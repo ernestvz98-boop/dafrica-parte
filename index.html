@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAFRICA Parte v0.2</title>
+  <style>
+    :root{
+      --bg:#f5f6f8; --card:#fff; --text:#1d2430; --muted:#6b7280;
+      --border:#dfe3e8; --accent:#1f6feb; --ok:#18794e; --danger:#b42318;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    main{max-width:760px;margin:0 auto;padding:20px}
+    h1{font-size:1.55rem;margin:0 0 4px}
+    h2{font-size:1.02rem;margin:0 0 12px}
+    .sub{color:var(--muted);margin:0 0 20px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    @media(max-width:620px){.grid{grid-template-columns:1fr}}
+    label{display:block;font-weight:650;margin-bottom:6px}
+    input,select,textarea,button,audio{width:100%;font:inherit}
+    input,select,textarea{border:1px solid var(--border);border-radius:10px;padding:11px 12px;background:#fff;color:var(--text)}
+    textarea{min-height:125px;resize:vertical}
+    button{border:0;border-radius:10px;padding:12px 14px;cursor:pointer;font-weight:700;min-height:44px}
+    button:disabled{cursor:not-allowed;opacity:.55}
+    .primary{background:var(--accent);color:#fff}
+    .secondary{background:#eef2f7;color:var(--text)}
+    .danger{background:#fff4f4;color:#a61b1b;border:1px solid #f0caca}
+    .record{background:#fff0f0;color:var(--danger);border:1px solid #efcaca}
+    .stop{background:var(--danger);color:#fff}
+    .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media(max-width:520px){.actions{grid-template-columns:1fr}}
+    .status{margin-top:12px;padding:10px 12px;border-radius:10px;background:#f0f7f3;color:var(--ok);font-size:.92rem}
+    .muted{color:var(--muted);font-size:.92rem}
+    .photo-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px}
+    .photo{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fafafa;position:relative}
+    .photo img{width:100%;height:90px;object-fit:cover;display:block}
+    .photo small{display:block;padding:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef2f7;color:var(--muted);font-size:.82rem;font-weight:650}
+    .recording{display:flex;align-items:center;gap:9px;margin:10px 0;color:var(--danger);font-weight:700}
+    .dot{width:10px;height:10px;border-radius:50%;background:var(--danger)}
+    .hidden{display:none!important}
+    .audioBox{margin-top:12px}
+    .footer-note{font-size:.86rem;color:var(--muted);margin-top:12px}
+    .mini{font-size:.82rem;color:var(--muted);margin-top:6px}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>DAFRICA Parte <span class="badge">v0.2</span></h1>
+    <p class="sub">Audio + fotos + borrador persistente.</p>
+
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label for="obra">Obra</label>
+          <select id="obra">
+            <option value="">Selecciona una obra</option>
+            <option>Torre del Bierzo</option>
+            <option>Taller Carpintería Colmenas Abejas - Tremor de Arriba</option>
+            <option>Castillo de los Templarios</option>
+            <option>CS Aravaca</option>
+          </select>
+        </div>
+        <div>
+          <label for="fecha">Fecha</label>
+          <input id="fecha" type="date">
+        </div>
+        <div>
+          <label for="encargado">Encargado</label>
+          <input id="encargado" type="text" placeholder="Nombre del encargado">
+        </div>
+        <div>
+          <label for="estado">Estado</label>
+          <input id="estado" type="text" value="Borrador" disabled>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>🎙️ Audio del encargado</h2>
+      <div class="actions">
+        <button id="recordBtn" class="record" type="button">🎙️ Empezar grabación</button>
+        <button id="stopBtn" class="stop" type="button" disabled>■ Detener</button>
+      </div>
+
+      <div id="recordingState" class="recording hidden">
+        <span class="dot"></span>
+        <span>Grabando… <span id="timer">00:00</span></span>
+      </div>
+
+      <div id="audioBox" class="audioBox hidden">
+        <audio id="audioPlayer" controls></audio>
+        <p id="audioInfo" class="mini"></p>
+        <button id="deleteAudio" class="danger" type="button">Eliminar audio</button>
+      </div>
+
+      <div style="margin-top:12px">
+        <label for="audioUpload">O subir un audio ya grabado</label>
+        <input id="audioUpload" type="file" accept="audio/*">
+      </div>
+      <p class="footer-note">El navegador pedirá permiso para usar el micrófono. El audio se guarda en este navegador mientras el parte esté en borrador.</p>
+    </section>
+
+    <section class="card">
+      <label for="notas">Notas opcionales</label>
+      <textarea id="notas" placeholder="Puedes añadir algo que no haya quedado claro en el audio."></textarea>
+      <p class="muted">Más adelante la IA rellenará aquí automáticamente la transcripción/redacción.</p>
+    </section>
+
+    <section class="card">
+      <label for="fotos">Fotografías</label>
+      <input id="fotos" type="file" accept="image/*" multiple>
+      <div id="photoList" class="photo-list" aria-live="polite"></div>
+      <p id="photoCount" class="muted">0 fotografías guardadas.</p>
+      <button id="clearPhotos" class="danger" type="button">Eliminar fotografías</button>
+    </section>
+
+    <section class="card">
+      <div class="actions">
+        <button id="guardar" class="secondary" type="button">Guardar borrador</button>
+        <button id="cerrar" class="primary" type="button">Cerrar parte</button>
+      </div>
+      <button id="limpiar" class="danger" type="button" style="margin-top:10px">Borrar borrador de prueba</button>
+      <div id="status" class="status" aria-live="polite">Preparando almacenamiento…</div>
+    </section>
+  </main>
+
+<script>
+(() => {
+  const DB_NAME = "dafrica_parte_db";
+  const DB_VERSION = 1;
+  const STORE = "drafts";
+  const DRAFT_ID = "current";
+  const el = id => document.getElementById(id);
+
+  const obra = el("obra"), fecha = el("fecha"), encargado = el("encargado");
+  const estado = el("estado"), notas = el("notas"), fotos = el("fotos");
+  const status = el("status"), photoList = el("photoList"), photoCount = el("photoCount");
+  const recordBtn = el("recordBtn"), stopBtn = el("stopBtn");
+  const recordingState = el("recordingState"), timerEl = el("timer");
+  const audioBox = el("audioBox"), audioPlayer = el("audioPlayer"), audioInfo = el("audioInfo");
+  const audioUpload = el("audioUpload");
+
+  let db;
+  let mediaRecorder = null;
+  let mediaStream = null;
+  let chunks = [];
+  let timerInterval = null;
+  let seconds = 0;
+  let audioBlob = null;
+  let photosData = [];
+  let audioObjectUrl = null;
+
+  function todayISO(){
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,"0");
+    const day = String(d.getDate()).padStart(2,"0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function openDB(){
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const database = req.result;
+        if(!database.objectStoreNames.contains(STORE)){
+          database.createObjectStore(STORE, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function putDraft(data){
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(data);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  function getDraft(){
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).get(DRAFT_ID);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function deleteDraft(){
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(DRAFT_ID);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  function draftSnapshot(){
+    return {
+      id: DRAFT_ID,
+      obra: obra.value,
+      fecha: fecha.value,
+      encargado: encargado.value.trim(),
+      estado: estado.value,
+      notas: notas.value,
+      audioBlob,
+      photosData,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  async function saveDraft(message="Borrador guardado correctamente."){
+    if(!db) return;
+    try{
+      await putDraft(draftSnapshot());
+      status.textContent = message;
+    }catch(err){
+      console.error(err);
+      status.textContent = "No se pudo guardar el borrador.";
+    }
+  }
+
+  function revokeAudioUrl(){
+    if(audioObjectUrl){
+      URL.revokeObjectURL(audioObjectUrl);
+      audioObjectUrl = null;
+    }
+  }
+
+  function showAudio(blob){
+    revokeAudioUrl();
+    audioBlob = blob;
+    if(!blob){
+      audioPlayer.removeAttribute("src");
+      audioBox.classList.add("hidden");
+      audioInfo.textContent = "";
+      return;
+    }
+    audioObjectUrl = URL.createObjectURL(blob);
+    audioPlayer.src = audioObjectUrl;
+    audioBox.classList.remove("hidden");
+    const kb = Math.max(1, Math.round(blob.size / 1024));
+    audioInfo.textContent = `Audio guardado · ${kb} KB`;
+  }
+
+  function renderPhotos(){
+    photoList.innerHTML = "";
+    photosData.forEach((item, idx) => {
+      const wrap = document.createElement("div");
+      wrap.className = "photo";
+      const img = document.createElement("img");
+      const url = URL.createObjectURL(item.blob);
+      img.src = url;
+      img.alt = item.name || `Foto ${idx+1}`;
+      img.onload = () => URL.revokeObjectURL(url);
+      const cap = document.createElement("small");
+      cap.textContent = item.name || `Foto ${idx+1}`;
+      wrap.append(img, cap);
+      photoList.appendChild(wrap);
+    });
+    photoCount.textContent = `${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} guardada${photosData.length === 1 ? "" : "s"}.`;
+  }
+
+  async function loadDraft(){
+    fecha.value = todayISO();
+    const data = await getDraft();
+    if(!data){
+      status.textContent = "Borrador nuevo preparado.";
+      return;
+    }
+    obra.value = data.obra || "";
+    fecha.value = data.fecha || todayISO();
+    encargado.value = data.encargado || "";
+    estado.value = data.estado || "Borrador";
+    notas.value = data.notas || "";
+    photosData = Array.isArray(data.photosData) ? data.photosData : [];
+    audioBlob = data.audioBlob || null;
+    renderPhotos();
+    showAudio(audioBlob);
+    status.textContent = "Borrador anterior recuperado, incluido audio y fotos.";
+  }
+
+  async function startRecording(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined"){
+      status.textContent = "Este navegador no permite grabar desde aquí. Puedes usar “Subir un audio ya grabado”.";
+      return;
+    }
+    try{
+      mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
+      const preferred = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4"
+      ].find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+
+      mediaRecorder = preferred ? new MediaRecorder(mediaStream, {mimeType: preferred}) : new MediaRecorder(mediaStream);
+      chunks = [];
+      mediaRecorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        const type = mediaRecorder.mimeType || (chunks[0] && chunks[0].type) || "audio/webm";
+        const blob = new Blob(chunks, {type});
+        showAudio(blob);
+        stopTracks();
+        await saveDraft("Audio grabado y guardado en el borrador.");
+      };
+      mediaRecorder.start(250);
+      recordBtn.disabled = true;
+      stopBtn.disabled = false;
+      recordingState.classList.remove("hidden");
+      seconds = 0;
+      updateTimer();
+      timerInterval = setInterval(() => { seconds++; updateTimer(); }, 1000);
+      status.textContent = "Grabando audio…";
+    }catch(err){
+      console.error(err);
+      status.textContent = "No se pudo acceder al micrófono. Revisa el permiso del navegador o sube un audio grabado.";
+    }
+  }
+
+  function updateTimer(){
+    const min = String(Math.floor(seconds/60)).padStart(2,"0");
+    const sec = String(seconds%60).padStart(2,"0");
+    timerEl.textContent = `${min}:${sec}`;
+  }
+
+  function stopTracks(){
+    if(mediaStream){
+      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream = null;
+    }
+  }
+
+  function stopRecording(){
+    if(mediaRecorder && mediaRecorder.state !== "inactive"){
+      mediaRecorder.stop();
+    }
+    clearInterval(timerInterval);
+    timerInterval = null;
+    recordingState.classList.add("hidden");
+    recordBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+
+  async function handlePhotos(){
+    const files = Array.from(fotos.files || []);
+    const valid = files.filter(f => f.type.startsWith("image/")).slice(0, 20);
+    photosData = valid.map(f => ({name:f.name, type:f.type, blob:f}));
+    renderPhotos();
+    await saveDraft("Fotografías guardadas en el borrador.");
+  }
+
+  async function handleAudioUpload(){
+    const file = audioUpload.files && audioUpload.files[0];
+    if(!file) return;
+    if(!file.type.startsWith("audio/")){
+      status.textContent = "El archivo seleccionado no parece ser un audio.";
+      return;
+    }
+    showAudio(file);
+    await saveDraft("Audio seleccionado y guardado en el borrador.");
+  }
+
+  function validate(){
+    const errors = [];
+    if(!obra.value) errors.push("seleccionar la obra");
+    if(!fecha.value) errors.push("indicar la fecha");
+    if(!encargado.value.trim()) errors.push("indicar el encargado");
+    if(!audioBlob && !notas.value.trim()) errors.push("grabar un audio o añadir notas");
+    return errors;
+  }
+
+  async function closePart(){
+    const errors = validate();
+    if(errors.length){
+      status.textContent = "Antes de cerrar debes: " + errors.join(", ") + ".";
+      return;
+    }
+    estado.value = "Cerrado";
+    await saveDraft("Parte cerrado en esta prueba. El siguiente paso será generar el parte redactado.");
+  }
+
+  async function resetDraft(){
+    if(!confirm("¿Seguro que quieres borrar este borrador de prueba, incluyendo audio y fotos?")) return;
+    stopTracks();
+    if(mediaRecorder && mediaRecorder.state !== "inactive"){
+      try{ mediaRecorder.stop(); }catch(e){}
+    }
+    await deleteDraft();
+    revokeAudioUrl();
+    obra.value = "";
+    fecha.value = todayISO();
+    encargado.value = "";
+    estado.value = "Borrador";
+    notas.value = "";
+    fotos.value = "";
+    audioUpload.value = "";
+    audioBlob = null;
+    photosData = [];
+    renderPhotos();
+    showAudio(null);
+    status.textContent = "Borrador eliminado.";
+  }
+
+  let autoTimer;
+  function autoSave(){
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => saveDraft("Guardado automático."), 500);
+  }
+
+  async function init(){
+    try{
+      db = await openDB();
+      await loadDraft();
+    }catch(err){
+      console.error(err);
+      status.textContent = "El navegador no permitió abrir el almacenamiento local.";
+    }
+
+    [obra, fecha, encargado, notas].forEach(node => {
+      node.addEventListener("input", autoSave);
+      node.addEventListener("change", autoSave);
+    });
+
+    fotos.addEventListener("change", handlePhotos);
+    audioUpload.addEventListener("change", handleAudioUpload);
+    recordBtn.addEventListener("click", startRecording);
+    stopBtn.addEventListener("click", stopRecording);
+
+    el("deleteAudio").addEventListener("click", async () => {
+      showAudio(null);
+      audioUpload.value = "";
+      await saveDraft("Audio eliminado del borrador.");
+    });
+
+    el("clearPhotos").addEventListener("click", async () => {
+      photosData = [];
+      fotos.value = "";
+      renderPhotos();
+      await saveDraft("Fotografías eliminadas del borrador.");
+    });
+
+    el("guardar").addEventListener("click", () => saveDraft());
+    el("cerrar").addEventListener("click", closePart);
+    el("limpiar").addEventListener("click", resetDraft);
+
+    window.addEventListener("beforeunload", stopTracks);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
