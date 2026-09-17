@@ -93,6 +93,9 @@
       <div id="audioBox" class="audioBox hidden">
         <audio id="audioPlayer" controls></audio>
         <p id="audioInfo" class="mini"></p>
+        <button id="transcribirBtn" class="primary" type="button">
+  ✨ Transcribir audio
+</button>
         <button id="deleteAudio" class="danger" type="button">Eliminar audio</button>
       </div>
 
@@ -129,6 +132,7 @@
 
 <script>
 (() => {
+const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
   const DB_NAME = "dafrica_parte_db";
   const DB_VERSION = 1;
   const STORE = "drafts";
@@ -413,7 +417,63 @@
     clearTimeout(autoTimer);
     autoTimer = setTimeout(() => saveDraft("Guardado automático."), 500);
   }
+async function transcribirAudio(){
 
+  if(!audioBlob){
+    status.textContent = "Primero debes grabar o seleccionar un audio.";
+    return;
+  }
+
+  try{
+
+    status.textContent = "Transcribiendo audio con IA…";
+
+    const formData = new FormData();
+
+    const tipo = audioBlob.type || "audio/webm";
+
+    let extension = "webm";
+
+    if(tipo.includes("mp4")){
+      extension = "m4a";
+    }
+
+    formData.append(
+      "audio",
+      audioBlob,
+      `parte.${extension}`
+    );
+
+    const respuesta = await fetch(
+      `${BACKEND_URL}/transcribir`,
+      {
+        method: "POST",
+        body: formData
+      }
+    );
+
+    const datos = await respuesta.json();
+
+    if(!respuesta.ok){
+      throw new Error(
+        datos.mensaje || "Error durante la transcripción"
+      );
+    }
+
+    notas.value = datos.texto;
+
+    await saveDraft(
+      "Audio transcrito correctamente."
+    );
+
+  }catch(error){
+
+    console.error(error);
+
+    status.textContent =
+      "Error al transcribir: " + error.message;
+  }
+}
   async function init(){
     try{
       db = await openDB();
@@ -432,6 +492,7 @@
     audioUpload.addEventListener("change", handleAudioUpload);
     recordBtn.addEventListener("click", startRecording);
     stopBtn.addEventListener("click", stopRecording);
+    el("transcribirBtn").addEventListener("click", transcribirAudio);
 
     el("deleteAudio").addEventListener("click", async () => {
       showAudio(null);
