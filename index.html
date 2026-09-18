@@ -255,22 +255,39 @@ const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
   }
 
   function renderPhotos(){
-    photoList.innerHTML = "";
-    photosData.forEach((item, idx) => {
-      const wrap = document.createElement("div");
-      wrap.className = "photo";
-      const img = document.createElement("img");
-      const url = URL.createObjectURL(item.blob);
-      img.src = url;
-      img.alt = item.name || `Foto ${idx+1}`;
-      img.onload = () => URL.revokeObjectURL(url);
-      const cap = document.createElement("small");
-      cap.textContent = item.name || `Foto ${idx+1}`;
-      wrap.append(img, cap);
-      photoList.appendChild(wrap);
-    });
-    photoCount.textContent = `${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} guardada${photosData.length === 1 ? "" : "s"}.`;
-  }
+
+  photoList.innerHTML = "";
+
+  photosData.forEach((item, idx) => {
+
+    const wrap = document.createElement("div");
+    wrap.className = "photo";
+
+    const img = document.createElement("img");
+    img.alt = item.name || `Foto ${idx + 1}`;
+
+    const reader = new FileReader();
+
+    reader.onload = function(event){
+      img.src = event.target.result;
+    };
+
+    reader.onerror = function(){
+      img.alt = "No se pudo mostrar la fotografía";
+    };
+
+    reader.readAsDataURL(item.blob);
+
+    const cap = document.createElement("small");
+    cap.textContent = item.name || `Foto ${idx + 1}`;
+
+    wrap.append(img, cap);
+    photoList.appendChild(wrap);
+  });
+
+  photoCount.textContent =
+    `${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} guardada${photosData.length === 1 ? "" : "s"}.`;
+}
 
   async function loadDraft(){
     fecha.value = todayISO();
