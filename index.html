@@ -296,7 +296,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v0.8</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v0.9</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -546,6 +546,10 @@
   let audioObjectUrl = null;
 
   let photosData = [];
+
+  /* El logo se carga con antelación para que al pulsar
+     "Compartir" Safari no pierda el gesto del usuario. */
+  let logoPDFCache = null;
 
 
   /* =====================================================
@@ -1757,9 +1761,14 @@
             new FileReader();
 
           reader.onload =
-            () => resolve(
-              reader.result
-            );
+            () => {
+              logoPDFCache =
+                reader.result;
+
+              resolve(
+                reader.result
+              );
+            };
 
           reader.onerror =
             reject;
@@ -1775,6 +1784,237 @@
       console.error(
         "No se pudo cargar el logo:",
         error
+      );
+
+      return null;
+    }
+  }
+
+
+  function generarPDFInstantaneo(
+    descargar = false
+  ){
+
+    if(!obra.value){
+
+      setStatus(
+        "Selecciona una obra antes de generar el PDF."
+      );
+
+      return null;
+    }
+
+    if(!fecha.value){
+
+      setStatus(
+        "Indica la fecha del parte."
+      );
+
+      return null;
+    }
+
+    if(
+      !encargado.value.trim()
+    ){
+
+      setStatus(
+        "Indica el nombre del encargado."
+      );
+
+      return null;
+    }
+
+    try{
+
+      if(
+        !window.jspdf ||
+        !window.jspdf.jsPDF
+      ){
+
+        throw new Error(
+          "La librería PDF no está disponible."
+        );
+      }
+
+      const {
+        jsPDF
+      } = window.jspdf;
+
+      const doc =
+        new jsPDF();
+
+      /* No hacemos ningún fetch aquí.
+         El logo ya se cargó antes y está en memoria. */
+      if(logoPDFCache){
+
+        try{
+
+          doc.addImage(
+            logoPDFCache,
+            "PNG",
+            20,
+            12,
+            35,
+            35
+          );
+
+        }catch(error){
+
+          console.warn(
+            "No se pudo insertar el logo:",
+            error
+          );
+        }
+      }
+
+      doc.setFontSize(18);
+      doc.text(
+        "DAFRICA BIERZO",
+        65,
+        22
+      );
+
+      doc.setFontSize(15);
+      doc.text(
+        "PARTE DIARIO DE OBRA",
+        65,
+        32
+      );
+
+      doc.setFontSize(11);
+      doc.text(
+        `Obra: ${obra.value}`,
+        20,
+        58
+      );
+
+      doc.text(
+        `Fecha: ${fecha.value}`,
+        20,
+        66
+      );
+
+      doc.text(
+        `Encargado: ${encargado.value.trim()}`,
+        20,
+        74
+      );
+
+      doc.line(
+        20,
+        81,
+        190,
+        81
+      );
+
+      doc.setFontSize(12);
+      doc.text(
+        "Información del parte",
+        20,
+        93
+      );
+
+      doc.setFontSize(10);
+
+      const textoParte =
+        notas.value.trim() ||
+        "Sin información redactada.";
+
+      const lineas =
+        doc.splitTextToSize(
+          textoParte,
+          170
+        );
+
+      let y = 103;
+
+      for(
+        let i = 0;
+        i < lineas.length;
+        i++
+      ){
+
+        if(y > 270){
+
+          doc.addPage();
+          y = 25;
+        }
+
+        doc.text(
+          lineas[i],
+          20,
+          y
+        );
+
+        y += 5;
+      }
+
+      if(
+        photosData.length > 0
+      ){
+
+        y += 8;
+
+        if(y > 270){
+
+          doc.addPage();
+          y = 25;
+        }
+
+        const frase =
+          `Registro fotográfico: se adjuntan ${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} junto con el presente parte.`;
+
+        const lineasFotos =
+          doc.splitTextToSize(
+            frase,
+            170
+          );
+
+        doc.text(
+          lineasFotos,
+          20,
+          y
+        );
+      }
+
+      const nombreObra =
+        sanitizarNombre(
+          obra.value
+        );
+
+      const nombreArchivo =
+        `${fecha.value}_Parte_${nombreObra}.pdf`;
+
+      const pdfBlob =
+        doc.output(
+          "blob"
+        );
+
+      if(descargar){
+
+        doc.save(
+          nombreArchivo
+        );
+
+        setStatus(
+          "PDF generado correctamente."
+        );
+      }
+
+      return {
+        blob:pdfBlob,
+        nombreArchivo
+      };
+
+    }catch(error){
+
+      console.error(
+        error
+      );
+
+      setStatus(
+        "No se pudo generar el PDF: " +
+        error.message
       );
 
       return null;
@@ -1835,6 +2075,7 @@
         new jsPDF();
 
       const logo =
+        logoPDFCache ||
         await cargarLogoPDF();
 
       if(logo){
@@ -2218,8 +2459,12 @@
       "Preparando PDF y fotografías…"
     );
 
+    /* IMPORTANTE:
+       Este generador no espera red ni archivos.
+       Así navigator.share() conserva el gesto del usuario
+       en Safari/iPhone y en navegadores Android. */
     const resultado =
-      await generarPDF(
+      generarPDFInstantaneo(
         false
       );
 
@@ -2563,6 +2808,16 @@
   async function init(){
 
     detectarCompatibilidad();
+
+    /* Precargamos el logo al abrir la aplicación.
+       Compartir no tendrá que esperar luego a fetch/FileReader. */
+    cargarLogoPDF()
+      .catch(error => {
+        console.warn(
+          "El logo no pudo precargarse:",
+          error
+        );
+      });
 
     try{
 
