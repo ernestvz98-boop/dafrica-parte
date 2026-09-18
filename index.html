@@ -2635,13 +2635,21 @@
         "click",
         async () => {
 
+          const confirmar = confirm(
+            "¿Seguro que quieres eliminar este audio?"
+          );
+
+          if(!confirmar){
+            return;
+          }
+
           showAudio(null);
 
           audioUpload.value =
             "";
 
           await saveDraft(
-            "Audio eliminado."
+            "Audio eliminado correctamente."
           );
         }
       );
