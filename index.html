@@ -296,7 +296,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v0.9</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v1.0</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -2459,10 +2459,6 @@
       "Preparando PDF y fotografías…"
     );
 
-    /* IMPORTANTE:
-       Este generador no espera red ni archivos.
-       Así navigator.share() conserva el gesto del usuario
-       en Safari/iPhone y en navegadores Android. */
     const resultado =
       generarPDFInstantaneo(
         false
@@ -2477,153 +2473,194 @@
         resultado
       );
 
-    let texto = "";
-
-    if(
-      tipo === "correo"
-    ){
-
-      texto =
-        `Parte diario de obra\n` +
-        `Obra: ${obra.value}\n` +
-        `Fecha: ${fecha.value}\n` +
-        `Encargado: ${encargado.value.trim()}\n\n` +
-        `Destinatarios:\n` +
-        `evelazquez@dafrica.es\n` +
-        `info@dafrica.es`;
-    }
-
-    if(
-      tipo === "whatsapp"
-    ){
-
-      texto =
-        `Parte diario de obra\n` +
-        `Obra: ${obra.value}\n` +
-        `Fecha: ${fecha.value}\n` +
-        `Encargado: ${encargado.value.trim()}`;
-    }
-
     const shareDisponible =
       typeof navigator.share ===
+        "function";
+
+    const canShareDisponible =
+      typeof navigator.canShare ===
         "function";
 
 
     /* ==========================================
        INTENTO 1:
-       COMPARTIR PDF + FOTOS DIRECTAMENTE
-       No bloqueamos con navigator.canShare()
-       porque algunos móviles devuelven false
-       aunque navigator.share sí funcione.
+       PDF + FOTOS
+       SOLO ARCHIVOS.
+       Sin title, sin text, sin mailto.
+       Esto maximiza la compatibilidad con
+       Safari/iPhone, Chrome/Android y otros
+       navegadores con Web Share API.
     ========================================== */
 
     if(shareDisponible){
 
-      try{
+      let intentarTodos =
+        true;
 
-        await navigator.share({
-          files:archivos,
-          title:
-            `Parte diario - ${obra.value}`,
-          text
-        });
+      if(canShareDisponible){
 
-        setStatus(
-          "Parte compartido correctamente."
-        );
+        try{
 
-        return;
+          intentarTodos =
+            navigator.canShare({
+              files:archivos
+            });
 
-      }catch(error){
+        }catch{
 
-        if(
-          error &&
-          error.name ===
-            "AbortError"
-        ){
+          /* No bloqueamos el intento si canShare falla */
+          intentarTodos =
+            true;
+        }
+      }
+
+      if(intentarTodos){
+
+        try{
+
+          await navigator.share({
+            files:archivos
+          });
 
           setStatus(
-            "Compartir cancelado."
+            "PDF y fotografías compartidos correctamente."
           );
 
           return;
-        }
 
-        console.warn(
-          "No se pudieron compartir PDF + fotos:",
-          error
-        );
+        }catch(error){
+
+          if(
+            error &&
+            error.name ===
+              "AbortError"
+          ){
+
+            setStatus(
+              "Compartir cancelado."
+            );
+
+            return;
+          }
+
+          console.warn(
+            "Error al compartir PDF + fotos:",
+            error
+          );
+
+          const nombreError =
+            error?.name ||
+            "Error";
+
+          const mensajeError =
+            error?.message ||
+            "sin detalle";
+
+          setStatus(
+            `No se pudieron compartir PDF + fotos (${nombreError}: ${mensajeError}). Probando solo el PDF…`
+          );
+        }
       }
     }
 
 
     /* ==========================================
        INTENTO 2:
-       SOLO EL PDF
+       SOLO PDF
+       También SOLO ARCHIVO.
     ========================================== */
 
     if(shareDisponible){
 
-      try{
+      const soloPDF =
+        [archivos[0]];
 
-        await navigator.share({
-          files:[archivos[0]],
-          title:
-            `Parte diario - ${obra.value}`,
-          text
-        });
+      let intentarPDF =
+        true;
 
-        setStatus(
-          photosData.length > 0
-            ? "PDF compartido. Las fotografías deben enviarse aparte en este dispositivo."
-            : "PDF compartido correctamente."
-        );
+      if(canShareDisponible){
 
-        return;
+        try{
 
-      }catch(error){
+          intentarPDF =
+            navigator.canShare({
+              files:soloPDF
+            });
 
-        if(
-          error &&
-          error.name ===
-            "AbortError"
-        ){
+        }catch{
+
+          intentarPDF =
+            true;
+        }
+      }
+
+      if(intentarPDF){
+
+        try{
+
+          await navigator.share({
+            files:soloPDF
+          });
 
           setStatus(
-            "Compartir cancelado."
+            photosData.length > 0
+              ? "PDF compartido. Este dispositivo no permitió compartir las fotografías junto con el PDF."
+              : "PDF compartido correctamente."
           );
 
           return;
-        }
 
-        console.warn(
-          "No se pudo compartir el PDF:",
-          error
-        );
+        }catch(error){
+
+          if(
+            error &&
+            error.name ===
+              "AbortError"
+          ){
+
+            setStatus(
+              "Compartir cancelado."
+            );
+
+            return;
+          }
+
+          console.warn(
+            "Error al compartir solo PDF:",
+            error
+          );
+
+          const nombreError =
+            error?.name ||
+            "Error";
+
+          const mensajeError =
+            error?.message ||
+            "sin detalle";
+
+          setStatus(
+            `El dispositivo tampoco permitió compartir solo el PDF (${nombreError}: ${mensajeError}). Descargando archivos…`
+          );
+        }
       }
     }
 
 
     /* ==========================================
        INTENTO 3:
-       DESCARGA SEGURA
-       No abrimos Gmail/WhatsApp automáticamente
-       porque no pueden recibir adjuntos mediante
-       mailto: o enlaces web.
+       DESCARGA
+       Funciona como respaldo en equipos que no
+       admiten Web Share con archivos.
     ========================================== */
 
     try{
-
-      setStatus(
-        "Este navegador no permite adjuntar los archivos directamente. Descargando PDF y fotografías…"
-      );
 
       await fallbackDescargas(
         resultado
       );
 
       setStatus(
-        "PDF y fotografías descargados. Ábrelos desde Descargas/Archivos y compártelos desde allí."
+        "PDF y fotografías descargados. Puedes compartirlos desde Descargas/Archivos."
       );
 
     }catch(error){
@@ -2634,7 +2671,7 @@
       );
 
       setStatus(
-        "No se pudo compartir ni descargar automáticamente. Usa «Generar PDF»."
+        "No se pudo compartir ni descargar automáticamente. Usa el botón «Generar PDF»."
       );
     }
   }
