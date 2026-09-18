@@ -2,224 +2,344 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DAFRICA Parte v0.2</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6f8">
+  <title>DAFRICA Parte</title>
+
   <style>
     :root{
-      --bg:#f5f6f8; --card:#fff; --text:#1d2430; --muted:#6b7280;
-      --border:#dfe3e8; --accent:#1f6feb; --ok:#18794e; --danger:#b42318;
+      --bg:#f5f6f8;
+      --card:#ffffff;
+      --text:#172033;
+      --muted:#6b7280;
+      --border:#dfe3e8;
+      --accent:#2875e8;
+      --accent-dark:#195fc9;
+      --ok:#18794e;
+      --danger:#b42318;
+      --soft:#eef2f7;
     }
     *{box-sizing:border-box}
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
-    main{max-width:760px;margin:0 auto;padding:20px}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+    main{
+      width:min(760px,100%);
+      margin:0 auto;
+      padding:18px;
+    }
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:14px;
+      margin-bottom:18px;
+    }
+    .brand img{
+      width:92px;
+      height:auto;
+      object-fit:contain;
+      display:block;
+    }
     h1{font-size:1.55rem;margin:0 0 4px}
-    h2{font-size:1.02rem;margin:0 0 12px}
-    .sub{color:var(--muted);margin:0 0 20px}
-    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-    @media(max-width:620px){.grid{grid-template-columns:1fr}}
-    label{display:block;font-weight:650;margin-bottom:6px}
+    .sub{margin:0;color:var(--muted)}
+    .badge{
+      display:inline-block;
+      padding:4px 8px;
+      border-radius:999px;
+      background:var(--soft);
+      color:var(--muted);
+      font-size:.78rem;
+      vertical-align:middle;
+    }
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:18px;
+      margin-bottom:16px;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:14px;
+    }
+    @media(max-width:640px){.grid{grid-template-columns:1fr}}
+    label{display:block;font-weight:700;margin-bottom:6px}
     input,select,textarea,button,audio{width:100%;font:inherit}
-    input,select,textarea{border:1px solid var(--border);border-radius:10px;padding:11px 12px;background:#fff;color:var(--text)}
-    textarea{min-height:125px;resize:vertical}
-    button{border:0;border-radius:10px;padding:12px 14px;cursor:pointer;font-weight:700;min-height:44px}
-    button:disabled{cursor:not-allowed;opacity:.55}
+    input,select,textarea{
+      border:1px solid var(--border);
+      border-radius:11px;
+      padding:12px;
+      background:#fff;
+      color:var(--text);
+    }
+    textarea{min-height:135px;resize:vertical}
+    button{
+      border:0;
+      border-radius:11px;
+      padding:13px 14px;
+      min-height:48px;
+      cursor:pointer;
+      font-weight:750;
+    }
+    button:disabled{opacity:.55;cursor:not-allowed}
     .primary{background:var(--accent);color:#fff}
-    .secondary{background:#eef2f7;color:var(--text)}
-    .danger{background:#fff4f4;color:#a61b1b;border:1px solid #f0caca}
-    .record{background:#fff0f0;color:var(--danger);border:1px solid #efcaca}
-    .stop{background:var(--danger);color:#fff}
-    .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    @media(max-width:520px){.actions{grid-template-columns:1fr}}
-    .status{margin-top:12px;padding:10px 12px;border-radius:10px;background:#f0f7f3;color:var(--ok);font-size:.92rem}
-    .muted{color:var(--muted);font-size:.92rem}
-    .photo-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px}
-    .photo{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fafafa;position:relative}
-    .photo img{width:100%;height:90px;object-fit:cover;display:block}
-    .photo small{display:block;padding:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef2f7;color:var(--muted);font-size:.82rem;font-weight:650}
-    .recording{display:flex;align-items:center;gap:9px;margin:10px 0;color:var(--danger);font-weight:700}
-    .dot{width:10px;height:10px;border-radius:50%;background:var(--danger)}
+    .primary:active{background:var(--accent-dark)}
+    .secondary{background:var(--soft);color:var(--text)}
+    .danger{
+      background:#fff4f4;
+      color:var(--danger);
+      border:1px solid #efcaca;
+    }
+    .record{
+      background:#fff0f0;
+      color:var(--danger);
+      border:1px solid #efcaca;
+    }
+    .stop{background:#d98782;color:white}
+    .actions{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+    }
+    @media(max-width:560px){.actions{grid-template-columns:1fr}}
+    .stack{display:grid;gap:10px}
     .hidden{display:none!important}
-    .audioBox{margin-top:12px}
-    .footer-note{font-size:.86rem;color:var(--muted);margin-top:12px}
-    .mini{font-size:.82rem;color:var(--muted);margin-top:6px}
+    .muted{color:var(--muted);font-size:.92rem}
+    .small{color:var(--muted);font-size:.84rem}
+    .status{
+      margin-top:12px;
+      padding:11px 12px;
+      border-radius:11px;
+      background:#eef7f2;
+      color:var(--ok);
+      font-size:.92rem;
+      overflow-wrap:anywhere;
+    }
+    .recording{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      color:var(--danger);
+      font-weight:700;
+      margin-top:12px;
+    }
+    .dot{width:10px;height:10px;border-radius:50%;background:var(--danger)}
+    .photo-list{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+      gap:10px;
+      margin-top:14px;
+    }
+    .photo{
+      border:1px solid var(--border);
+      border-radius:11px;
+      overflow:hidden;
+      background:#fafafa;
+    }
+    .photo img{
+      width:100%;
+      height:105px;
+      object-fit:cover;
+      display:block;
+      background:#f1f3f5;
+    }
+    .photo small{
+      display:block;
+      padding:8px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .section-title{font-size:1.05rem;margin:0 0 12px}
+    .spacer-top{margin-top:10px}
   </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 </head>
+
 <body>
-  <main>
-    <img
-  src="dafrica-logo.png"
-  alt="DAFRICA Bierzo"
-  style="width:120px; height:auto; display:block; margin-bottom:10px;"
->
-    <h1>DAFRICA Parte <span class="badge">v0.2</span></h1>
-    <p class="sub">Audio + fotos + borrador persistente.</p>
+<main>
+  <div class="brand">
+    <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
+    <div>
+      <h1>DAFRICA Parte <span class="badge">v0.3</span></h1>
+      <p class="sub">Parte diario de obra desde el móvil</p>
+    </div>
+  </div>
 
-    <section class="card">
-      <div class="grid">
-        <div>
-          <label for="obra">Obra</label>
-          <select id="obra">
-  <option value="">Selecciona una obra</option>
-  <option>Torre del Bierzo</option>
-  <option>Taller Carpintería Colmenas Abejas - Tremor de Arriba</option>
-  <option>Castillo de los Templarios</option>
-  <option>CS Aravaca</option>
-</select>
+  <section class="card">
+    <div class="grid">
+      <div>
+        <label for="obra">Obra</label>
+        <select id="obra">
+          <option value="">Selecciona una obra</option>
+          <option>Torre del Bierzo</option>
+          <option>Taller Carpintería Colmenas Abejas - Tremor de Arriba</option>
+          <option>Castillo de los Templarios</option>
+          <option>CS Aravaca</option>
+        </select>
 
-<div style="margin-top:10px">
-  <button id="nuevaObraBtn" class="secondary" type="button">
-    ➕ Crear nueva obra
-  </button>
-</div>
-
-<div id="nuevaObraBox" class="hidden" style="margin-top:10px">
-  <input
-    id="nuevaObraNombre"
-    type="text"
-    placeholder="Nombre de la nueva obra"
-  >
-
-  <button
-    id="guardarNuevaObra"
-    class="primary"
-    type="button"
-    style="margin-top:8px"
-  >
-    Guardar obra
-  </button>
-</div>
-
-</div>
-          
+        <div class="spacer-top">
+          <button id="nuevaObraBtn" class="secondary" type="button">
+            ➕ Crear nueva obra
+          </button>
         </div>
-        <div>
-          <label for="fecha">Fecha</label>
-          <input id="fecha" type="date">
-        </div>
-        <div>
-          <label for="encargado">Encargado</label>
-          <input id="encargado" type="text" placeholder="Nombre del encargado">
-        </div>
-        <div>
-          <label for="estado">Estado</label>
-          <input id="estado" type="text" value="Borrador" disabled>
+
+        <div id="nuevaObraBox" class="hidden spacer-top">
+          <input id="nuevaObraNombre" type="text" placeholder="Nombre de la nueva obra">
+          <button id="guardarNuevaObra" class="primary spacer-top" type="button">
+            Guardar obra
+          </button>
         </div>
       </div>
-    </section>
 
-    <section class="card">
-      <h2>🎙️ Audio del encargado</h2>
-      <div class="actions">
-        <button id="recordBtn" class="record" type="button">🎙️ Empezar grabación</button>
-        <button id="stopBtn" class="stop" type="button" disabled>■ Detener</button>
+      <div>
+        <label for="fecha">Fecha</label>
+        <input id="fecha" type="date">
       </div>
 
-      <div id="recordingState" class="recording hidden">
-        <span class="dot"></span>
-        <span>Grabando… <span id="timer">00:00</span></span>
+      <div>
+        <label for="encargado">Encargado</label>
+        <input id="encargado" type="text" placeholder="Nombre del encargado">
       </div>
 
-      <div id="audioBox" class="audioBox hidden">
-        <audio id="audioPlayer" controls></audio>
-        <p id="audioInfo" class="mini"></p>
-        <button id="transcribirBtn" class="primary" type="button">
-  ✨ Transcribir audio
-</button>
+      <div>
+        <label for="estado">Estado</label>
+        <input id="estado" type="text" value="Borrador" disabled>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="section-title">🎙️ Audio del encargado</h2>
+
+    <div class="actions">
+      <button id="recordBtn" class="record" type="button">🎙️ Empezar grabación</button>
+      <button id="stopBtn" class="stop" type="button" disabled>■ Detener</button>
+    </div>
+
+    <div id="recordingState" class="recording hidden">
+      <span class="dot"></span>
+      <span>Grabando… <span id="timer">00:00</span></span>
+    </div>
+
+    <div id="audioBox" class="hidden spacer-top">
+      <audio id="audioPlayer" controls></audio>
+      <p id="audioInfo" class="small"></p>
+
+      <div class="stack">
+        <button id="transcribirBtn" class="primary" type="button">✨ Transcribir audio</button>
         <button id="deleteAudio" class="danger" type="button">Eliminar audio</button>
       </div>
+    </div>
 
-      <div style="margin-top:12px">
-        <label for="audioUpload">O subir un audio ya grabado</label>
-        <input id="audioUpload" type="file" accept="audio/*">
-      </div>
-      <p class="footer-note">El navegador pedirá permiso para usar el micrófono. El audio se guarda en este navegador mientras el parte esté en borrador.</p>
-    </section>
+    <div class="spacer-top">
+      <label for="audioUpload">O subir un audio ya grabado</label>
+      <input id="audioUpload" type="file" accept="audio/*">
+    </div>
 
-    <section class="card">
-      <label for="notas">Notas opcionales</label>
-      <textarea id="notas" placeholder="Puedes añadir algo que no haya quedado claro en el audio."></textarea>
-      <p class="muted">Más adelante la IA rellenará aquí automáticamente la transcripción/redacción.</p>
-    </section>
+    <p class="small">El audio queda guardado localmente mientras el parte esté en borrador.</p>
+  </section>
 
-    <section class="card">
-      <label for="fotos">Fotografías</label>
-      <input id="fotos" type="file" accept="image/*" multiple>
-      <div id="photoList" class="photo-list" aria-live="polite"></div>
-      <p id="photoCount" class="muted">0 fotografías guardadas.</p>
-      <button id="clearPhotos" class="danger" type="button">Eliminar fotografías</button>
-    </section>
+  <section class="card">
+    <label for="notas">Información / redacción del parte</label>
+    <textarea id="notas" placeholder="La transcripción aparecerá aquí o puedes escribir manualmente."></textarea>
+    <p class="small">La IA redactará esta información automáticamente cuando activemos los créditos de API.</p>
+  </section>
 
-    <section class="card">
+  <section class="card">
+    <h2 class="section-title">Fotografías</h2>
+    <input id="fotos" type="file" accept="image/*" multiple>
+    <div id="photoList" class="photo-list"></div>
+    <p id="photoCount" class="muted">0 fotografías guardadas.</p>
+    <button id="clearPhotos" class="danger" type="button">Eliminar fotografías</button>
+  </section>
+
+  <section class="card">
+    <div class="stack">
+      <button id="guardar" class="secondary" type="button">Guardar borrador</button>
+      <button id="pdfBtn" class="secondary" type="button">📄 Generar PDF</button>
+
       <div class="actions">
-        <button id="guardar" class="secondary" type="button">Guardar borrador</button>
-        <button id="pdfBtn" class="secondary" type="button">
-  📄 Generar PDF
-</button>
-<div class="actions">
-
-  <button id="correoBtn" class="primary" type="button">
-    📧 Enviar por correo
-  </button>
-
-  <button id="whatsappBtn" class="secondary" type="button">
-    💬 Enviar por WhatsApp
-  </button>
-
-</div>
-        <button id="cerrar" class="primary" type="button">Cerrar parte</button>
+        <button id="correoBtn" class="primary" type="button">📧 Enviar por correo</button>
+        <button id="whatsappBtn" class="secondary" type="button">💬 Enviar por WhatsApp</button>
       </div>
-      <button id="limpiar" class="danger" type="button" style="margin-top:10px">Borrar borrador de prueba</button>
-      <div id="status" class="status" aria-live="polite">Preparando almacenamiento…</div>
-    </section>
-  </main>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+      <button id="cerrar" class="primary" type="button">Cerrar parte</button>
+      <button id="limpiar" class="danger" type="button">Borrar borrador de prueba</button>
+    </div>
+
+    <div id="status" class="status">Preparando almacenamiento…</div>
+  </section>
+</main>
+
 <script>
 (() => {
-const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
+  const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
+  const LOGO_URL = "dafrica-logo.png.png";
   const DB_NAME = "dafrica_parte_db";
-  const OBRAS_KEY = "dafrica_obras_personalizadas";
   const DB_VERSION = 1;
   const STORE = "drafts";
   const DRAFT_ID = "current";
+  const OBRAS_KEY = "dafrica_obras_personalizadas";
+
   const el = id => document.getElementById(id);
 
-  const obra = el("obra"), fecha = el("fecha"), encargado = el("encargado");
-  const estado = el("estado"), notas = el("notas"), fotos = el("fotos");
-  const status = el("status"), photoList = el("photoList"), photoCount = el("photoCount");
-  const recordBtn = el("recordBtn"), stopBtn = el("stopBtn");
-  const recordingState = el("recordingState"), timerEl = el("timer");
-  const audioBox = el("audioBox"), audioPlayer = el("audioPlayer"), audioInfo = el("audioInfo");
+  const obra = el("obra");
+  const fecha = el("fecha");
+  const encargado = el("encargado");
+  const estado = el("estado");
+  const notas = el("notas");
+  const fotos = el("fotos");
+  const photoList = el("photoList");
+  const photoCount = el("photoCount");
+  const recordBtn = el("recordBtn");
+  const stopBtn = el("stopBtn");
+  const recordingState = el("recordingState");
+  const timerEl = el("timer");
+  const audioBox = el("audioBox");
+  const audioPlayer = el("audioPlayer");
+  const audioInfo = el("audioInfo");
   const audioUpload = el("audioUpload");
+  const status = el("status");
 
-  let db;
+  let db = null;
   let mediaRecorder = null;
   let mediaStream = null;
   let chunks = [];
   let timerInterval = null;
   let seconds = 0;
   let audioBlob = null;
-  let photosData = [];
   let audioObjectUrl = null;
+  let photosData = [];
 
   function todayISO(){
     const d = new Date();
     const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,"0");
-    const day = String(d.getDate()).padStart(2,"0");
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
+  }
+
+  function setStatus(texto){
+    status.textContent = texto;
   }
 
   function openDB(){
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
+
       req.onupgradeneeded = () => {
         const database = req.result;
         if(!database.objectStoreNames.contains(STORE)){
           database.createObjectStore(STORE, { keyPath: "id" });
         }
       };
+
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
@@ -266,15 +386,104 @@ const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
     };
   }
 
-  async function saveDraft(message="Borrador guardado correctamente."){
-    if(!db) return;
+  async function saveDraft(mensaje = "Borrador guardado correctamente."){
+    if(!db){
+      setStatus("El almacenamiento todavía no está disponible.");
+      return;
+    }
+
     try{
       await putDraft(draftSnapshot());
-      status.textContent = message;
-    }catch(err){
-      console.error(err);
-      status.textContent = "No se pudo guardar el borrador.";
+      setStatus(mensaje);
+    }catch(error){
+      console.error(error);
+      setStatus("No se pudo guardar el borrador.");
     }
+  }
+
+  async function loadDraft(){
+    fecha.value = todayISO();
+
+    const data = await getDraft();
+
+    if(!data){
+      setStatus("Borrador nuevo preparado.");
+      return;
+    }
+
+    obra.value = data.obra || "";
+    fecha.value = data.fecha || todayISO();
+    encargado.value = data.encargado || "";
+    estado.value = data.estado || "Borrador";
+    notas.value = data.notas || "";
+    photosData = Array.isArray(data.photosData) ? data.photosData : [];
+    audioBlob = data.audioBlob || null;
+
+    renderPhotos();
+    showAudio(audioBlob);
+    setStatus("Borrador anterior recuperado.");
+  }
+
+  function cargarObrasPersonalizadas(){
+    let obrasGuardadas = [];
+
+    try{
+      obrasGuardadas = JSON.parse(localStorage.getItem(OBRAS_KEY) || "[]");
+    }catch{
+      obrasGuardadas = [];
+    }
+
+    obrasGuardadas.forEach(nombre => {
+      const yaExiste = Array.from(obra.options).some(option => option.value === nombre);
+
+      if(!yaExiste){
+        const option = document.createElement("option");
+        option.value = nombre;
+        option.textContent = nombre;
+        obra.appendChild(option);
+      }
+    });
+  }
+
+  async function crearNuevaObra(){
+    const input = el("nuevaObraNombre");
+    const nombre = input.value.trim();
+
+    if(!nombre){
+      setStatus("Escribe el nombre de la nueva obra.");
+      return;
+    }
+
+    const yaExiste = Array.from(obra.options).some(
+      option => option.value.toLowerCase() === nombre.toLowerCase()
+    );
+
+    if(yaExiste){
+      setStatus("Esa obra ya existe.");
+      return;
+    }
+
+    let obrasGuardadas = [];
+
+    try{
+      obrasGuardadas = JSON.parse(localStorage.getItem(OBRAS_KEY) || "[]");
+    }catch{
+      obrasGuardadas = [];
+    }
+
+    obrasGuardadas.push(nombre);
+    localStorage.setItem(OBRAS_KEY, JSON.stringify(obrasGuardadas));
+
+    const option = document.createElement("option");
+    option.value = nombre;
+    option.textContent = nombre;
+    obra.appendChild(option);
+    obra.value = nombre;
+
+    input.value = "";
+    el("nuevaObraBox").classList.add("hidden");
+
+    await saveDraft("Nueva obra creada y guardada.");
   }
 
   function revokeAudioUrl(){
@@ -287,120 +496,94 @@ const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
   function showAudio(blob){
     revokeAudioUrl();
     audioBlob = blob;
+
     if(!blob){
       audioPlayer.removeAttribute("src");
       audioBox.classList.add("hidden");
       audioInfo.textContent = "";
       return;
     }
+
     audioObjectUrl = URL.createObjectURL(blob);
     audioPlayer.src = audioObjectUrl;
     audioBox.classList.remove("hidden");
+
     const kb = Math.max(1, Math.round(blob.size / 1024));
     audioInfo.textContent = `Audio guardado · ${kb} KB`;
   }
 
-  function renderPhotos(){
-
-  photoList.innerHTML = "";
-
-  photosData.forEach((item, idx) => {
-
-    const wrap = document.createElement("div");
-    wrap.className = "photo";
-
-    const img = document.createElement("img");
-    img.alt = item.name || `Foto ${idx + 1}`;
-
-    const reader = new FileReader();
-
-    reader.onload = function(event){
-      img.src = event.target.result;
-    };
-
-    reader.onerror = function(){
-      img.alt = "No se pudo mostrar la fotografía";
-    };
-
-    reader.readAsDataURL(item.blob);
-
-    const cap = document.createElement("small");
-    cap.textContent = item.name || `Foto ${idx + 1}`;
-
-    wrap.append(img, cap);
-    photoList.appendChild(wrap);
-  });
-
-  photoCount.textContent =
-    `${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} guardada${photosData.length === 1 ? "" : "s"}.`;
-}
-
-  async function loadDraft(){
-    fecha.value = todayISO();
-    const data = await getDraft();
-    if(!data){
-      status.textContent = "Borrador nuevo preparado.";
-      return;
-    }
-    obra.value = data.obra || "";
-    fecha.value = data.fecha || todayISO();
-    encargado.value = data.encargado || "";
-    estado.value = data.estado || "Borrador";
-    notas.value = data.notas || "";
-    photosData = Array.isArray(data.photosData) ? data.photosData : [];
-    audioBlob = data.audioBlob || null;
-    renderPhotos();
-    showAudio(audioBlob);
-    status.textContent = "Borrador anterior recuperado, incluido audio y fotos.";
-  }
-
-  async function startRecording(){
-    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined"){
-      status.textContent = "Este navegador no permite grabar desde aquí. Puedes usar “Subir un audio ya grabado”.";
-      return;
-    }
-    try{
-      mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
-      const preferred = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4"
-      ].find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
-
-      mediaRecorder = preferred ? new MediaRecorder(mediaStream, {mimeType: preferred}) : new MediaRecorder(mediaStream);
-      chunks = [];
-      mediaRecorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
-      mediaRecorder.onstop = async () => {
-        const type = mediaRecorder.mimeType || (chunks[0] && chunks[0].type) || "audio/webm";
-        const blob = new Blob(chunks, {type});
-        showAudio(blob);
-        stopTracks();
-        await saveDraft("Audio grabado y guardado en el borrador.");
-      };
-      mediaRecorder.start(250);
-      recordBtn.disabled = true;
-      stopBtn.disabled = false;
-      recordingState.classList.remove("hidden");
-      seconds = 0;
-      updateTimer();
-      timerInterval = setInterval(() => { seconds++; updateTimer(); }, 1000);
-      status.textContent = "Grabando audio…";
-    }catch(err){
-      console.error(err);
-      status.textContent = "No se pudo acceder al micrófono. Revisa el permiso del navegador o sube un audio grabado.";
-    }
-  }
-
   function updateTimer(){
-    const min = String(Math.floor(seconds/60)).padStart(2,"0");
-    const sec = String(seconds%60).padStart(2,"0");
+    const min = String(Math.floor(seconds / 60)).padStart(2, "0");
+    const sec = String(seconds % 60).padStart(2, "0");
     timerEl.textContent = `${min}:${sec}`;
   }
 
   function stopTracks(){
     if(mediaStream){
-      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream.getTracks().forEach(track => track.stop());
       mediaStream = null;
+    }
+  }
+
+  async function startRecording(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined"){
+      setStatus("Este navegador no permite grabar directamente. Puedes subir un audio grabado.");
+      return;
+    }
+
+    try{
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+
+      const tipos = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4"
+      ];
+
+      const preferred = tipos.find(
+        tipo => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(tipo)
+      );
+
+      mediaRecorder = preferred
+        ? new MediaRecorder(mediaStream, { mimeType: preferred })
+        : new MediaRecorder(mediaStream);
+
+      chunks = [];
+
+      mediaRecorder.ondataavailable = event => {
+        if(event.data && event.data.size){
+          chunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const tipo = mediaRecorder.mimeType || chunks[0]?.type || "audio/webm";
+        const blob = new Blob(chunks, { type: tipo });
+
+        showAudio(blob);
+        stopTracks();
+        await saveDraft("Audio grabado y guardado.");
+      };
+
+      mediaRecorder.start(250);
+
+      recordBtn.disabled = true;
+      stopBtn.disabled = false;
+      recordingState.classList.remove("hidden");
+
+      seconds = 0;
+      updateTimer();
+
+      timerInterval = setInterval(() => {
+        seconds++;
+        updateTimer();
+      }, 1000);
+
+      setStatus("Grabando audio…");
+
+    }catch(error){
+      console.error(error);
+      setStatus("No se pudo acceder al micrófono.");
     }
   }
 
@@ -408,6 +591,7 @@ const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
     if(mediaRecorder && mediaRecorder.state !== "inactive"){
       mediaRecorder.stop();
     }
+
     clearInterval(timerInterval);
     timerInterval = null;
     recordingState.classList.add("hidden");
@@ -415,52 +599,385 @@ const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
     stopBtn.disabled = true;
   }
 
+  async function handleAudioUpload(){
+    const file = audioUpload.files?.[0];
+
+    if(!file){
+      return;
+    }
+
+    if(!file.type.startsWith("audio/")){
+      setStatus("El archivo seleccionado no parece un audio.");
+      return;
+    }
+
+    showAudio(file);
+    await saveDraft("Audio seleccionado y guardado.");
+  }
+
+  function renderPhotos(){
+    photoList.innerHTML = "";
+
+    photosData.forEach((item, index) => {
+      const wrap = document.createElement("div");
+      wrap.className = "photo";
+
+      const img = document.createElement("img");
+      img.alt = item.name || `Foto ${index + 1}`;
+
+      const reader = new FileReader();
+
+      reader.onload = event => {
+        img.src = event.target.result;
+      };
+
+      reader.onerror = () => {
+        img.alt = "No se pudo mostrar la fotografía";
+      };
+
+      reader.readAsDataURL(item.blob);
+
+      const cap = document.createElement("small");
+      cap.textContent = item.name || `Foto ${index + 1}`;
+
+      wrap.append(img, cap);
+      photoList.appendChild(wrap);
+    });
+
+    photoCount.textContent =
+      `${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} guardada${photosData.length === 1 ? "" : "s"}.`;
+  }
+
   async function handlePhotos(){
     const files = Array.from(fotos.files || []);
-    const valid = files.filter(f => f.type.startsWith("image/")).slice(0, 20);
-    photosData = valid.map(f => ({name:f.name, type:f.type, blob:f}));
+
+    const valid = files
+      .filter(file => file.type.startsWith("image/"))
+      .slice(0, 20);
+
+    photosData = valid.map(file => ({
+      name: file.name,
+      type: file.type,
+      blob: file
+    }));
+
     renderPhotos();
     await saveDraft("Fotografías guardadas en el borrador.");
   }
 
-  async function handleAudioUpload(){
-    const file = audioUpload.files && audioUpload.files[0];
-    if(!file) return;
-    if(!file.type.startsWith("audio/")){
-      status.textContent = "El archivo seleccionado no parece ser un audio.";
+  async function transcribirAudio(){
+    if(!audioBlob){
+      setStatus("Primero debes grabar o seleccionar un audio.");
       return;
     }
-    showAudio(file);
-    await saveDraft("Audio seleccionado y guardado en el borrador.");
+
+    try{
+      setStatus("Transcribiendo audio con IA…");
+
+      const formData = new FormData();
+      const tipo = audioBlob.type || "audio/webm";
+      let extension = "webm";
+
+      if(tipo.includes("mp4")){
+        extension = "m4a";
+      }
+
+      formData.append("audio", audioBlob, `parte.${extension}`);
+
+      const respuesta = await fetch(`${BACKEND_URL}/transcribir`, {
+        method:"POST",
+        body:formData
+      });
+
+      let datos = {};
+
+      try{
+        datos = await respuesta.json();
+      }catch{
+        datos = {};
+      }
+
+      if(!respuesta.ok){
+        throw new Error(datos.mensaje || `Error HTTP ${respuesta.status}`);
+      }
+
+      notas.value = datos.texto || "";
+      await saveDraft("Audio transcrito correctamente.");
+
+    }catch(error){
+      console.error(error);
+      setStatus("Error al transcribir: " + error.message);
+    }
+  }
+
+  async function cargarLogoPDF(){
+    try{
+      const respuesta = await fetch(LOGO_URL);
+
+      if(!respuesta.ok){
+        return null;
+      }
+
+      const blob = await respuesta.blob();
+
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+    }catch(error){
+      console.error("No se pudo cargar el logo:", error);
+      return null;
+    }
+  }
+
+  async function generarPDF(descargar = true){
+    if(!obra.value){
+      setStatus("Selecciona una obra antes de generar el PDF.");
+      return null;
+    }
+
+    if(!fecha.value){
+      setStatus("Indica la fecha del parte.");
+      return null;
+    }
+
+    if(!encargado.value.trim()){
+      setStatus("Indica el nombre del encargado.");
+      return null;
+    }
+
+    try{
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      const logo = await cargarLogoPDF();
+
+      if(logo){
+        try{
+          doc.addImage(logo, "PNG", 20, 12, 35, 35);
+        }catch(error){
+          console.warn("No se pudo insertar el logo en el PDF:", error);
+        }
+      }
+
+      doc.setFontSize(18);
+      doc.text("DAFRICA BIERZO", 65, 22);
+
+      doc.setFontSize(15);
+      doc.text("PARTE DIARIO DE OBRA", 65, 32);
+
+      doc.setFontSize(11);
+      doc.text(`Obra: ${obra.value}`, 20, 58);
+      doc.text(`Fecha: ${fecha.value}`, 20, 66);
+      doc.text(`Encargado: ${encargado.value.trim()}`, 20, 74);
+
+      doc.line(20, 81, 190, 81);
+
+      doc.setFontSize(12);
+      doc.text("Información del parte", 20, 93);
+
+      doc.setFontSize(10);
+
+      const textoParte = notas.value.trim() || "Sin información redactada.";
+      const lineas = doc.splitTextToSize(textoParte, 170);
+
+      let y = 103;
+
+      for(let i = 0; i < lineas.length; i++){
+        if(y > 270){
+          doc.addPage();
+          y = 25;
+        }
+
+        doc.text(lineas[i], 20, y);
+        y += 5;
+      }
+
+      if(photosData.length > 0){
+        y += 8;
+
+        if(y > 270){
+          doc.addPage();
+          y = 25;
+        }
+
+        doc.setFontSize(10);
+
+        const frase =
+          `Registro fotográfico: se adjuntan ${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} junto con el presente parte.`;
+
+        const lineasFotos = doc.splitTextToSize(frase, 170);
+        doc.text(lineasFotos, 20, y);
+      }
+
+      const nombreObra = obra.value.replace(
+        /[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+/g,
+        "_"
+      );
+
+      const nombreArchivo = `${fecha.value}_Parte_${nombreObra}.pdf`;
+      const pdfBlob = doc.output("blob");
+
+      if(descargar){
+        doc.save(nombreArchivo);
+        setStatus("PDF generado correctamente.");
+      }
+
+      return {
+        blob: pdfBlob,
+        nombreArchivo
+      };
+
+    }catch(error){
+      console.error(error);
+      setStatus("No se pudo generar el PDF: " + error.message);
+      return null;
+    }
+  }
+
+  async function compartirPDF(tipo){
+    try{
+      setStatus("Preparando PDF…");
+
+      const resultado = await generarPDF(false);
+
+      if(!resultado){
+        return;
+      }
+
+      const archivoPDF = new File(
+        [resultado.blob],
+        resultado.nombreArchivo,
+        { type:"application/pdf" }
+      );
+
+      const archivosCompartir = [archivoPDF];
+
+      photosData.forEach((foto, indice) => {
+        const nombreFoto = foto.name || `Foto_${indice + 1}.jpg`;
+
+        const archivoFoto = new File(
+          [foto.blob],
+          nombreFoto,
+          {
+            type: foto.type || foto.blob.type || "image/jpeg"
+          }
+        );
+
+        archivosCompartir.push(archivoFoto);
+      });
+
+      if(
+        navigator.share &&
+        navigator.canShare &&
+        navigator.canShare({ files: archivosCompartir })
+      ){
+        let texto = "";
+
+        if(tipo === "correo"){
+          texto =
+            `Parte diario de obra\n` +
+            `Obra: ${obra.value}\n` +
+            `Fecha: ${fecha.value}\n` +
+            `Encargado: ${encargado.value.trim()}\n\n` +
+            `Destinatarios:\n` +
+            `evelazquez@dafrica.es\n` +
+            `info@dafrica.es`;
+        }
+
+        if(tipo === "whatsapp"){
+          texto =
+            `Parte diario de obra\n` +
+            `Obra: ${obra.value}\n` +
+            `Fecha: ${fecha.value}\n` +
+            `Encargado: ${encargado.value.trim()}`;
+        }
+
+        await navigator.share({
+          files: archivosCompartir,
+          title: `Parte diario - ${obra.value}`,
+          text:texto
+        });
+
+        setStatus("Parte preparado correctamente.");
+
+      }else{
+        setStatus("Este dispositivo no permite compartir varios archivos directamente. Se descargará el PDF.");
+        await generarPDF(true);
+      }
+
+    }catch(error){
+      if(error.name === "AbortError"){
+        setStatus("Envío cancelado.");
+        return;
+      }
+
+      console.error(error);
+      setStatus("No se pudo compartir el parte: " + error.message);
+    }
+  }
+
+  async function compartirParteCorreo(){
+    await compartirPDF("correo");
+  }
+
+  async function compartirParteWhatsApp(){
+    await compartirPDF("whatsapp");
   }
 
   function validate(){
     const errors = [];
-    if(!obra.value) errors.push("seleccionar la obra");
-    if(!fecha.value) errors.push("indicar la fecha");
-    if(!encargado.value.trim()) errors.push("indicar el encargado");
-    if(!audioBlob && !notas.value.trim()) errors.push("grabar un audio o añadir notas");
+
+    if(!obra.value){
+      errors.push("seleccionar la obra");
+    }
+
+    if(!fecha.value){
+      errors.push("indicar la fecha");
+    }
+
+    if(!encargado.value.trim()){
+      errors.push("indicar el encargado");
+    }
+
+    if(!audioBlob && !notas.value.trim()){
+      errors.push("grabar un audio o añadir información");
+    }
+
     return errors;
   }
 
   async function closePart(){
     const errors = validate();
+
     if(errors.length){
-      status.textContent = "Antes de cerrar debes: " + errors.join(", ") + ".";
+      setStatus("Antes de cerrar debes: " + errors.join(", ") + ".");
       return;
     }
+
     estado.value = "Cerrado";
-    await saveDraft("Parte cerrado en esta prueba. El siguiente paso será generar el parte redactado.");
+    await saveDraft("Parte cerrado y guardado.");
   }
 
   async function resetDraft(){
-    if(!confirm("¿Seguro que quieres borrar este borrador de prueba, incluyendo audio y fotos?")) return;
-    stopTracks();
-    if(mediaRecorder && mediaRecorder.state !== "inactive"){
-      try{ mediaRecorder.stop(); }catch(e){}
+    if(!confirm("¿Seguro que quieres borrar el borrador, incluyendo audio y fotos?")){
+      return;
     }
+
+    stopTracks();
+
+    if(mediaRecorder && mediaRecorder.state !== "inactive"){
+      try{
+        mediaRecorder.stop();
+      }catch{}
+    }
+
     await deleteDraft();
     revokeAudioUrl();
+
     obra.value = "";
     fecha.value = todayISO();
     encargado.value = "";
@@ -470,494 +987,31 @@ const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
     audioUpload.value = "";
     audioBlob = null;
     photosData = [];
+
     renderPhotos();
     showAudio(null);
-    status.textContent = "Borrador eliminado.";
+
+    setStatus("Borrador eliminado.");
   }
 
-  let autoTimer;
+  let autoTimer = null;
+
   function autoSave(){
     clearTimeout(autoTimer);
-    autoTimer = setTimeout(() => saveDraft("Guardado automático."), 500);
-  }
-async function transcribirAudio(){
 
-  if(!audioBlob){
-    status.textContent = "Primero debes grabar o seleccionar un audio.";
-    return;
+    autoTimer = setTimeout(() => {
+      saveDraft("Guardado automático.");
+    }, 500);
   }
 
-  try{
-
-    status.textContent = "Transcribiendo audio con IA…";
-
-    const formData = new FormData();
-
-    const tipo = audioBlob.type || "audio/webm";
-
-    let extension = "webm";
-
-    if(tipo.includes("mp4")){
-      extension = "m4a";
-    }
-
-    formData.append(
-      "audio",
-      audioBlob,
-      `parte.${extension}`
-    );
-
-    const respuesta = await fetch(
-      `${BACKEND_URL}/transcribir`,
-      {
-        method: "POST",
-        body: formData
-      }
-    );
-
-    const datos = await respuesta.json();
-
-    if(!respuesta.ok){
-      throw new Error(
-        datos.mensaje || "Error durante la transcripción"
-      );
-    }
-
-    notas.value = datos.texto;
-
-    await saveDraft(
-      "Audio transcrito correctamente."
-    );
-
-  }catch(error){
-
-    console.error(error);
-
-    status.textContent =
-      "Error al transcribir: " + error.message;
-  }
-}
-async function prepararFotoPDF(blob){async function prepararFotoPDF(blob){
-
-  return await new Promise((resolve, reject) => {
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-
-      const img = new Image();
-
-      img.onload = () => {
-
-        const maxDimension = 1600;
-
-        let ancho = img.width;
-        let alto = img.height;
-
-        if(ancho > maxDimension || alto > maxDimension){
-
-          const escala = Math.min(
-            maxDimension / ancho,
-            maxDimension / alto
-          );
-
-          ancho = Math.round(ancho * escala);
-          alto = Math.round(alto * escala);
-        }
-
-        const canvas = document.createElement("canvas");
-
-        canvas.width = ancho;
-        canvas.height = alto;
-
-        const ctx = canvas.getContext("2d");
-
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, ancho, alto);
-
-        ctx.drawImage(
-          img,
-          0,
-          0,
-          ancho,
-          alto
-        );
-
-        const data = canvas.toDataURL(
-          "image/jpeg",
-          0.85
-        );
-
-        resolve({
-          data: data,
-          ancho: ancho,
-          alto: alto
-        });
-
-      };
-
-      img.onerror = () => {
-        reject(
-          new Error("No se pudo procesar una fotografía.")
-        );
-      };
-
-      img.src = reader.result;
-    };
-
-    reader.onerror = () => {
-      reject(
-        new Error("No se pudo leer una fotografía.")
-      );
-    };
-
-    reader.readAsDataURL(blob);
-  });
-}
-
-      img.onerror = reject;
-
-      img.src = reader.result;
-    };
-
-    reader.onerror = reject;
-
-    reader.readAsDataURL(blob);
-  });
-}
-async function cargarLogoPDF(){
-
-  try{
-
-   const respuesta = await fetch("dafrica-logo.png.png");
-
-    if(!respuesta.ok){
-      return null;
-    }
-
-    const blob = await respuesta.blob();
-
-    return await new Promise((resolve, reject) => {
-
-      const reader = new FileReader();
-
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-
-      reader.readAsDataURL(blob);
-    });
-
-  }catch(error){
-
-    console.error("No se pudo cargar el logo:", error);
-
-    return null;
-  }
-}
-async function generarPDF(descargar = true){
-
-  if(!obra.value){
-    status.textContent = "Selecciona una obra antes de generar el PDF.";
-    return;
-  }
-
-  if(!fecha.value){
-    status.textContent = "Indica la fecha del parte.";
-    return;
-  }
-
-  if(!encargado.value.trim()){
-    status.textContent = "Indica el nombre del encargado.";
-    return;
-  }
-
-  try{
-
-    const { jsPDF } = window.jspdf;
-
-    const doc = new jsPDF();
-    const logo = await cargarLogoPDF();
-
-if(logo){
-  doc.addImage(
-    logo,
-    "PNG",
-    20,
-    12,
-    35,
-    35
-  );
-}
-
-    doc.setFontSize(18);
-doc.text("DAFRICA BIERZO", 65, 22);
-
-doc.setFontSize(15);
-doc.text("PARTE DIARIO DE OBRA", 65, 32);
-
-    doc.setFontSize(11);
-
-    doc.text(`Obra: ${obra.value}`, 20, 58);
-doc.text(`Fecha: ${fecha.value}`, 20, 66);
-doc.text(`Encargado: ${encargado.value.trim()}`, 20, 74);
-
-doc.line(20, 81, 190, 81);
-    doc.setFontSize(12);
-    doc.text("Información del parte", 20, 93);
-
-    doc.setFontSize(10);
-
-    const textoParte =
-      notas.value.trim() ||
-      "Sin información redactada.";
-
-    const lineas = doc.splitTextToSize(
-      textoParte,
-      170
-    );
-
-    doc.text(
-  lineas,
-  20,
-  103
-);
-if(photosData.length > 0){
-
-  doc.setFontSize(10);
-
-  doc.text(
-    `Registro fotográfico: se adjuntan ${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} junto con el presente parte.`,
-    20,
-    125
-  );
-}
-
-    const nombreObra = obra.value
-      .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+/g, "_");
-
-    const nombreArchivo =
-      `${fecha.value}_Parte_${nombreObra}.pdf`;
-
-    const pdfBlob = doc.output("blob");
-
-if(descargar){
-
-  doc.save(nombreArchivo);
-
-  status.textContent =
-    "PDF generado correctamente.";
-}
-
-return {
-  blob: pdfBlob,
-  nombreArchivo: nombreArchivo
-};
-
-  }catch(error){
-
-    console.error(error);
-
-    status.textContent =
-      "No se pudo generar el PDF: " + error.message;
-  }
-}
-function cargarObrasPersonalizadas(){
-
-  let obrasGuardadas = [];
-
-  try{
-    obrasGuardadas =
-      JSON.parse(localStorage.getItem(OBRAS_KEY) || "[]");
-  }catch(error){
-    obrasGuardadas = [];
-  }
-
-  obrasGuardadas.forEach(nombre => {
-
-    const yaExiste = Array.from(obra.options)
-      .some(option => option.value === nombre);
-
-    if(!yaExiste){
-      const option = document.createElement("option");
-      option.value = nombre;
-      option.textContent = nombre;
-      obra.appendChild(option);
-    }
-  });
-}
-
-
-async function crearNuevaObra(){
-
-  const input = el("nuevaObraNombre");
-  const nombre = input.value.trim();
-
-  if(!nombre){
-    status.textContent = "Escribe el nombre de la nueva obra.";
-    return;
-  }
-
-  const yaExiste = Array.from(obra.options)
-    .some(option => option.value.toLowerCase() === nombre.toLowerCase());
-
-  if(yaExiste){
-    status.textContent = "Esa obra ya existe.";
-    return;
-  }
-
-  let obrasGuardadas = [];
-
-  try{
-    obrasGuardadas =
-      JSON.parse(localStorage.getItem(OBRAS_KEY) || "[]");
-  }catch(error){
-    obrasGuardadas = [];
-  }
-
-  obrasGuardadas.push(nombre);
-
-  localStorage.setItem(
-    OBRAS_KEY,
-    JSON.stringify(obrasGuardadas)
-  );
-
-  const option = document.createElement("option");
-
-  option.value = nombre;
-  option.textContent = nombre;
-
-  obra.appendChild(option);
-
-  obra.value = nombre;
-
-  input.value = "";
-
-  el("nuevaObraBox").classList.add("hidden");
-
-  await saveDraft(
-    "Nueva obra creada y guardada."
-  );
-}
-async function compartirPDF(tipo){
-
-  try{
-
-    status.textContent =
-      "Preparando PDF…";
-
-    const resultado = await generarPDF(false);
-
-    if(!resultado){
-      return;
-    }
-
-    const archivoPDF = new File(
-      [resultado.blob],
-      resultado.nombreArchivo,
-      { type: "application/pdf" }
-    );
-    const archivosCompartir = [archivoPDF];
-
-photosData.forEach((foto, indice) => {
-
-  const nombreFoto =
-    foto.name || `Foto_${indice + 1}.jpg`;
-
-  const archivoFoto = new File(
-    [foto.blob],
-    nombreFoto,
-    {
-      type:
-        foto.type ||
-        foto.blob.type ||
-        "image/jpeg"
-    }
-  );
-
-  archivosCompartir.push(archivoFoto);
-});
-
-    if(
-      navigator.share &&
-      navigator.canShare &&
-     navigator.canShare({ files: archivosCompartir })
-    ){
-
-      let texto = "";
-
-      if(tipo === "correo"){
-
-        texto =
-          `Parte diario de obra\n` +
-          `Obra: ${obra.value}\n` +
-          `Fecha: ${fecha.value}\n` +
-          `Encargado: ${encargado.value.trim()}\n\n` +
-          `Enviar a:\n` +
-          `evelazquez@dafrica.es\n` +
-          `info@dafrica.es`;
-
-      }
-
-      if(tipo === "whatsapp"){
-
-        texto =
-          `Parte diario de obra\n` +
-          `Obra: ${obra.value}\n` +
-          `Fecha: ${fecha.value}\n` +
-          `Encargado: ${encargado.value.trim()}`;
-
-      }
-
-      await navigator.share({
-  files: archivosCompartir,
-        title: `Parte diario - ${obra.value}`,
-        text: texto
-      });
-
-      status.textContent =
-        "Parte preparado correctamente.";
-
-    }else{
-
-      status.textContent =
-        "El dispositivo no permite compartir el PDF directamente.";
-
-      await generarPDF(true);
-    }
-
-  }catch(error){
-
-    if(error.name === "AbortError"){
-      status.textContent =
-        "Envío cancelado.";
-      return;
-    }
-
-    console.error(error);
-
-    status.textContent =
-      "No se pudo compartir el parte: " + error.message;
-  }
-}
-
-
-async function compartirParteCorreo(){
-  await compartirPDF("correo");
-}
-
-
-async function compartirParteWhatsApp(){
-  await compartirPDF("whatsapp");
-}
-}
   async function init(){
-  cargarObrasPersonalizadas();
     try{
+      cargarObrasPersonalizadas();
       db = await openDB();
       await loadDraft();
-    }catch(err){
-      console.error(err);
-      status.textContent = "El navegador no permitió abrir el almacenamiento local.";
+    }catch(error){
+      console.error(error);
+      setStatus("No se pudo iniciar el almacenamiento local.");
     }
 
     [obra, fecha, encargado, notas].forEach(node => {
@@ -965,44 +1019,40 @@ async function compartirParteWhatsApp(){
       node.addEventListener("change", autoSave);
     });
 
+    el("nuevaObraBtn").addEventListener("click", () => {
+      el("nuevaObraBox").classList.toggle("hidden");
+    });
+
+    el("guardarNuevaObra").addEventListener("click", crearNuevaObra);
+
     fotos.addEventListener("change", handlePhotos);
     audioUpload.addEventListener("change", handleAudioUpload);
+
     recordBtn.addEventListener("click", startRecording);
     stopBtn.addEventListener("click", stopRecording);
-    el("nuevaObraBtn").addEventListener("click", () => {
-  el("nuevaObraBox").classList.toggle("hidden");
-});
 
-el("guardarNuevaObra").addEventListener(
-  "click",
-  crearNuevaObra
-);
     el("transcribirBtn").addEventListener("click", transcribirAudio);
 
     el("deleteAudio").addEventListener("click", async () => {
       showAudio(null);
       audioUpload.value = "";
-      await saveDraft("Audio eliminado del borrador.");
+      await saveDraft("Audio eliminado.");
     });
 
     el("clearPhotos").addEventListener("click", async () => {
       photosData = [];
       fotos.value = "";
       renderPhotos();
-      await saveDraft("Fotografías eliminadas del borrador.");
+      await saveDraft("Fotografías eliminadas.");
     });
 
     el("guardar").addEventListener("click", () => saveDraft());
-    el("pdfBtn").addEventListener("click", generarPDF);
-    el("correoBtn").addEventListener(
-  "click",
-  compartirParteCorreo
-);
 
-el("whatsappBtn").addEventListener(
-  "click",
-  compartirParteWhatsApp
-);
+    el("pdfBtn").addEventListener("click", () => generarPDF(true));
+
+    el("correoBtn").addEventListener("click", compartirParteCorreo);
+    el("whatsappBtn").addEventListener("click", compartirParteWhatsApp);
+
     el("cerrar").addEventListener("click", closePart);
     el("limpiar").addEventListener("click", resetDraft);
 
@@ -1012,5 +1062,6 @@ el("whatsappBtn").addEventListener(
   init();
 })();
 </script>
+
 </body>
 </html>
