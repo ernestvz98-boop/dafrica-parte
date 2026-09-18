@@ -296,7 +296,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v0.5</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v0.7</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -2214,89 +2214,83 @@
     tipo
   ){
 
-    try{
+    setStatus(
+      "Preparando PDF y fotografías…"
+    );
 
-      setStatus(
-        "Preparando PDF y fotografías…"
+    const resultado =
+      await generarPDF(
+        false
       );
 
-      const resultado =
-        await generarPDF(
-          false
-        );
+    if(!resultado){
+      return;
+    }
 
-      if(!resultado){
-        return;
-      }
+    const archivos =
+      construirArchivosCompartir(
+        resultado
+      );
 
-      const archivos =
-        construirArchivosCompartir(
-          resultado
-        );
+    let texto = "";
 
-      let texto = "";
+    if(
+      tipo === "correo"
+    ){
 
-      if(
-        tipo === "correo"
-      ){
+      texto =
+        `Parte diario de obra\n` +
+        `Obra: ${obra.value}\n` +
+        `Fecha: ${fecha.value}\n` +
+        `Encargado: ${encargado.value.trim()}\n\n` +
+        `Destinatarios:\n` +
+        `evelazquez@dafrica.es\n` +
+        `info@dafrica.es`;
+    }
 
-        texto =
-          `Parte diario de obra\n` +
-          `Obra: ${obra.value}\n` +
-          `Fecha: ${fecha.value}\n` +
-          `Encargado: ${encargado.value.trim()}\n\n` +
-          `Destinatarios:\n` +
-          `evelazquez@dafrica.es\n` +
-          `info@dafrica.es`;
-      }
+    if(
+      tipo === "whatsapp"
+    ){
 
-      if(
-        tipo === "whatsapp"
-      ){
+      texto =
+        `Parte diario de obra\n` +
+        `Obra: ${obra.value}\n` +
+        `Fecha: ${fecha.value}\n` +
+        `Encargado: ${encargado.value.trim()}`;
+    }
 
-        texto =
-          `Parte diario de obra\n` +
-          `Obra: ${obra.value}\n` +
-          `Fecha: ${fecha.value}\n` +
-          `Encargado: ${encargado.value.trim()}`;
-      }
+    const ua =
+      navigator.userAgent || "";
 
-      const shareDisponible =
-        typeof navigator.share ===
-          "function";
+    const esIOS =
+      /iPhone|iPad|iPod/i.test(
+        ua
+      );
 
-      const canShareDisponible =
-        typeof navigator.canShare ===
-          "function";
+    const shareDisponible =
+      typeof navigator.share ===
+        "function";
 
-      let puedeCompartirTodos =
-        false;
+    const canShareDisponible =
+      typeof navigator.canShare ===
+        "function";
 
-      if(
-        shareDisponible &&
-        canShareDisponible
-      ){
 
-        try{
+    /* ==========================================
+       iPHONE / iPAD
+       IMPORTANTE:
+       En iOS intentamos compartir directamente.
+       No bloqueamos antes con navigator.canShare()
+       porque Safari puede devolver false aunque
+       el menú nativo sí funcione correctamente.
+    ========================================== */
 
-          puedeCompartirTodos =
-            navigator.canShare({
-              files:archivos
-            });
+    if(
+      esIOS &&
+      shareDisponible
+    ){
 
-        }catch{
-
-          puedeCompartirTodos =
-            false;
-        }
-      }
-
-      /* iPhone, Android y otros equipos compatibles:
-         abre el menú nativo con PDF + fotografías. */
-      if(
-        shareDisponible &&
-        puedeCompartirTodos
-      ){
+      try{
 
         await navigator.share({
           files:archivos,
@@ -2310,12 +2304,208 @@
         );
 
         return;
+
+      }catch(error){
+
+        if(
+          error &&
+          error.name ===
+            "AbortError"
+        ){
+
+          setStatus(
+            "Compartir cancelado."
+          );
+
+          return;
+        }
+
+        console.warn(
+          "iOS no pudo compartir PDF + fotos:",
+          error
+        );
+
+        /* En iPhone, si PDF + fotos falla,
+           probamos solamente el PDF. */
+        try{
+
+          await navigator.share({
+            files:[archivos[0]],
+            title:
+              `Parte diario - ${obra.value}`,
+            text
+          });
+
+          setStatus(
+            photosData.length > 0
+              ? "PDF compartido. Las fotos deben adjuntarse aparte."
+              : "PDF compartido correctamente."
+          );
+
+          return;
+
+        }catch(errorPDF){
+
+          if(
+            errorPDF &&
+            errorPDF.name ===
+              "AbortError"
+          ){
+
+            setStatus(
+              "Compartir cancelado."
+            );
+
+            return;
+          }
+
+          console.warn(
+            "iOS tampoco pudo compartir solo el PDF:",
+            errorPDF
+          );
+        }
+      }
+    }
+
+
+    /* ==========================================
+       ANDROID Y OTROS NAVEGADORES
+       Comprobamos compatibilidad antes.
+    ========================================== */
+
+    if(
+      !esIOS &&
+      shareDisponible &&
+      canShareDisponible
+    ){
+
+      let puedeTodos =
+        false;
+
+      try{
+
+        puedeTodos =
+          navigator.canShare({
+            files:archivos
+          });
+
+      }catch{
+
+        puedeTodos =
+          false;
       }
 
-      /* En equipos que no pueden compartir varios adjuntos,
-         los descargamos primero. */
+      if(puedeTodos){
+
+        try{
+
+          await navigator.share({
+            files:archivos,
+            title:
+              `Parte diario - ${obra.value}`,
+            text
+          });
+
+          setStatus(
+            "Parte preparado para compartir correctamente."
+          );
+
+          return;
+
+        }catch(error){
+
+          if(
+            error &&
+            error.name ===
+              "AbortError"
+          ){
+
+            setStatus(
+              "Compartir cancelado."
+            );
+
+            return;
+          }
+
+          console.warn(
+            "No se pudieron compartir todos los archivos:",
+            error
+          );
+        }
+      }
+
+
+      /* Si PDF + fotos no es compatible,
+         probamos solo PDF. */
+
+      let puedePDF =
+        false;
+
+      try{
+
+        puedePDF =
+          navigator.canShare({
+            files:[archivos[0]]
+          });
+
+      }catch{
+
+        puedePDF =
+          false;
+      }
+
+      if(puedePDF){
+
+        try{
+
+          await navigator.share({
+            files:[archivos[0]],
+            title:
+              `Parte diario - ${obra.value}`,
+            text
+          });
+
+          setStatus(
+            photosData.length > 0
+              ? "PDF compartido. Este dispositivo no permite adjuntar PDF y fotos juntos."
+              : "PDF compartido correctamente."
+          );
+
+          return;
+
+        }catch(error){
+
+          if(
+            error &&
+            error.name ===
+              "AbortError"
+          ){
+
+            setStatus(
+              "Compartir cancelado."
+            );
+
+            return;
+          }
+
+          console.warn(
+            "No se pudo compartir el PDF:",
+            error
+          );
+        }
+      }
+    }
+
+
+    /* ==========================================
+       SISTEMA ALTERNATIVO
+       DESCARGA + CORREO / WHATSAPP
+    ========================================== */
+
+    try{
+
       setStatus(
-        "Preparando los archivos para el envío…"
+        "El dispositivo no permite compartir los adjuntos directamente. Descargando archivos…"
       );
 
       await fallbackDescargas(
@@ -2331,8 +2521,10 @@
         );
 
         setTimeout(
-          abrirCorreoPreparado,
-          700
+          () => {
+            abrirCorreoPreparado();
+          },
+          900
         );
 
         return;
@@ -2347,8 +2539,10 @@
         );
 
         setTimeout(
-          abrirWhatsAppPreparado,
-          700
+          () => {
+            abrirWhatsAppPreparado();
+          },
+          900
         );
 
         return;
@@ -2356,25 +2550,13 @@
 
     }catch(error){
 
-      if(
-        error &&
-        error.name ===
-          "AbortError"
-      ){
-
-        setStatus(
-          "Compartir cancelado."
-        );
-
-        return;
-      }
-
       console.error(
+        "Error en el sistema alternativo:",
         error
       );
 
       setStatus(
-        "No se pudo compartir automáticamente. Genera el PDF y adjúntalo manualmente."
+        "No se pudo compartir automáticamente. Usa «Generar PDF» para descargar el parte."
       );
     }
   }
