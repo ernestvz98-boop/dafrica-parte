@@ -629,7 +629,7 @@ async function cargarLogoPDF(){
 
   try{
 
-    const respuesta = await fetch("dafrica-logo.png");
+   const respuesta = await fetch("dafrica-logo.png.png");
 
     if(!respuesta.ok){
       return null;
@@ -723,98 +723,13 @@ doc.line(20, 81, 190, 81);
 );
 if(photosData.length > 0){
 
-  const posiciones = [
-    { x: 20,  y: 35 },
-    { x: 110, y: 35 },
-    { x: 20,  y: 155 },
-    { x: 110, y: 155 }
-  ];
+  doc.setFontSize(10);
 
-  for(let i = 0; i < photosData.length; i++){
-
-    if(i % 4 === 0){
-
-      doc.addPage();
-
-      doc.setFontSize(15);
-      doc.text(
-        "REGISTRO FOTOGRÁFICO",
-        20,
-        20
-      );
-
-      doc.line(
-        20,
-        25,
-        190,
-        25
-      );
-    }
-
-    const posicion =
-      posiciones[i % 4];
-
-    try{
-
-      const foto = await prepararFotoPDF(
-        photosData[i].blob
-      );
-
-      const maxAncho = 80;
-      const maxAlto = 95;
-
-      const proporcion =
-        foto.ancho / foto.alto;
-
-      let anchoFinal = maxAncho;
-      let altoFinal =
-        anchoFinal / proporcion;
-
-      if(altoFinal > maxAlto){
-
-        altoFinal = maxAlto;
-
-        anchoFinal =
-          altoFinal * proporcion;
-      }
-
-      const xCentrada =
-        posicion.x +
-        (maxAncho - anchoFinal) / 2;
-
-      doc.addImage(
-        foto.data,
-        "JPEG",
-        xCentrada,
-        posicion.y,
-        anchoFinal,
-        altoFinal
-      );
-
-      doc.setFontSize(9);
-
-      doc.text(
-        `Foto ${i + 1}`,
-        posicion.x,
-        posicion.y + maxAlto + 7
-      );
-
-    }catch(error){
-
-      console.error(
-        `Error procesando foto ${i + 1}:`,
-        error
-      );
-
-      doc.setFontSize(9);
-
-      doc.text(
-        `Foto ${i + 1}: no se pudo procesar`,
-        posicion.x,
-        posicion.y + 10
-      );
-    }
-  }
+  doc.text(
+    `Registro fotográfico: se adjuntan ${photosData.length} fotografía${photosData.length === 1 ? "" : "s"} junto con el presente parte.`,
+    20,
+    125
+  );
 }
 
     const nombreObra = obra.value
@@ -941,11 +856,31 @@ async function compartirPDF(tipo){
       resultado.nombreArchivo,
       { type: "application/pdf" }
     );
+    const archivosCompartir = [archivoPDF];
+
+photosData.forEach((foto, indice) => {
+
+  const nombreFoto =
+    foto.name || `Foto_${indice + 1}.jpg`;
+
+  const archivoFoto = new File(
+    [foto.blob],
+    nombreFoto,
+    {
+      type:
+        foto.type ||
+        foto.blob.type ||
+        "image/jpeg"
+    }
+  );
+
+  archivosCompartir.push(archivoFoto);
+});
 
     if(
       navigator.share &&
       navigator.canShare &&
-      navigator.canShare({ files: [archivoPDF] })
+     navigator.canShare({ files: archivosCompartir })
     ){
 
       let texto = "";
@@ -974,7 +909,7 @@ async function compartirPDF(tipo){
       }
 
       await navigator.share({
-        files: [archivoPDF],
+  files: archivosCompartir,
         title: `Parte diario - ${obra.value}`,
         text: texto
       });
