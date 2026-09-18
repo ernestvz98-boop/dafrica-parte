@@ -48,6 +48,11 @@
 </head>
 <body>
   <main>
+    <img
+  src="dafrica-logo.png"
+  alt="DAFRICA Bierzo"
+  style="width:120px; height:auto; display:block; margin-bottom:10px;"
+>
     <h1>DAFRICA Parte <span class="badge">v0.2</span></h1>
     <p class="sub">Audio + fotos + borrador persistente.</p>
 
@@ -56,12 +61,38 @@
         <div>
           <label for="obra">Obra</label>
           <select id="obra">
-            <option value="">Selecciona una obra</option>
-            <option>Torre del Bierzo</option>
-            <option>Taller Carpintería Colmenas Abejas - Tremor de Arriba</option>
-            <option>Castillo de los Templarios</option>
-            <option>CS Aravaca</option>
-          </select>
+  <option value="">Selecciona una obra</option>
+  <option>Torre del Bierzo</option>
+  <option>Taller Carpintería Colmenas Abejas - Tremor de Arriba</option>
+  <option>Castillo de los Templarios</option>
+  <option>CS Aravaca</option>
+</select>
+
+<div style="margin-top:10px">
+  <button id="nuevaObraBtn" class="secondary" type="button">
+    ➕ Crear nueva obra
+  </button>
+</div>
+
+<div id="nuevaObraBox" class="hidden" style="margin-top:10px">
+  <input
+    id="nuevaObraNombre"
+    type="text"
+    placeholder="Nombre de la nueva obra"
+  >
+
+  <button
+    id="guardarNuevaObra"
+    class="primary"
+    type="button"
+    style="margin-top:8px"
+  >
+    Guardar obra
+  </button>
+</div>
+
+</div>
+          
         </div>
         <div>
           <label for="fecha">Fecha</label>
@@ -123,17 +154,32 @@
     <section class="card">
       <div class="actions">
         <button id="guardar" class="secondary" type="button">Guardar borrador</button>
+        <button id="pdfBtn" class="secondary" type="button">
+  📄 Generar PDF
+</button>
+<div class="actions">
+
+  <button id="correoBtn" class="primary" type="button">
+    📧 Enviar por correo
+  </button>
+
+  <button id="whatsappBtn" class="secondary" type="button">
+    💬 Enviar por WhatsApp
+  </button>
+
+</div>
         <button id="cerrar" class="primary" type="button">Cerrar parte</button>
       </div>
       <button id="limpiar" class="danger" type="button" style="margin-top:10px">Borrar borrador de prueba</button>
       <div id="status" class="status" aria-live="polite">Preparando almacenamiento…</div>
     </section>
   </main>
-
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script>
 (() => {
 const BACKEND_URL = "https://dafrica-parte-backend.onrender.com";
   const DB_NAME = "dafrica_parte_db";
+  const OBRAS_KEY = "dafrica_obras_personalizadas";
   const DB_VERSION = 1;
   const STORE = "drafts";
   const DRAFT_ID = "current";
@@ -491,7 +537,486 @@ async function transcribirAudio(){
       "Error al transcribir: " + error.message;
   }
 }
+async function prepararFotoPDF(blob){async function prepararFotoPDF(blob){
+
+  return await new Promise((resolve, reject) => {
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+
+      const img = new Image();
+
+      img.onload = () => {
+
+        const maxDimension = 1600;
+
+        let ancho = img.width;
+        let alto = img.height;
+
+        if(ancho > maxDimension || alto > maxDimension){
+
+          const escala = Math.min(
+            maxDimension / ancho,
+            maxDimension / alto
+          );
+
+          ancho = Math.round(ancho * escala);
+          alto = Math.round(alto * escala);
+        }
+
+        const canvas = document.createElement("canvas");
+
+        canvas.width = ancho;
+        canvas.height = alto;
+
+        const ctx = canvas.getContext("2d");
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, ancho, alto);
+
+        ctx.drawImage(
+          img,
+          0,
+          0,
+          ancho,
+          alto
+        );
+
+        const data = canvas.toDataURL(
+          "image/jpeg",
+          0.85
+        );
+
+        resolve({
+          data: data,
+          ancho: ancho,
+          alto: alto
+        });
+
+      };
+
+      img.onerror = () => {
+        reject(
+          new Error("No se pudo procesar una fotografía.")
+        );
+      };
+
+      img.src = reader.result;
+    };
+
+    reader.onerror = () => {
+      reject(
+        new Error("No se pudo leer una fotografía.")
+      );
+    };
+
+    reader.readAsDataURL(blob);
+  });
+}
+
+      img.onerror = reject;
+
+      img.src = reader.result;
+    };
+
+    reader.onerror = reject;
+
+    reader.readAsDataURL(blob);
+  });
+}
+async function cargarLogoPDF(){
+
+  try{
+
+    const respuesta = await fetch("dafrica-logo.png");
+
+    if(!respuesta.ok){
+      return null;
+    }
+
+    const blob = await respuesta.blob();
+
+    return await new Promise((resolve, reject) => {
+
+      const reader = new FileReader();
+
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+
+      reader.readAsDataURL(blob);
+    });
+
+  }catch(error){
+
+    console.error("No se pudo cargar el logo:", error);
+
+    return null;
+  }
+}
+async function generarPDF(descargar = true){
+
+  if(!obra.value){
+    status.textContent = "Selecciona una obra antes de generar el PDF.";
+    return;
+  }
+
+  if(!fecha.value){
+    status.textContent = "Indica la fecha del parte.";
+    return;
+  }
+
+  if(!encargado.value.trim()){
+    status.textContent = "Indica el nombre del encargado.";
+    return;
+  }
+
+  try{
+
+    const { jsPDF } = window.jspdf;
+
+    const doc = new jsPDF();
+    const logo = await cargarLogoPDF();
+
+if(logo){
+  doc.addImage(
+    logo,
+    "PNG",
+    20,
+    12,
+    35,
+    35
+  );
+}
+
+    doc.setFontSize(18);
+doc.text("DAFRICA BIERZO", 65, 22);
+
+doc.setFontSize(15);
+doc.text("PARTE DIARIO DE OBRA", 65, 32);
+
+    doc.setFontSize(11);
+
+    doc.text(`Obra: ${obra.value}`, 20, 58);
+doc.text(`Fecha: ${fecha.value}`, 20, 66);
+doc.text(`Encargado: ${encargado.value.trim()}`, 20, 74);
+
+doc.line(20, 81, 190, 81);
+    doc.setFontSize(12);
+    doc.text("Información del parte", 20, 93);
+
+    doc.setFontSize(10);
+
+    const textoParte =
+      notas.value.trim() ||
+      "Sin información redactada.";
+
+    const lineas = doc.splitTextToSize(
+      textoParte,
+      170
+    );
+
+    doc.text(
+  lineas,
+  20,
+  103
+);
+if(photosData.length > 0){
+
+  const posiciones = [
+    { x: 20,  y: 35 },
+    { x: 110, y: 35 },
+    { x: 20,  y: 155 },
+    { x: 110, y: 155 }
+  ];
+
+  for(let i = 0; i < photosData.length; i++){
+
+    if(i % 4 === 0){
+
+      doc.addPage();
+
+      doc.setFontSize(15);
+      doc.text(
+        "REGISTRO FOTOGRÁFICO",
+        20,
+        20
+      );
+
+      doc.line(
+        20,
+        25,
+        190,
+        25
+      );
+    }
+
+    const posicion =
+      posiciones[i % 4];
+
+    try{
+
+      const foto = await prepararFotoPDF(
+        photosData[i].blob
+      );
+
+      const maxAncho = 80;
+      const maxAlto = 95;
+
+      const proporcion =
+        foto.ancho / foto.alto;
+
+      let anchoFinal = maxAncho;
+      let altoFinal =
+        anchoFinal / proporcion;
+
+      if(altoFinal > maxAlto){
+
+        altoFinal = maxAlto;
+
+        anchoFinal =
+          altoFinal * proporcion;
+      }
+
+      const xCentrada =
+        posicion.x +
+        (maxAncho - anchoFinal) / 2;
+
+      doc.addImage(
+        foto.data,
+        "JPEG",
+        xCentrada,
+        posicion.y,
+        anchoFinal,
+        altoFinal
+      );
+
+      doc.setFontSize(9);
+
+      doc.text(
+        `Foto ${i + 1}`,
+        posicion.x,
+        posicion.y + maxAlto + 7
+      );
+
+    }catch(error){
+
+      console.error(
+        `Error procesando foto ${i + 1}:`,
+        error
+      );
+
+      doc.setFontSize(9);
+
+      doc.text(
+        `Foto ${i + 1}: no se pudo procesar`,
+        posicion.x,
+        posicion.y + 10
+      );
+    }
+  }
+}
+
+    const nombreObra = obra.value
+      .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+/g, "_");
+
+    const nombreArchivo =
+      `${fecha.value}_Parte_${nombreObra}.pdf`;
+
+    const pdfBlob = doc.output("blob");
+
+if(descargar){
+
+  doc.save(nombreArchivo);
+
+  status.textContent =
+    "PDF generado correctamente.";
+}
+
+return {
+  blob: pdfBlob,
+  nombreArchivo: nombreArchivo
+};
+
+  }catch(error){
+
+    console.error(error);
+
+    status.textContent =
+      "No se pudo generar el PDF: " + error.message;
+  }
+}
+function cargarObrasPersonalizadas(){
+
+  let obrasGuardadas = [];
+
+  try{
+    obrasGuardadas =
+      JSON.parse(localStorage.getItem(OBRAS_KEY) || "[]");
+  }catch(error){
+    obrasGuardadas = [];
+  }
+
+  obrasGuardadas.forEach(nombre => {
+
+    const yaExiste = Array.from(obra.options)
+      .some(option => option.value === nombre);
+
+    if(!yaExiste){
+      const option = document.createElement("option");
+      option.value = nombre;
+      option.textContent = nombre;
+      obra.appendChild(option);
+    }
+  });
+}
+
+
+async function crearNuevaObra(){
+
+  const input = el("nuevaObraNombre");
+  const nombre = input.value.trim();
+
+  if(!nombre){
+    status.textContent = "Escribe el nombre de la nueva obra.";
+    return;
+  }
+
+  const yaExiste = Array.from(obra.options)
+    .some(option => option.value.toLowerCase() === nombre.toLowerCase());
+
+  if(yaExiste){
+    status.textContent = "Esa obra ya existe.";
+    return;
+  }
+
+  let obrasGuardadas = [];
+
+  try{
+    obrasGuardadas =
+      JSON.parse(localStorage.getItem(OBRAS_KEY) || "[]");
+  }catch(error){
+    obrasGuardadas = [];
+  }
+
+  obrasGuardadas.push(nombre);
+
+  localStorage.setItem(
+    OBRAS_KEY,
+    JSON.stringify(obrasGuardadas)
+  );
+
+  const option = document.createElement("option");
+
+  option.value = nombre;
+  option.textContent = nombre;
+
+  obra.appendChild(option);
+
+  obra.value = nombre;
+
+  input.value = "";
+
+  el("nuevaObraBox").classList.add("hidden");
+
+  await saveDraft(
+    "Nueva obra creada y guardada."
+  );
+}
+async function compartirPDF(tipo){
+
+  try{
+
+    status.textContent =
+      "Preparando PDF…";
+
+    const resultado = await generarPDF(false);
+
+    if(!resultado){
+      return;
+    }
+
+    const archivoPDF = new File(
+      [resultado.blob],
+      resultado.nombreArchivo,
+      { type: "application/pdf" }
+    );
+
+    if(
+      navigator.share &&
+      navigator.canShare &&
+      navigator.canShare({ files: [archivoPDF] })
+    ){
+
+      let texto = "";
+
+      if(tipo === "correo"){
+
+        texto =
+          `Parte diario de obra\n` +
+          `Obra: ${obra.value}\n` +
+          `Fecha: ${fecha.value}\n` +
+          `Encargado: ${encargado.value.trim()}\n\n` +
+          `Enviar a:\n` +
+          `evelazquez@dafrica.es\n` +
+          `info@dafrica.es`;
+
+      }
+
+      if(tipo === "whatsapp"){
+
+        texto =
+          `Parte diario de obra\n` +
+          `Obra: ${obra.value}\n` +
+          `Fecha: ${fecha.value}\n` +
+          `Encargado: ${encargado.value.trim()}`;
+
+      }
+
+      await navigator.share({
+        files: [archivoPDF],
+        title: `Parte diario - ${obra.value}`,
+        text: texto
+      });
+
+      status.textContent =
+        "Parte preparado correctamente.";
+
+    }else{
+
+      status.textContent =
+        "El dispositivo no permite compartir el PDF directamente.";
+
+      await generarPDF(true);
+    }
+
+  }catch(error){
+
+    if(error.name === "AbortError"){
+      status.textContent =
+        "Envío cancelado.";
+      return;
+    }
+
+    console.error(error);
+
+    status.textContent =
+      "No se pudo compartir el parte: " + error.message;
+  }
+}
+
+
+async function compartirParteCorreo(){
+  await compartirPDF("correo");
+}
+
+
+async function compartirParteWhatsApp(){
+  await compartirPDF("whatsapp");
+}
+}
   async function init(){
+  cargarObrasPersonalizadas();
     try{
       db = await openDB();
       await loadDraft();
@@ -509,6 +1034,14 @@ async function transcribirAudio(){
     audioUpload.addEventListener("change", handleAudioUpload);
     recordBtn.addEventListener("click", startRecording);
     stopBtn.addEventListener("click", stopRecording);
+    el("nuevaObraBtn").addEventListener("click", () => {
+  el("nuevaObraBox").classList.toggle("hidden");
+});
+
+el("guardarNuevaObra").addEventListener(
+  "click",
+  crearNuevaObra
+);
     el("transcribirBtn").addEventListener("click", transcribirAudio);
 
     el("deleteAudio").addEventListener("click", async () => {
@@ -525,6 +1058,16 @@ async function transcribirAudio(){
     });
 
     el("guardar").addEventListener("click", () => saveDraft());
+    el("pdfBtn").addEventListener("click", generarPDF);
+    el("correoBtn").addEventListener(
+  "click",
+  compartirParteCorreo
+);
+
+el("whatsappBtn").addEventListener(
+  "click",
+  compartirParteWhatsApp
+);
     el("cerrar").addEventListener("click", closePart);
     el("limpiar").addEventListener("click", resetDraft);
 
