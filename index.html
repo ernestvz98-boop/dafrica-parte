@@ -296,7 +296,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v1.0</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v1.2</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -2451,6 +2451,32 @@
   }
 
 
+  function abrirCorreoPC(){
+
+    const destinatarios =
+      "evelazquez@dafrica.es,info@dafrica.es";
+
+    const asunto =
+      `Parte diario - ${obra.value}`;
+
+    const cuerpo =
+      `Parte diario de obra\n\n` +
+      `Obra: ${obra.value}\n` +
+      `Fecha: ${fecha.value}\n` +
+      `Encargado: ${encargado.value.trim()}\n\n` +
+      `El PDF y las fotografías se han descargado en este equipo. ` +
+      `Adjúntalos al correo antes de enviarlo.`;
+
+    const mailto =
+      `mailto:${destinatarios}` +
+      `?subject=${encodeURIComponent(asunto)}` +
+      `&body=${encodeURIComponent(cuerpo)}`;
+
+    window.location.href =
+      mailto;
+  }
+
+
   async function compartirPDF(
     tipo
   ){
@@ -2481,15 +2507,36 @@
       typeof navigator.canShare ===
         "function";
 
+    const ua =
+      navigator.userAgent || "";
+
+    const esAndroid =
+      /Android/i.test(ua);
+
+    const esIOS =
+      /iPhone|iPad|iPod/i.test(ua);
+
+
+    /* Texto corto para Android.
+       WhatsApp puede rechazar un share sin texto
+       aunque el navegador abra correctamente
+       el selector de aplicaciones. */
+    const textoAndroid =
+      `Parte diario de obra\n` +
+      `Obra: ${obra.value}\n` +
+      `Fecha: ${fecha.value}\n` +
+      `Encargado: ${encargado.value.trim()}`;
+
 
     /* ==========================================
        INTENTO 1:
        PDF + FOTOS
-       SOLO ARCHIVOS.
-       Sin title, sin text, sin mailto.
-       Esto maximiza la compatibilidad con
-       Safari/iPhone, Chrome/Android y otros
-       navegadores con Web Share API.
+
+       iPhone/iPad:
+       SOLO archivos.
+
+       Android:
+       archivos + texto no vacío.
     ========================================== */
 
     if(shareDisponible){
@@ -2508,7 +2555,6 @@
 
         }catch{
 
-          /* No bloqueamos el intento si canShare falla */
           intentarTodos =
             true;
         }
@@ -2518,9 +2564,20 @@
 
         try{
 
-          await navigator.share({
-            files:archivos
-          });
+          const datosCompartir =
+            {
+              files:archivos
+            };
+
+          if(esAndroid){
+
+            datosCompartir.text =
+              textoAndroid;
+          }
+
+          await navigator.share(
+            datosCompartir
+          );
 
           setStatus(
             "PDF y fotografías compartidos correctamente."
@@ -2567,7 +2624,6 @@
     /* ==========================================
        INTENTO 2:
        SOLO PDF
-       También SOLO ARCHIVO.
     ========================================== */
 
     if(shareDisponible){
@@ -2598,9 +2654,20 @@
 
         try{
 
-          await navigator.share({
-            files:soloPDF
-          });
+          const datosPDF =
+            {
+              files:soloPDF
+            };
+
+          if(esAndroid){
+
+            datosPDF.text =
+              textoAndroid;
+          }
+
+          await navigator.share(
+            datosPDF
+          );
 
           setStatus(
             photosData.length > 0
@@ -2647,10 +2714,11 @@
 
 
     /* ==========================================
-       INTENTO 3:
+       RESPALDO:
        DESCARGA
-       Funciona como respaldo en equipos que no
-       admiten Web Share con archivos.
+
+       En PC, si es correo, abrimos después
+       el cliente de correo preparado.
     ========================================== */
 
     try{
@@ -2658,6 +2726,26 @@
       await fallbackDescargas(
         resultado
       );
+
+      if(
+        tipo === "correo" &&
+        !esAndroid &&
+        !esIOS
+      ){
+
+        setStatus(
+          "PDF y fotografías descargados. Abriendo el correo en el ordenador…"
+        );
+
+        setTimeout(
+          () => {
+            abrirCorreoPC();
+          },
+          700
+        );
+
+        return;
+      }
 
       setStatus(
         "PDF y fotografías descargados. Puedes compartirlos desde Descargas/Archivos."
