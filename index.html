@@ -296,7 +296,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v1.4</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v1.5</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -451,6 +451,14 @@
         </button>
       </div>
 
+      <button
+        id="abrirPDFAndroidBtn"
+        class="primary hidden"
+        type="button"
+      >
+        📂 Abrir PDF para compartir
+      </button>
+
       <button id="cerrar" class="primary" type="button">
         Cerrar parte
       </button>
@@ -551,6 +559,10 @@
      Se preparan al seleccionar las fotos, no al pulsar WhatsApp. */
   let photosPdfCache = [];
   let photosPdfPreparing = false;
+
+  /* PDF preparado para el flujo de dos pasos en Android */
+  let androidPdfUrl = null;
+  let androidPdfNombre = null;
 
   /* El logo se carga con antelación para que al pulsar
      "Compartir" Safari no pierda el gesto del usuario. */
@@ -1810,6 +1822,8 @@
         })
       );
 
+    limpiarPDFAndroidPreparado();
+
     renderPhotos();
 
     await prepararFotosPdfCache(
@@ -2944,6 +2958,80 @@
   }
 
 
+  function limpiarPDFAndroidPreparado(){
+
+    if(androidPdfUrl){
+
+      URL.revokeObjectURL(
+        androidPdfUrl
+      );
+
+      androidPdfUrl =
+        null;
+    }
+
+    androidPdfNombre =
+      null;
+
+    el("abrirPDFAndroidBtn")
+      .classList.add(
+        "hidden"
+      );
+  }
+
+
+  function prepararPDFAndroidParaAbrir(
+    combinado
+  ){
+
+    limpiarPDFAndroidPreparado();
+
+    androidPdfUrl =
+      URL.createObjectURL(
+        combinado.blob
+      );
+
+    androidPdfNombre =
+      combinado.nombreArchivo;
+
+    el("abrirPDFAndroidBtn")
+      .classList.remove(
+        "hidden"
+      );
+  }
+
+
+  function abrirPDFAndroid(){
+
+    if(!androidPdfUrl){
+
+      setStatus(
+        "Primero pulsa «Enviar por WhatsApp» para preparar el PDF."
+      );
+
+      return;
+    }
+
+    const nuevaVentana =
+      window.open(
+        androidPdfUrl,
+        "_blank"
+      );
+
+    if(!nuevaVentana){
+
+      /* Si el navegador bloquea una nueva pestaña,
+         intentamos abrirlo en la pestaña actual. */
+      window.location.href =
+        androidPdfUrl;
+    }
+
+    setStatus(
+      "PDF abierto. Usa el botón Compartir del visor del teléfono y elige WhatsApp."
+    );
+  }
+
+
   async function compartirPDF(
     tipo
   ){
@@ -2985,15 +3073,20 @@
 
 
     /* ==========================================
-       ANDROID + WHATSAPP
+       ANDROID + WHATSAPP — FLUJO FIABLE
 
-       En Android compartimos UN SOLO PDF:
-       - parte
-       - transcripción
-       - fotografías comprimidas
+       No intentamos enviar el archivo directamente
+       a WhatsApp desde el navegador porque algunos
+       Android ignoran el adjunto.
 
-       PDF es un tipo de archivo ampliamente
-       compatible con Web Share y WhatsApp.
+       Paso 1:
+       - crear un PDF único con parte + fotos
+       - descargarlo
+       - mostrar "Abrir PDF para compartir"
+
+       Paso 2:
+       - abrir el PDF en el visor del teléfono
+       - compartir desde el visor a WhatsApp
     ========================================== */
 
     if(
@@ -3036,75 +3129,18 @@
         return;
       }
 
-      const archivoPDFAndroid =
-        new File(
-          [combinado.blob],
-          combinado.nombreArchivo,
-          {
-            type:
-              "application/pdf"
-          }
-        );
+      prepararPDFAndroidParaAbrir(
+        combinado
+      );
 
-      if(shareDisponible){
-
-        try{
-
-          if(
-            canShareDisponible &&
-            !navigator.canShare({
-              files:[
-                archivoPDFAndroid
-              ]
-            })
-          ){
-
-            throw new Error(
-              "El navegador no admite compartir PDF."
-            );
-          }
-
-          await navigator.share({
-            files:[
-              archivoPDFAndroid
-            ]
-          });
-
-          setStatus(
-            "Parte con fotografías compartido correctamente."
-          );
-
-          return;
-
-        }catch(error){
-
-          if(
-            error &&
-            error.name ===
-              "AbortError"
-          ){
-
-            setStatus(
-              "Compartir cancelado."
-            );
-
-            return;
-          }
-
-          console.warn(
-            "Android no pudo compartir el PDF con fotos:",
-            error
-          );
-        }
-      }
-
+      /* Guardamos además una copia en Descargas. */
       descargarBlob(
         combinado.blob,
         combinado.nombreArchivo
       );
 
       setStatus(
-        "El PDF con las fotografías se descargó. Compártelo desde Descargas/Archivos."
+        "PDF con fotografías preparado y descargado. Ahora pulsa «Abrir PDF para compartir» y elige WhatsApp desde el visor."
       );
 
       return;
@@ -3486,6 +3522,8 @@
     photosPdfCache = [];
     photosPdfPreparing = false;
 
+    limpiarPDFAndroidPreparado();
+
     renderPhotos();
     showAudio(null);
 
@@ -3670,6 +3708,8 @@
           photosPdfCache = [];
           photosPdfPreparing = false;
 
+          limpiarPDFAndroidPreparado();
+
           fotos.value =
             "";
 
@@ -3710,6 +3750,13 @@
       );
 
 
+    el("abrirPDFAndroidBtn")
+      .addEventListener(
+        "click",
+        abrirPDFAndroid
+      );
+
+
     el("cerrar")
       .addEventListener(
         "click",
@@ -3726,7 +3773,10 @@
 
     window.addEventListener(
       "beforeunload",
-      stopTracks
+      () => {
+        stopTracks();
+        limpiarPDFAndroidPreparado();
+      }
     );
   }
 
