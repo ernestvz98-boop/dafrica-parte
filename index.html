@@ -288,6 +288,7 @@
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 
 <body>
@@ -296,7 +297,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v1.2</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v1.3</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -2477,6 +2478,70 @@
   }
 
 
+  async function crearZipAndroid(
+    resultado
+  ){
+
+    if(
+      typeof JSZip ===
+        "undefined"
+    ){
+
+      throw new Error(
+        "JSZip no está disponible."
+      );
+    }
+
+    const zip =
+      new JSZip();
+
+    /* Añadimos el PDF */
+    zip.file(
+      resultado.nombreArchivo,
+      resultado.blob
+    );
+
+    /* Añadimos las fotografías originales */
+    photosData.forEach(
+      (foto, indice) => {
+
+        const nombreFoto =
+          foto.name ||
+          `Foto_${String(indice + 1).padStart(2, "0")}.jpg`;
+
+        zip.file(
+          nombreFoto,
+          foto.blob
+        );
+      }
+    );
+
+    /* STORE evita comprimir las fotos otra vez.
+       Es mucho más rápido en móviles. */
+    const zipBlob =
+      await zip.generateAsync({
+        type:"blob",
+        compression:"STORE"
+      });
+
+    const nombreObra =
+      sanitizarNombre(
+        obra.value
+      );
+
+    const nombreZip =
+      `${fecha.value}_Parte_${nombreObra}_ADJUNTOS.zip`;
+
+    return new File(
+      [zipBlob],
+      nombreZip,
+      {
+        type:"application/zip"
+      }
+    );
+  }
+
+
   async function compartirPDF(
     tipo
   ){
@@ -2515,6 +2580,96 @@
 
     const esIOS =
       /iPhone|iPad|iPod/i.test(ua);
+
+
+    /* ==========================================
+       ANDROID + WHATSAPP
+       Creamos UN SOLO ZIP con:
+       - PDF
+       - todas las fotografías
+
+       WhatsApp recibe así un único documento
+       y no puede ignorar las fotos por mezclar
+       tipos de archivo diferentes.
+    ========================================== */
+
+    if(
+      esAndroid &&
+      tipo === "whatsapp"
+    ){
+
+      try{
+
+        setStatus(
+          "Preparando PDF y fotografías en un único archivo ZIP…"
+        );
+
+        const archivoZIP =
+          await crearZipAndroid(
+            resultado
+          );
+
+        if(shareDisponible){
+
+          try{
+
+            await navigator.share({
+              files:[archivoZIP]
+            });
+
+            setStatus(
+              "ZIP con PDF y fotografías compartido correctamente."
+            );
+
+            return;
+
+          }catch(error){
+
+            if(
+              error &&
+              error.name ===
+                "AbortError"
+            ){
+
+              setStatus(
+                "Compartir cancelado."
+              );
+
+              return;
+            }
+
+            console.warn(
+              "Android no pudo compartir el ZIP:",
+              error
+            );
+          }
+        }
+
+        /* Si Web Share no acepta ZIP,
+           lo descargamos como respaldo. */
+        descargarBlob(
+          archivoZIP,
+          archivoZIP.name
+        );
+
+        setStatus(
+          "El ZIP con el PDF y las fotografías se descargó. Compártelo desde Descargas/Archivos."
+        );
+
+        return;
+
+      }catch(error){
+
+        console.error(
+          "No se pudo crear el ZIP:",
+          error
+        );
+
+        setStatus(
+          "No se pudo crear el ZIP. Se intentará el método normal…"
+        );
+      }
+    }
 
 
     /* Texto corto para Android.
