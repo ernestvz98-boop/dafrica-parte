@@ -296,7 +296,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v1.2</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v1.4</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -546,6 +546,11 @@
   let audioObjectUrl = null;
 
   let photosData = [];
+
+  /* Copias ligeras de las fotos para el PDF único de Android.
+     Se preparan al seleccionar las fotos, no al pulsar WhatsApp. */
+  let photosPdfCache = [];
+  let photosPdfPreparing = false;
 
   /* El logo se carga con antelación para que al pulsar
      "Compartir" Safari no pierda el gesto del usuario. */
@@ -893,6 +898,18 @@
 
     renderPhotos();
     showAudio(audioBlob);
+
+    /* Preparamos las fotos recuperadas en segundo plano. */
+    prepararFotosPdfCache(
+      false
+    ).catch(
+      error => {
+        console.warn(
+          "No se pudieron preparar las fotos recuperadas:",
+          error
+        );
+      }
+    );
 
     setStatus(
       "Borrador anterior recuperado."
@@ -1466,6 +1483,185 @@
      FOTOGRAFÍAS
   ====================================================== */
 
+  function prepararFotoLigeraPDF(
+    item
+  ){
+
+    return new Promise(
+      resolve => {
+
+        const url =
+          URL.createObjectURL(
+            item.blob
+          );
+
+        const img =
+          new Image();
+
+        img.onload =
+          () => {
+
+            try{
+
+              const maxLado =
+                1280;
+
+              const escala =
+                Math.min(
+                  1,
+                  maxLado /
+                  Math.max(
+                    img.width,
+                    img.height
+                  )
+                );
+
+              const width =
+                Math.max(
+                  1,
+                  Math.round(
+                    img.width *
+                    escala
+                  )
+                );
+
+              const height =
+                Math.max(
+                  1,
+                  Math.round(
+                    img.height *
+                    escala
+                  )
+                );
+
+              const canvas =
+                document.createElement(
+                  "canvas"
+                );
+
+              canvas.width =
+                width;
+
+              canvas.height =
+                height;
+
+              const ctx =
+                canvas.getContext(
+                  "2d"
+                );
+
+              ctx.drawImage(
+                img,
+                0,
+                0,
+                width,
+                height
+              );
+
+              const dataUrl =
+                canvas.toDataURL(
+                  "image/jpeg",
+                  0.68
+                );
+
+              URL.revokeObjectURL(
+                url
+              );
+
+              resolve({
+                dataUrl,
+                width,
+                height,
+                name:
+                  item.name ||
+                  "Fotografía"
+              });
+
+            }catch(error){
+
+              console.warn(
+                "No se pudo preparar una fotografía para PDF:",
+                error
+              );
+
+              URL.revokeObjectURL(
+                url
+              );
+
+              resolve(null);
+            }
+          };
+
+        img.onerror =
+          () => {
+
+            URL.revokeObjectURL(
+              url
+            );
+
+            resolve(null);
+          };
+
+        img.src =
+          url;
+      }
+    );
+  }
+
+
+  async function prepararFotosPdfCache(
+    mostrarEstado = true
+  ){
+
+    photosPdfPreparing =
+      true;
+
+    photosPdfCache =
+      [];
+
+    if(
+      photosData.length === 0
+    ){
+
+      photosPdfPreparing =
+        false;
+
+      return;
+    }
+
+    if(mostrarEstado){
+
+      setStatus(
+        "Preparando fotografías para compartir en Android…"
+      );
+    }
+
+    for(
+      const item of photosData
+    ){
+
+      const preparada =
+        await prepararFotoLigeraPDF(
+          item
+        );
+
+      photosPdfCache.push(
+        preparada
+      );
+    }
+
+    photosPdfPreparing =
+      false;
+
+    if(mostrarEstado){
+
+      setStatus(
+        "Fotografías listas para compartir."
+      );
+    }
+  }
+
+
   function renderPhotos(){
 
     photoList.innerHTML =
@@ -1616,8 +1812,12 @@
 
     renderPhotos();
 
+    await prepararFotosPdfCache(
+      true
+    );
+
     await saveDraft(
-      "Fotografías guardadas en el borrador."
+      "Fotografías guardadas y listas para compartir."
     );
   }
 
@@ -2477,6 +2677,273 @@
   }
 
 
+  function generarPDFAndroidConFotos(){
+
+    if(!obra.value){
+
+      setStatus(
+        "Selecciona una obra antes de compartir."
+      );
+
+      return null;
+    }
+
+    if(!fecha.value){
+
+      setStatus(
+        "Indica la fecha del parte."
+      );
+
+      return null;
+    }
+
+    if(
+      !encargado.value.trim()
+    ){
+
+      setStatus(
+        "Indica el nombre del encargado."
+      );
+
+      return null;
+    }
+
+    try{
+
+      const {
+        jsPDF
+      } = window.jspdf;
+
+      const doc =
+        new jsPDF();
+
+      if(logoPDFCache){
+
+        try{
+
+          doc.addImage(
+            logoPDFCache,
+            "PNG",
+            20,
+            12,
+            35,
+            35
+          );
+
+        }catch(error){
+
+          console.warn(
+            "No se pudo insertar el logo:",
+            error
+          );
+        }
+      }
+
+      doc.setFontSize(18);
+      doc.text(
+        "DAFRICA BIERZO",
+        65,
+        22
+      );
+
+      doc.setFontSize(15);
+      doc.text(
+        "PARTE DIARIO DE OBRA",
+        65,
+        32
+      );
+
+      doc.setFontSize(11);
+
+      doc.text(
+        `Obra: ${obra.value}`,
+        20,
+        58
+      );
+
+      doc.text(
+        `Fecha: ${fecha.value}`,
+        20,
+        66
+      );
+
+      doc.text(
+        `Encargado: ${encargado.value.trim()}`,
+        20,
+        74
+      );
+
+      doc.line(
+        20,
+        81,
+        190,
+        81
+      );
+
+      doc.setFontSize(12);
+      doc.text(
+        "Información del parte",
+        20,
+        93
+      );
+
+      doc.setFontSize(10);
+
+      const textoParte =
+        notas.value.trim() ||
+        "Sin información redactada.";
+
+      const lineas =
+        doc.splitTextToSize(
+          textoParte,
+          170
+        );
+
+      let y =
+        103;
+
+      for(
+        const linea of lineas
+      ){
+
+        if(y > 270){
+
+          doc.addPage();
+          y = 25;
+        }
+
+        doc.text(
+          linea,
+          20,
+          y
+        );
+
+        y += 5;
+      }
+
+
+      /* Registro fotográfico comprimido */
+      if(
+        photosData.length > 0
+      ){
+
+        doc.addPage();
+
+        doc.setFontSize(14);
+        doc.text(
+          "REGISTRO FOTOGRÁFICO",
+          20,
+          20
+        );
+
+        let fotoY =
+          30;
+
+        let numero =
+          1;
+
+        photosPdfCache.forEach(
+          foto => {
+
+            if(!foto){
+              return;
+            }
+
+            const maxW =
+              170;
+
+            const maxH =
+              105;
+
+            const escala =
+              Math.min(
+                maxW /
+                  foto.width,
+                maxH /
+                  foto.height
+              );
+
+            const w =
+              foto.width *
+              escala;
+
+            const h =
+              foto.height *
+              escala;
+
+            if(
+              fotoY + h + 14 >
+              285
+            ){
+
+              doc.addPage();
+
+              fotoY =
+                20;
+            }
+
+            doc.setFontSize(9);
+
+            doc.text(
+              `Foto ${numero}`,
+              20,
+              fotoY
+            );
+
+            fotoY +=
+              4;
+
+            doc.addImage(
+              foto.dataUrl,
+              "JPEG",
+              20,
+              fotoY,
+              w,
+              h,
+              undefined,
+              "FAST"
+            );
+
+            fotoY +=
+              h + 10;
+
+            numero++;
+          }
+        );
+      }
+
+      const nombreObra =
+        sanitizarNombre(
+          obra.value
+        );
+
+      const nombreArchivo =
+        `${fecha.value}_Parte_${nombreObra}_CON_FOTOS.pdf`;
+
+      return {
+        blob:
+          doc.output(
+            "blob"
+          ),
+        nombreArchivo
+      };
+
+    }catch(error){
+
+      console.error(
+        "Error creando PDF Android con fotos:",
+        error
+      );
+
+      setStatus(
+        "No se pudo crear el PDF con fotografías."
+      );
+
+      return null;
+    }
+  }
+
+
   async function compartirPDF(
     tipo
   ){
@@ -2515,6 +2982,133 @@
 
     const esIOS =
       /iPhone|iPad|iPod/i.test(ua);
+
+
+    /* ==========================================
+       ANDROID + WHATSAPP
+
+       En Android compartimos UN SOLO PDF:
+       - parte
+       - transcripción
+       - fotografías comprimidas
+
+       PDF es un tipo de archivo ampliamente
+       compatible con Web Share y WhatsApp.
+    ========================================== */
+
+    if(
+      esAndroid &&
+      tipo === "whatsapp"
+    ){
+
+      if(
+        photosPdfPreparing
+      ){
+
+        setStatus(
+          "Las fotografías todavía se están preparando. Espera unos segundos y vuelve a pulsar WhatsApp."
+        );
+
+        return;
+      }
+
+      if(
+        photosData.length > 0 &&
+        photosPdfCache.length !==
+          photosData.length
+      ){
+
+        setStatus(
+          "Preparando fotografías. Espera unos segundos y vuelve a pulsar WhatsApp."
+        );
+
+        prepararFotosPdfCache(
+          false
+        );
+
+        return;
+      }
+
+      const combinado =
+        generarPDFAndroidConFotos();
+
+      if(!combinado){
+        return;
+      }
+
+      const archivoPDFAndroid =
+        new File(
+          [combinado.blob],
+          combinado.nombreArchivo,
+          {
+            type:
+              "application/pdf"
+          }
+        );
+
+      if(shareDisponible){
+
+        try{
+
+          if(
+            canShareDisponible &&
+            !navigator.canShare({
+              files:[
+                archivoPDFAndroid
+              ]
+            })
+          ){
+
+            throw new Error(
+              "El navegador no admite compartir PDF."
+            );
+          }
+
+          await navigator.share({
+            files:[
+              archivoPDFAndroid
+            ]
+          });
+
+          setStatus(
+            "Parte con fotografías compartido correctamente."
+          );
+
+          return;
+
+        }catch(error){
+
+          if(
+            error &&
+            error.name ===
+              "AbortError"
+          ){
+
+            setStatus(
+              "Compartir cancelado."
+            );
+
+            return;
+          }
+
+          console.warn(
+            "Android no pudo compartir el PDF con fotos:",
+            error
+          );
+        }
+      }
+
+      descargarBlob(
+        combinado.blob,
+        combinado.nombreArchivo
+      );
+
+      setStatus(
+        "El PDF con las fotografías se descargó. Compártelo desde Descargas/Archivos."
+      );
+
+      return;
+    }
 
 
     /* Texto corto para Android.
@@ -2889,6 +3483,8 @@
 
     audioBlob = null;
     photosData = [];
+    photosPdfCache = [];
+    photosPdfPreparing = false;
 
     renderPhotos();
     showAudio(null);
@@ -3071,6 +3667,8 @@
         async () => {
 
           photosData = [];
+          photosPdfCache = [];
+          photosPdfPreparing = false;
 
           fotos.value =
             "";
