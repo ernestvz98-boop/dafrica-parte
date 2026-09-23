@@ -443,7 +443,7 @@
 
       <div class="actions">
         <button id="correoBtn" class="primary" type="button">
-          📧 Enviar por correo
+          📧 Enviar correo automático
         </button>
 
         <button id="whatsappBtn" class="secondary" type="button">
@@ -3395,11 +3395,132 @@
   }
 
 
+  async function enviarParteCorreoAutomatico(){
+
+    const botonCorreo =
+      el("correoBtn");
+
+    try{
+
+      botonCorreo.disabled =
+        true;
+
+      setStatus(
+        "Generando PDF y preparando el correo…"
+      );
+
+      const resultado =
+        await generarPDF(
+          false
+        );
+
+      if(!resultado){
+        return;
+      }
+
+      const formData =
+        new FormData();
+
+      formData.append(
+        "pdf",
+        resultado.blob,
+        resultado.nombreArchivo
+      );
+
+      photosData.forEach(
+        (foto, indice) => {
+
+          formData.append(
+            "fotos",
+            foto.blob,
+            foto.name ||
+              `Foto_${indice + 1}.jpg`
+          );
+        }
+      );
+
+      formData.append(
+        "obra",
+        obra.value
+      );
+
+      formData.append(
+        "fecha",
+        fecha.value
+      );
+
+      formData.append(
+        "encargado",
+        encargado.value.trim()
+      );
+
+      formData.append(
+        "notas",
+        notas.value.trim()
+      );
+
+      setStatus(
+        "Enviando parte por correo…"
+      );
+
+      const respuesta =
+        await fetch(
+          `${BACKEND_URL}/enviar-parte`,
+          {
+            method:"POST",
+            body:formData
+          }
+        );
+
+      let datos = {};
+
+      try{
+        datos =
+          await respuesta.json();
+      }catch{
+        datos = {};
+      }
+
+      if(!respuesta.ok){
+
+        throw new Error(
+          datos.mensaje ||
+          `Error HTTP ${respuesta.status}`
+        );
+      }
+
+      setStatus(
+        `✅ Parte enviado por correo correctamente${datos.destinatarios ? ` a ${datos.destinatarios}` : ""}.`
+      );
+
+    }catch(error){
+
+      console.error(
+        "Error en el envío automático:",
+        error
+      );
+
+      setStatus(
+        "No se pudo enviar automáticamente (" +
+        error.message +
+        "). Probando el método de respaldo…"
+      );
+
+      await compartirPDF(
+        "correo"
+      );
+
+    }finally{
+
+      botonCorreo.disabled =
+        false;
+    }
+  }
+
+
   async function compartirParteCorreo(){
 
-    await compartirPDF(
-      "correo"
-    );
+    await enviarParteCorreoAutomatico();
   }
 
 
