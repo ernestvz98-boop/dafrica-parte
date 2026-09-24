@@ -296,7 +296,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v1.9</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v2.0</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -3727,11 +3727,83 @@
       return;
     }
 
-    estado.value =
-      "Cerrado";
+    const confirmar =
+      confirm(
+        "¿Cerrar este parte? Al cerrarlo se borrarán del formulario los datos, el audio y las fotografías para empezar un parte nuevo."
+      );
 
-    await saveDraft(
-      "Parte cerrado y guardado."
+    if(!confirmar){
+      return;
+    }
+
+    /* Evita que un guardado automático pendiente vuelva a crear
+       el borrador justo después de eliminarlo. */
+    clearTimeout(
+      autoTimer
+    );
+
+    stopTracks();
+
+    if(
+      mediaRecorder &&
+      mediaRecorder.state !==
+        "inactive"
+    ){
+
+      try{
+        mediaRecorder.onstop = null;
+        mediaRecorder.stop();
+      }catch{}
+    }
+
+    await deleteDraft();
+
+    revokeAudioUrl();
+
+    /* Formulario completamente nuevo */
+    obra.value = "";
+    fecha.value = "";
+    encargado.value = "";
+    estado.value =
+      "Borrador";
+    notas.value = "";
+
+    fotos.value = "";
+    audioUpload.value = "";
+
+    audioBlob = null;
+    chunks = [];
+    photosData = [];
+    photosPdfCache = [];
+    photosPdfPreparing = false;
+
+    limpiarPDFAndroidPreparado();
+
+    renderPhotos();
+    showAudio(null);
+
+    recordBtn.disabled =
+      false;
+    stopBtn.disabled =
+      true;
+
+    recordingState
+      .classList.add(
+        "hidden"
+      );
+
+    if(timerInterval){
+      clearInterval(
+        timerInterval
+      );
+      timerInterval = null;
+    }
+
+    seconds = 0;
+    updateTimer();
+
+    setStatus(
+      "✅ Parte cerrado. Formulario limpio y listo para crear un parte nuevo."
     );
   }
 
