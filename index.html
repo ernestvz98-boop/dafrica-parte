@@ -296,7 +296,7 @@
   <div class="brand">
     <img src="dafrica-logo.png.png" alt="DAFRICA Bierzo">
     <div>
-      <h1>DAFRICA Parte <span class="badge">v1.5</span></h1>
+      <h1>DAFRICA Parte <span class="badge">v1.9</span></h1>
       <p class="sub">Parte diario de obra · móvil y ordenador</p>
     </div>
   </div>
@@ -443,7 +443,7 @@
 
       <div class="actions">
         <button id="correoBtn" class="primary" type="button">
-          📧 Enviar por correo
+          📧 Enviar correo automático
         </button>
 
         <button id="whatsappBtn" class="secondary" type="button">
@@ -3395,11 +3395,270 @@
   }
 
 
+  async function blobABase64(blob){
+
+    return await new Promise(
+      (resolve, reject) => {
+
+        const reader =
+          new FileReader();
+
+        reader.onload =
+          () => {
+
+            const valor =
+              String(reader.result || "");
+
+            const coma =
+              valor.indexOf(",");
+
+            resolve(
+              coma >= 0
+                ? valor.slice(coma + 1)
+                : valor
+            );
+          };
+
+        reader.onerror =
+          () => reject(
+            new Error(
+              "No se pudo preparar un archivo para el envío."
+            )
+          );
+
+        reader.readAsDataURL(blob);
+      }
+    );
+  }
+
+
+  async function enviarParteCorreoAutomatico(){
+
+    const botonCorreo =
+      el("correoBtn");
+
+    try{
+
+      botonCorreo.disabled =
+        true;
+
+      setStatus(
+        "Generando PDF y preparando el correo…"
+      );
+
+      const resultado =
+        await generarPDF(false);
+
+      if(!resultado){
+        return;
+      }
+
+      if(
+        !resultado.blob ||
+        resultado.blob.size === 0
+      ){
+        throw new Error(
+          "El PDF se generó vacío."
+        );
+      }
+
+      const ua =
+        navigator.userAgent || "";
+
+      const esIOS =
+        /iPhone|iPad|iPod/i.test(ua);
+
+      setStatus(
+        esIOS
+          ? "Preparando archivos para envío seguro desde iPhone…"
+          : "Preparando archivos para correo…"
+      );
+
+      let respuesta;
+
+      /* ==================================================
+         iPHONE / iPAD
+         Safari puede fallar con multipart/FormData.
+         En iOS enviamos TODO como JSON + Base64 por HTTPS.
+      ================================================== */
+      if(esIOS){
+
+        const pdfBase64 =
+          await blobABase64(
+            resultado.blob
+          );
+
+        const fotosJson = [];
+
+        for(
+          let i = 0;
+          i < photosData.length;
+          i++
+        ){
+
+          const foto =
+            photosData[i];
+
+          fotosJson.push({
+            name:
+              foto.name ||
+              `Foto_${i + 1}.jpg`,
+            type:
+              foto.type ||
+              foto.blob.type ||
+              "image/jpeg",
+            content:
+              await blobABase64(
+                foto.blob
+              )
+          });
+        }
+
+        setStatus(
+          "Enviando parte por correo…"
+        );
+
+        respuesta =
+          await fetch(
+            `${BACKEND_URL}/enviar-parte`,
+            {
+              method:"POST",
+              headers:{
+                "Content-Type":"application/json"
+              },
+              body:JSON.stringify({
+                obra:
+                  obra.value,
+                fecha:
+                  fecha.value,
+                encargado:
+                  encargado.value.trim(),
+                notas:
+                  notas.value.trim(),
+                pdf_nombre:
+                  resultado.nombreArchivo,
+                pdf_base64:
+                  pdfBase64,
+                fotos:
+                  fotosJson
+              })
+            }
+          );
+
+      }else{
+
+        /* PC / Android: mantenemos multipart,
+           que ya está funcionando correctamente. */
+        const formData =
+          new FormData();
+
+        const archivoPDF =
+          new File(
+            [resultado.blob],
+            resultado.nombreArchivo,
+            {
+              type:"application/pdf"
+            }
+          );
+
+        formData.append(
+          "pdf",
+          archivoPDF
+        );
+
+        photosData.forEach(
+          (foto, indice) => {
+
+            formData.append(
+              "fotos",
+              foto.blob,
+              foto.name ||
+                `Foto_${indice + 1}.jpg`
+            );
+          }
+        );
+
+        formData.append(
+          "obra",
+          obra.value
+        );
+
+        formData.append(
+          "fecha",
+          fecha.value
+        );
+
+        formData.append(
+          "encargado",
+          encargado.value.trim()
+        );
+
+        formData.append(
+          "notas",
+          notas.value.trim()
+        );
+
+        setStatus(
+          "Enviando parte por correo…"
+        );
+
+        respuesta =
+          await fetch(
+            `${BACKEND_URL}/enviar-parte`,
+            {
+              method:"POST",
+              body:formData
+            }
+          );
+      }
+
+      let datos = {};
+
+      try{
+        datos =
+          await respuesta.json();
+      }catch{
+        datos = {};
+      }
+
+      if(!respuesta.ok){
+
+        throw new Error(
+          datos.detalle ||
+          datos.mensaje ||
+          `Error HTTP ${respuesta.status}`
+        );
+      }
+
+      setStatus(
+        `✅ Parte enviado por correo correctamente${datos.destinatarios ? ` a ${datos.destinatarios}` : ""}.`
+      );
+
+    }catch(error){
+
+      console.error(
+        "Error en el envío automático:",
+        error
+      );
+
+      /* IMPORTANTE:
+         Ya no abrimos automáticamente el menú Compartir.
+         Así podremos ver el error real en pantalla. */
+      setStatus(
+        "❌ No se pudo enviar automáticamente: " +
+        error.message
+      );
+
+    }finally{
+
+      botonCorreo.disabled =
+        false;
+    }
+  }
+
   async function compartirParteCorreo(){
 
-    await compartirPDF(
-      "correo"
-    );
+    await enviarParteCorreoAutomatico();
   }
 
 
@@ -3749,8 +4008,6 @@
         compartirParteWhatsApp
       );
 
-
-      
 
     el("abrirPDFAndroidBtn")
       .addEventListener(
