@@ -3421,10 +3421,27 @@
       const formData =
         new FormData();
 
+      if(
+        !resultado.blob ||
+        resultado.blob.size === 0
+      ){
+        throw new Error(
+          "El PDF se generó vacío."
+        );
+      }
+
+      const archivoPDF =
+        new File(
+          [resultado.blob],
+          resultado.nombreArchivo,
+          {
+            type: "application/pdf"
+          }
+        );
+
       formData.append(
         "pdf",
-        resultado.blob,
-        resultado.nombreArchivo
+        archivoPDF
       );
 
       photosData.forEach(
