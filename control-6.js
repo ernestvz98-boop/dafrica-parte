@@ -14,7 +14,7 @@ async function renderCostes(){
 async function renderHistorial(){
   setTopbar("Historial","Auditoría general");
   loading("Cargando auditoría…");
-  const rows = await sb("/rest/v1/auditoria_sistema?select=*&order=created_at.desc&limit=100").catch(()=>[]);
+  const rows = await sb("/rest/v1/auditoria_sistema?select=*&order=creado_en.desc&limit=100").catch(()=>[]);
   if(!(rows||[]).length){
     setContent('<div class="card"><h2>Historial</h2><div class="muted">No hay registros disponibles o tu política de acceso no permite consultarlos.</div></div>');
     return;
