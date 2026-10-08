@@ -105,7 +105,7 @@ function renderLocatorForm(machines,vehicles){
             <label>Máquina *</label>
             <select id="locMachine"><option value="">Seleccionar…</option>${machineOptions}</select>
           </div>
-          <div id="locVehicleWrap" style="display:none">
+          <div id="locVehicleWrap" hidden>
             <label>Vehículo *</label>
             <select id="locVehicle"><option value="">Seleccionar…</option>${vehicleOptions}</select>
           </div>
@@ -129,11 +129,18 @@ function renderLocatorForm(machines,vehicles){
 
   $("closeLocatorForm")?.addEventListener("click",()=>{ $("locatorFormHost").innerHTML=""; });
 
-  $("locTargetType")?.addEventListener("change",()=>{
+  const syncLocatorTarget = ()=>{
     const isMachine = $("locTargetType").value === "MAQUINARIA";
-    $("locMachineWrap").style.display = isMachine ? "" : "none";
-    $("locVehicleWrap").style.display = isMachine ? "none" : "";
-  });
+    $("locMachineWrap").hidden = !isMachine;
+    $("locVehicleWrap").hidden = isMachine;
+    if(isMachine){
+      $("locVehicle").value = "";
+    }else{
+      $("locMachine").value = "";
+    }
+  };
+  $("locTargetType")?.addEventListener("change", syncLocatorTarget);
+  syncLocatorTarget();
 
   $("locatorForm")?.addEventListener("submit", async e=>{
     e.preventDefault();
