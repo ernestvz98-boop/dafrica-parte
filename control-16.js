@@ -173,9 +173,11 @@ renderGeofenceForm = function(works){
   });
 
   $("refreshGeoMap")?.addEventListener("click",()=>{
-    const la=Number($("geoLat").value);
-    const lo=Number($("geoLon").value);
-    if(!Number.isFinite(la)||!Number.isFinite(lo)){
+    const rawLa=$("geoLat").value.trim();
+    const rawLo=$("geoLon").value.trim();
+    const la=Number(rawLa);
+    const lo=Number(rawLo);
+    if(!rawLa || !rawLo || !Number.isFinite(la)||!Number.isFinite(lo)){
       $("geoStatus").textContent="Introduce latitud y longitud válidas.";
       $("geoStatus").className="statusline error";
       return;
@@ -230,10 +232,12 @@ renderGeofenceForm = function(works){
   $("geoForm")?.addEventListener("submit",async e=>{
     e.preventDefault();
     const s=$("geoStatus");
-    const lat=Number($("geoLat").value);
-    const lon=Number($("geoLon").value);
+    const rawLat=$("geoLat").value.trim();
+    const rawLon=$("geoLon").value.trim();
+    const lat=Number(rawLat);
+    const lon=Number(rawLon);
 
-    if(!Number.isFinite(lat) || !Number.isFinite(lon)){
+    if(!rawLat || !rawLon || !Number.isFinite(lat) || !Number.isFinite(lon)){
       s.textContent="Busca una dirección o introduce coordenadas válidas antes de guardar.";
       s.className="statusline error";
       return;
