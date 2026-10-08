@@ -3,6 +3,24 @@
 const __renderMachinesBase = renderMachines;
 const __enterAppBase = enterApp;
 const __navigateBase = navigate;
+const __renderNavBase = renderNav;
+
+renderNav = function(){
+  __renderNavBase();
+  if(has("partes.crear") || has("partes.editar")){
+    const nav = $("nav");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "➕  Nuevo parte";
+    btn.addEventListener("click",()=>{
+      location.href = "./?mod=partes&nuevo=1";
+    });
+    const partes = nav.querySelector('button[data-module="partes"]');
+    if(partes && partes.nextSibling){ nav.insertBefore(btn, partes.nextSibling); }
+    else if(partes){ nav.appendChild(btn); }
+    else { nav.appendChild(btn); }
+  }
+};
 
 navigate = function(id, options={}){
   const mod = modules.find(m => m.id === id);
