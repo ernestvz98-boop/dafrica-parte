@@ -69,6 +69,7 @@ async function renderObras(){
     <td>${statusBadge(o.estado || "—")}</td><td>${esc(o.responsable || "—")}</td><td>${esc(o.fecha_inicio || "—")}</td>
   </tr>`).join("");
   setContent(`<div class="section-head"><div><h2>Obras</h2><p>${(rows||[]).length} obra(s) activa(s).</p></div></div><div class="table-wrap"><table><thead><tr><th>Código</th><th>Obra</th><th>Cliente</th><th>Ubicación</th><th>Estado</th><th>Responsable</th><th>Inicio</th></tr></thead><tbody>${html || '<tr><td colspan="7" class="empty">Sin obras activas.</td></tr>'}</tbody></table></div>`);
+  renderUbicalyKm(true);
 }
 
 async function renderVehiculos(){
