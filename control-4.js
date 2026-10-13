@@ -72,14 +72,8 @@ async function renderObras(){
 }
 
 async function renderVehiculos(){
-  setTopbar("Vehículos","Flota y asignaciones");
-  loading("Cargando vehículos…");
-  const rows = await sb("/rest/v1/vehiculos?activo=eq.true&select=id,legacy_id,referencia,matricula,marca,modelo,combustible,kilometraje,estado,responsable,ubicacion,beacon_id,stel_id&order=legacy_id.asc");
-  const html = (rows||[]).map(v=>`<tr>
-    <td><b>${esc(v.legacy_id || v.referencia || "—")}</b></td><td>${esc(v.matricula || "—")}</td><td>${esc([v.marca,v.modelo].filter(Boolean).join(" ") || "—")}</td>
-    <td>${esc(v.combustible || "—")}</td><td>${esc(v.kilometraje ?? "—")}</td><td>${statusBadge(v.estado || "—")}</td><td>${esc(v.responsable || "—")}</td><td>${esc(v.ubicacion || "—")}</td>
-  </tr>`).join("");
-  setContent(`<div class="section-head"><div><h2>Vehículos</h2><p>${(rows||[]).length} vehículo(s) activo(s).</p></div></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Matrícula</th><th>Marca / modelo</th><th>Combustible</th><th>Km</th><th>Estado</th><th>Responsable</th><th>Ubicación</th></tr></thead><tbody>${html || '<tr><td colspan="8" class="empty">Sin vehículos.</td></tr>'}</tbody></table></div>`);
+  setTopbar("Vehículos", "Control económico y kilometraje de la flota");
+  loading("Preparando informe mensual…");
+  setContent('<div class="section-head"><div><h2>Control mensual de vehículos</h2><p>Kilómetros y recorridos obtenidos de Ubicaly. El combustible de STEL Order se añadirá cuando esté integrado.</p></div></div>');
   renderUbicalyKm(true);
 }
-
