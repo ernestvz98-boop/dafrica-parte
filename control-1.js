@@ -26,7 +26,6 @@ const modules = [
   {id:"partes", label:"Partes", icon:"📝", any:["partes.ver","partes.crear","partes.editar"]},
   {id:"obras", label:"Obras", icon:"🏗", permission:"obras.ver"},
   {id:"vehiculos", label:"Vehículos", icon:"🚚", permission:"vehiculos.ver"},
-  {id:"kilometraje", label:"Kilometraje mensual", icon:"📊", permission:"vehiculos.ver"},
   {id:"trabajadores", label:"Trabajadores", icon:"👷", permission:"trabajadores.ver"},
   {id:"epis", label:"EPIs", icon:"🦺", permission:"epis.ver"},
   {id:"localizacion", label:"Localización", icon:"⌖", permission:"localizacion.ver"},
@@ -272,7 +271,7 @@ async function renderModule(){
     case "partes": return renderPartes();
     case "obras": return renderObras();
     case "vehiculos": return renderVehiculos();
-    case "kilometraje": return renderUbicalyKm();
+    case "kilometraje": return renderVehiculos();
     case "trabajadores": return renderWorkers();
     case "epis": return renderEpis();
     case "localizacion": return renderLocalizacion();
