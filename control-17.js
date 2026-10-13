@@ -1,7 +1,7 @@
 "use strict";
 async function renderUbicalyKm(embedded=false){
   if(!embedded) setTopbar("Kilometraje mensual", "Datos de Ubicaly · sin duplicar GPS");
-  const now=new Date();const ym=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");
+  const now=new Date();const previous=new Date(now.getFullYear(),now.getMonth()-1,1);const ym=previous.getFullYear()+"-"+String(previous.getMonth()+1).padStart(2,"0");
   const markup = '<div class="card"><h2>Informe mensual de vehículos</h2><p class="muted">Consulta los recorridos existentes en Ubicaly. No se almacena el historial de posiciones.</p><div class="form-grid"><div><label>Mes</label><input type="month" id="ubMonth" value="'+ym+'"></div><div style="display:flex;align-items:end;gap:8px"><button class="btn" type="button" id="ubRun">Consultar flota</button><button class="btn secondary" type="button" id="ubCSV" disabled>Exportar CSV</button></div></div><div id="ubStatus" class="statusline muted" aria-live="polite"></div><div id="ubResults"></div></div>';
   if(embedded) $("content").insertAdjacentHTML("beforeend", markup);
   else setContent(markup);
@@ -28,4 +28,6 @@ async function renderUbicalyKm(embedded=false){
     }catch(e){stat.textContent="No se pudo consultar Ubicaly: "+(e.message||String(e));}
     finally{btn.disabled=false;}
   });
+  // Mostrar automáticamente el último mes cerrado al entrar en Vehículos.
+  $("ubRun").click();
 }
