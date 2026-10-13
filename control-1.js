@@ -29,7 +29,7 @@ const modules = [
   {id:"trabajadores", label:"Trabajadores", icon:"👷", permission:"trabajadores.ver"},
   {id:"epis", label:"EPIs", icon:"🦺", permission:"epis.ver"},
   {id:"localizacion", label:"Localización", icon:"⌖", permission:"localizacion.ver"},
-  {id:"costes", label:"Costes / Consumos", icon:"€", permission:"costes.ver"},
+  {id:"costes", label:"Costes / Consumos", icon:"€", permission:"costes.ver"},\n  {id:"albaranes-piloto", label:"Albaranes IA · piloto", icon:"▣", permission:"costes.ver"},
   {id:"historial", label:"Historial", icon:"🕘", permission:"auditoria.ver"},
   {id:"administracion", label:"Administración", icon:"🔐", any:["usuarios.ver","usuarios.gestionar","configuracion.gestionar"]}
 ];
@@ -275,7 +275,7 @@ async function renderModule(){
     case "trabajadores": return renderWorkers();
     case "epis": return renderEpis();
     case "localizacion": return renderLocalizacion();
-    case "costes": return renderCostes();
+    case "costes": return renderCostes();\n    case "albaranes-piloto": return renderAlbaranesPiloto();
     case "historial": return renderHistorial();
     case "administracion": return renderAdministracion();
     default: return renderHome();
