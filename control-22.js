@@ -109,7 +109,7 @@ function renderComprasLotePilot(){
    });
    const callAudit=async (doc,first,third=false)=>sb("/functions/v1/compras-verificar-documento",{
      method:"POST",headers:{"Content-Type":"application/json"},
-     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first,modo:third?"tercera":"segunda"})
+     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first,modo:third?"tercera":"segunda",ampliar:third&&(doc.lineas||[]).length>=7})
    });
    const auditReport=(result,label)=>{
      const stats=result?.estadisticas||{};
@@ -166,7 +166,7 @@ function renderComprasLotePilot(){
          if(third.estado==="DOBLE_COINCIDENCIA"&&third.auditoria_id){
            doc.__audit=third;
            doc.__reviewRows=new Set();
-           status.innerHTML='<b>Verificado: tres lecturas independientes coinciden.</b>'+
+           status.innerHTML='<b>Verificado: tres lecturas coinciden'+(third.ampliacion_automatica?' (con zoom automático por zonas)':'')+'.</b>'+
              '<p>Las tres lecturas coinciden, sin excepciones. Confirma el documento antes del registro; no tienes que marcar cada línea.</p>';
            refreshManualChecks(i,doc);
          }else{
@@ -216,7 +216,7 @@ function renderComprasLotePilot(){
            syncFields(i,doc);
            refreshManualChecks(i,doc);
            status.innerHTML='<b>Corrección automática contrastada:</b> la segunda y tercera lecturas coinciden.'+
-             '<p>DAFRICA ha propuesto '+esc(differences)+' corrección(es) de línea y comprobado PRY '+
+             '<p>DAFRICA ha propuesto '+esc(differences)+' corrección(es) de línea'+(third.ampliacion_automatica?' tras ampliar automáticamente el PDF por zonas':'')+' y comprobado PRY '+
              esc(doc.codigo_proyecto||"no identificado")+'. Marca únicamente las filas corregidas y confirma el documento antes de registrar.</p>'+
              auditReport(second,"Diferencias detectadas en lectura inicial");
          }else{
