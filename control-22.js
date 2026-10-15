@@ -34,12 +34,13 @@ function renderComprasLotePilot(){
    });
    if(!Array.isArray(output.documentos))throw Error("La IA no devolvió una lista verificable");
    s.textContent="Análisis de "+output.paginas_pdf+" página(s). "+output.documentos.length+" documento(s) propuesto(s). Revisa la separación.";
-   res.innerHTML='<div class="module-note sensitive-note"><b>Separación propuesta por IA:</b> los números de página y datos deben contrastarse con el PDF original. No se ha guardado el PDF ni se han creado pedidos.</div>'+
+   res.innerHTML='<div class="module-note sensitive-note"><b>LECTURA NO VERIFICADA:</b> la separación de páginas no valida los materiales. Es obligatoria una segunda lectura independiente y revisar manualmente CADA línea antes de permitir la importación de un albarán.</div>'+
     (output.advertencias||[]).map(x=>'<p class="error">'+esc(x)+'</p>').join("")+
     output.documentos.map((d,i)=>{
      const lines=Array.isArray(d.lineas)?d.lineas:[];
      const lineRows=lines.map((l,j)=>'<tr><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="referencia" aria-label="Referencia fila '+(j+1)+'" style="min-width:122px" value="'+esc(l.referencia??"")+'"></td><td>'+esc(l.descripcion||"—")+'</td>'+
-      '<td><input type="number" step="0.001" min="0.001" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="cantidad" aria-label="Cantidad fila '+(j+1)+'" style="min-width:90px;max-width:105px" value="'+esc(l.cantidad??"")+'"></td><td>'+esc(l.unidad||"—")+'</td><td>'+esc(l.precio_unitario===null?"Sin precio":l.precio_unitario)+'</td></tr>').join("");
+      '<td><input type="number" step="0.001" min="0.001" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="cantidad" aria-label="Cantidad fila '+(j+1)+'" style="min-width:90px;max-width:105px" value="'+esc(l.cantidad??"")+'"></td><td>'+esc(l.unidad||"—")+'</td><td>'+esc(l.precio_unitario===null?"Sin precio":l.precio_unitario)+'</td>'+
+      '<td><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="pcBatchLineChecked" style="width:auto" data-pc-doc="'+i+'" data-pc-row="'+j+'">Sí</label></td></tr>').join("");
      return '<div class="card" style="margin-top:12px"><h4>Documento '+(i+1)+' · '+esc(d.tipo)+' · '+esc(d.numero||"Número sin identificar")+'</h4>'+
       '<p><b>Página(s) del PDF:</b> '+esc((d.paginas||[]).join(", ")||"Revisar")+
       ' · <b>Proveedor:</b> '+esc(d.proveedor||"—")+
@@ -51,9 +52,12 @@ function renderComprasLotePilot(){
       (d.cantidades_sospechosas?'<div class="module-note sensitive-note"><b>Revisión obligatoria de cantidades:</b> la IA ha repetido la misma cifra en gran parte de las filas. Corrige los números con el PDF original antes de registrar entregas.</div>':'')+
       (d.numero_pedido_mencionado?'<p><b>Pedido citado:</b> '+esc(d.numero_pedido_mencionado)+'</p>':"")+
       (d.albaranes_mencionados?.length?'<p><b>Albaranes citados:</b> '+esc(d.albaranes_mencionados.join(", "))+'</p>':"")+
-      '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th></tr></thead><tbody>'+
-      (lineRows||'<tr><td colspan="5">Sin líneas detectadas.</td></tr>')+'</tbody></table></div>'+
+      '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th><th>Revisado en PDF</th></tr></thead><tbody>'+
+      (lineRows||'<tr><td colspan="6">Sin líneas detectadas.</td></tr>')+'</tbody></table></div>'+
       (d.dudas||[]).map(x=>'<p class="muted">• '+esc(x)+'</p>').join("")+
+      '<div class="module-note sensitive-note" id="pcBatchAuditStatus'+i+'"><b>Sin segunda lectura:</b> no se puede importar al pedido.</div>'+
+      (d.pdf_separado_b64?'<button type="button" class="btn secondary" data-pc-audit="'+i+'">Verificar este documento con segunda IA</button>':
+        '<p class="error">No existe un PDF separado fiable. La auditoría y la importación quedan bloqueadas.</p>')+
       (d.tipo==="ALBARAN"&&has("costes.editar")?'<div id="pcBatchMatch'+i+'" style="margin-top:12px"></div>':"")+
       (d.pdf_separado_b64?'<button class="btn secondary" type="button" data-pc-download="'+i+'">Descargar PDF separado</button>':"")+
       (d.tipo==="PEDIDO"&&has("costes.editar")?'<button class="btn secondary" type="button" data-pc-load-order="'+i+'">Cargar pedido en formulario para revisar</button>':"")+
@@ -63,6 +67,9 @@ function renderComprasLotePilot(){
    res.querySelectorAll(".pcBatchEdit").forEach(control=>control.addEventListener("change",()=>{
     const doc=output.documentos[Number(control.dataset.pcDoc)];
     if(!doc)return;
+    doc.__audit=null;
+    const status=$("pcBatchAuditStatus"+control.dataset.pcDoc);
+    if(status)status.innerHTML='<b>Verificación caducada:</b> has cambiado datos desde la última lectura. Vuelve a ejecutar la segunda IA.';
     const field=control.dataset.pcField;
     const row=Number(control.dataset.pcRow);
     const item=Number.isInteger(row)&&Array.isArray(doc.lineas)?doc.lineas[row]:null;
@@ -74,6 +81,53 @@ function renderComprasLotePilot(){
     if(field==="codigo_proyecto")doc.codigo_proyecto=control.value.trim().toUpperCase().replace(/\s+/g,"");
     const selected=$("pcBatchOrder"+control.dataset.pcDoc);
     if(selected&&selected.value)selected.dispatchEvent(new Event("change"));
+   }));
+   res.querySelectorAll(".pcBatchLineChecked").forEach(control=>control.addEventListener("change",()=>{
+    const sel=$("pcBatchOrder"+control.dataset.pcDoc);
+    if(sel?.value)sel.dispatchEvent(new Event("change"));
+   }));
+   res.querySelectorAll("[data-pc-audit]").forEach(btn=>btn.addEventListener("click",async()=>{
+    const i=Number(btn.dataset.pcAudit),doc=output.documentos[i],status=$("pcBatchAuditStatus"+i);
+    if(!doc?.pdf_separado_b64)return;
+    btn.disabled=true;doc.__audit=null;
+    status.innerHTML='<b>Segunda lectura independiente en curso…</b> Se cotejarán todas las líneas, cantidades, referencias y PRY.';
+    try{
+     const first={
+      tipo:doc.tipo,numero:doc.numero,proveedor:doc.proveedor,
+      fecha:doc.fecha,codigo_proyecto:doc.codigo_proyecto,
+      lineas:(doc.lineas||[]).map(x=>({
+       referencia:x.referencia,descripcion:x.descripcion,cantidad:x.cantidad,
+       unidad:x.unidad,precio_unitario:x.precio_unitario
+      }))
+     };
+     const audit=await sb("/functions/v1/compras-verificar-documento",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first})
+     });
+     doc.__audit=audit.estado==="DOBLE_COINCIDENCIA"?audit:null;
+     const summary=audit.estadisticas||{};
+     const report='<p><b>Líneas:</b> 1ª lectura '+esc(summary.lineas_primera??"?")+
+      ' · 2ª lectura '+esc(summary.lineas_segunda??"?")+' · diferencias '+esc(summary.lineas_diferentes??"?")+'</p>'+
+      (audit.diferencias||[]).map(x=>'<p class="error">• '+esc(x)+'</p>').join("")+
+      (audit.comparacion_lineas||[]).filter(x=>!x.coincide).map(x=>
+       '<p class="error">Fila '+esc(x.fila)+': ref. '+esc(x.referencia_primera)+
+       ' / '+esc(x.referencia_segunda)+', cantidad '+esc(x.cantidad_primera??"—")+
+       ' / '+esc(x.cantidad_segunda??"—")+" · "+esc((x.motivos||[]).join(", "))+'</p>').join("");
+     if(doc.__audit){
+      status.innerHTML='<b>Dos lecturas coinciden.</b> '+report+
+       '<p>IMPORTANTE: esto no garantiza exactitud. Comprueba visualmente todas las filas y marca cada casilla antes de registrar.</p>';
+     }else{
+      status.innerHTML='<b>VERIFICACIÓN BLOQUEADA:</b> las lecturas son diferentes o presentan dudas. Corrige según el PDF y repite la segunda lectura. Ninguna entrega puede importarse hasta resolverlo.'+report;
+     }
+    }catch(err){
+     doc.__audit=null;
+     status.innerHTML='<b>Segunda lectura fallida:</b> '+esc(err?.message||String(err))+
+      '<p>No se permite registrar el albarán sin verificar.</p>';
+    }finally{
+     btn.disabled=false;
+     const sel=$("pcBatchOrder"+i);
+     if(sel?.value)sel.dispatchEvent(new Event("change"));
+    }
    }));
    if(has("costes.editar"))await pcBindBatchDeliveryMatches(output.documentos);
    document.querySelectorAll("[data-pc-download]").forEach(el=>el.addEventListener("click",()=>{
@@ -145,6 +199,11 @@ async function pcBindBatchDeliveryMatches(documents){
    area.innerHTML="";if(!id)return;
    const order=orders.find(x=>x.id===id),validLines=lines.filter(x=>x.pedido_id===id);
    const problems=[],matched=[],used=new Set();
+   if(!d.__audit||d.__audit.estado!=="DOBLE_COINCIDENCIA")
+    problems.push("BLOQUEADO: pendiente de dos lecturas independientes coincidentes.");
+   const allLineChecks=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+i+'"]')];
+   if(allLineChecks.length!==(d.lineas||[]).length||allLineChecks.some(x=>!x.checked))
+    problems.push("Debes verificar visualmente y marcar cada línea del PDF (no basta una casilla general).");
    if(d.codigo_proyecto&&norm(order.codigo_proyecto)&&norm(d.codigo_proyecto)!==norm(order.codigo_proyecto))
     problems.push("El código PRY del PDF no coincide con el proyecto registrado en este pedido.");
    for(const item of (d.lineas||[])){
@@ -175,6 +234,13 @@ async function pcBindBatchDeliveryMatches(documents){
     'Registrar '+matched.length+' línea(s) como entrega en DAFRICA</button>';
    const button=$("pcBatchSave"+i);
    if(button)button.addEventListener("click",async()=>{
+    if(!d.__audit||d.__audit.estado!=="DOBLE_COINCIDENCIA"){
+     alert("Importación bloqueada: se requiere segunda lectura idéntica.");return;
+    }
+    const confirmations=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+i+'"]')];
+    if(confirmations.length!==(d.lineas||[]).length||confirmations.some(x=>!x.checked)){
+     alert("Falta confirmar visualmente alguna línea.");return;
+    }
     if(!$("pcBatchConfirm"+i).checked){alert("Confirma primero la revisión del albarán");return;}
     if(!confirm("Registrar "+matched.length+" líneas en el pedido "+order.numero+" desde el albarán "+d.numero+"? No se escribirá nada en STEL."))return;
     button.disabled=true;
