@@ -256,7 +256,7 @@ async function pcBindBatchDeliveryMatches(documents){
     try{
      await sb("/rest/v1/rpc/pedido_registrar_albaran_pdf",{
       method:"POST",body:JSON.stringify({
-       p_pedido_id:id,p_numero:String(d.numero).trim(),p_fecha:d.fecha,p_lineas:matched
+       p_pedido_id:id,p_numero:String(d.numero).trim(),p_fecha:d.fecha,p_lineas:matched,p_auditoria_id:d.__audit.auditoria_id
       })
      });
      pedidoActualId=id;
