@@ -41,6 +41,8 @@ function renderAlbaranVisionPilot(){
     const initialDate=validation.consistent===true?String(d.fecha||""):"";
     output.innerHTML=warning+diagnostics+
       '<h4>Datos extraídos · revisa y corrige</h4>'+
+      '<p class="muted"><b>Referencia STEL escrita a mano:</b> '+esc(d.codigo_proyecto_stel_literal||"No detectada")+'. El código debe comprobarse contra el catálogo de proyectos.</p>'+
+
       '<p class="muted">Fecha literal impresa: <b>'+esc(printDate)+'</b>. Interpretación IA: <b>'+esc(d.fecha||"sin identificar")+'</b>. Verifica el año antes de continuar.</p>'+
       '<div class="form-grid">'+
        editField("Proveedor","proveedor",d.proveedor)+
@@ -52,6 +54,8 @@ function renderAlbaranVisionPilot(){
        '<option value="COMPRA"'+(d.tipo_documento==="COMPRA"?" selected":"")+'>Compra</option>'+
        '<option value="ABONO"'+(d.tipo_documento==="ABONO"?" selected":"")+'>Abono</option></select></div>'+
        editField("Obra escrita en el papel","obra_texto",d.obra_texto)+
+       editField("Obra impresa por proveedor","obra_impresa",d.obra_impresa)+
+       editField("Código manuscrito proyecto STEL (PRY...)","codigo_proyecto_stel",d.codigo_proyecto_stel)+
        editField("Título sugerido","titulo_sugerido",d.titulo_sugerido)+
       '</div>'+
       '<h4>Materiales ('+lines.length+') · revisa descripciones y cantidades</h4>'+
@@ -98,12 +102,20 @@ function renderAlbaranVisionPilot(){
       if(!revisedLines.length||revisedLines.some(x=>!x.referencia||!x.descripcion||x.cantidad===null||!Number.isFinite(x.cantidad)||x.cantidad<=0)){
         info.textContent="Revisa referencias, descripciones y cantidades de todas las líneas.";return;
       }
+      const projectCode=rvalue("codigo_proyecto_stel").toUpperCase().replace(/\\s+/g,"");
+      if(projectCode&&!/^PRY[0-9]{4,8}$/.test(projectCode)){
+        info.textContent="El código STEL no tiene el formato PRY + números. Comprueba la escritura del documento.";return;
+      }
       const proposedTitle=rvalue("titulo_sugerido");
       const reviewed={
         proveedor:rvalue("proveedor"),numero_albaran:rvalue("numero_albaran"),fecha:date,
         fecha_literal:String(d.fecha_literal||""),tipo_documento:type,
-        obra_texto:rvalue("obra_texto"),titulo_sugerido:proposedTitle,
-        lineas:revisedLines,estado:"REVISADO_LOCALMENTE_SIN_ENVIO_STEL"
+        obra_texto:rvalue("obra_texto"),obra_impresa:rvalue("obra_impresa"),
+        codigo_proyecto_stel:projectCode,
+        codigo_proyecto_stel_literal:String(d.codigo_proyecto_stel_literal||""),
+        titulo_sugerido:proposedTitle,
+        lineas:revisedLines,estado:"REVISADO_LOCALMENTE_SIN_ENVIO_STEL",
+        vinculacion_proyecto_stel:"NO_VERIFICADA"
       };
       prepared.innerHTML='<p><b>Revisión preparada. No se ha enviado nada a STEL.</b> Comprueba el JSON si quieres utilizarlo en la siguiente fase.</p>'+
         '<textarea id="albReviewJSON" rows="12" readonly></textarea>';
