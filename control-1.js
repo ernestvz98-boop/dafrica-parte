@@ -135,7 +135,7 @@ async function sb(path, options={}){
   try{ data = text ? JSON.parse(text) : null; }catch{ data = text; }
 
   if(!r.ok){
-    const msg = data?.message || data?.hint || data?.error_description || data?.msg || ("HTTP " + r.status);
+    const msg = data?.message || (typeof data?.error==="string" && data.error) || data?.hint || data?.error_description || data?.msg || ("HTTP " + r.status);
     const err = new Error(msg);
     err.status = r.status;
     throw err;
