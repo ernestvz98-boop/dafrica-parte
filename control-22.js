@@ -33,15 +33,61 @@ function renderComprasLotePilot(){
     body:JSON.stringify({mime:"application/pdf",name:file.name,data})
    });
    if(!Array.isArray(output.documentos))throw Error("La IA no devolvió una lista verificable");
-   s.textContent="Documentos separados: "+output.documentos.length+". Iniciando auditorías automáticas, sin más botones…";
+   s.textContent="PDF separado. Leyendo automáticamente la tabla por franjas ampliadas…";
+   // Antes de mostrar el formulario se reconstruyen las tablas largas desde JPEG físicos
+   // para evitar depender de una lectura de página completa a baja resolución.
+   for(let k=0;k<output.documentos.length;k++){
+     const doc=output.documentos[k];
+     if(doc.tipo!=="ALBARAN"||!doc.pdf_separado_b64||!Array.isArray(doc.lineas)||doc.lineas.length<7)continue;
+     try{
+       s.textContent="Ampliando tablas del documento "+(k+1)+"/"+output.documentos.length+
+         " · lectura de 6 franjas por página…";
+       const zonal=await pcLeerDocumentoPorFranjas(doc);
+       doc.__zonas=({
+        lineas: Array.isArray(zonal.lineas)?zonal.lineas.length:0,
+        avisos:Array.isArray(zonal.advertencias)?zonal.advertencias:[]
+       });
+       doc.__zoneImages=zonal.imagenes_zonas||[];
+       if(zonal.lineas.length>=doc.lineas.length&&zonal.lineas.length>0){
+         doc.__primeraExtraccionResumen={
+           lineas:doc.lineas.length,codigo_proyecto:doc.codigo_proyecto
+         };
+         doc.lineas=zonal.lineas.map(row=>({
+          referencia:row.referencia,descripcion:row.descripcion,
+          cantidad:row.cantidad,unidad:row.unidad,precio_unitario:row.precio_unitario
+         }));
+         const code=String(zonal.codigo_proyecto||"").trim().toUpperCase();
+         if(/^PRY[0-9]{4,8}$/.test(code))doc.codigo_proyecto=code;
+         if(zonal.codigo_proyecto_literal)doc.codigo_proyecto_literal=zonal.codigo_proyecto_literal;
+         doc.__franjasAplicadas=true;
+       }else{
+         doc.__franjasAplicadas=false;
+       }
+       if(zonal.advertencias?.length){
+         doc.dudas=(Array.isArray(doc.dudas)?doc.dudas:[]).concat(
+           zonal.advertencias.map(x=>"Lectura ampliada: "+x)
+         );
+       }
+     }catch(error){
+       doc.__errorFranjas=error?.message||String(error);
+       doc.dudas=(Array.isArray(doc.dudas)?doc.dudas:[]).concat(
+        ["No se pudo completar la lectura de imágenes ampliadas: "+doc.__errorFranjas]
+       );
+     }
+   }
+   s.textContent="Documentos preparados: "+output.documentos.length+
+     ". Iniciando comprobación automática independiente…";
    res.innerHTML='<div class="module-note sensitive-note"><b>Verificación automática:</b> DAFRICA realiza dos lecturas y compara cada línea; si discrepan, ejecuta una tercera lectura independiente. Los artículos sin consenso quedan bloqueados. No se modifica STEL.</div>'+
     (output.advertencias||[]).map(x=>'<p class="error">'+esc(x)+'</p>').join("")+
     output.documentos.map((d,i)=>{
      const lines=Array.isArray(d.lineas)?d.lineas:[];
+     const regional=String(d.__franjasAplicadas===true?" · LECTURA POR FRANJAS":d.__errorFranjas?" · AMPLIACIÓN FALLIDA":"");
      const lineRows=lines.map((l,j)=>'<tr><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="referencia" aria-label="Referencia fila '+(j+1)+'" style="min-width:122px" value="'+esc(l.referencia??"")+'"></td><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="descripcion" aria-label="Descripción fila '+(j+1)+'" style="min-width:215px" value="'+esc(l.descripcion??"")+'"></td>'+
       '<td><input type="number" step="0.001" min="0.001" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="cantidad" aria-label="Cantidad fila '+(j+1)+'" style="min-width:90px;max-width:105px" value="'+esc(l.cantidad??"")+'"></td><td>'+esc(l.unidad||"—")+'</td><td>'+esc(l.precio_unitario===null?"Sin precio":l.precio_unitario)+'</td>'+
       '<td><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="pcBatchLineChecked" style="width:auto" data-pc-doc="'+i+'" data-pc-row="'+j+'">Sí</label></td></tr>').join("");
-     return '<div class="card" style="margin-top:12px"><h4>Documento '+(i+1)+' · '+esc(d.tipo)+' · '+esc(d.numero||"Número sin identificar")+'</h4>'+
+     return '<div class="card" style="margin-top:12px"><h4>Documento '+(i+1)+' · '+esc(d.tipo)+' · '+esc(d.numero||"Número sin identificar")+esc(regional)+'</h4>'+
+      (d.__primeraExtraccionResumen?'<p class="muted">Lectura completa: '+esc(d.__primeraExtraccionResumen.lineas)+' materiales; lectura por franjas reales: '+esc(lines.length)+'. Ambas deberán validarse.</p>':"")+
+
       '<p><b>Página(s) del PDF:</b> '+esc((d.paginas||[]).join(", ")||"Revisar")+
       ' · <b>Proveedor:</b> '+esc(d.proveedor||"—")+
       ' · <b>Fecha:</b> '+esc(d.fecha_literal||d.fecha||"—")+'</p>'+
@@ -109,7 +155,7 @@ function renderComprasLotePilot(){
    });
    const callAudit=async (doc,first,third=false)=>sb("/functions/v1/compras-verificar-documento",{
      method:"POST",headers:{"Content-Type":"application/json"},
-     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first,modo:third?"tercera":"segunda",ampliar:third&&(doc.lineas||[]).length>=7})
+     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first,modo:third?"tercera":"segunda",ampliar:third&&(doc.lineas||[]).length>=7&&!(doc.__zoneImages?.length),imagenes_zonas:doc.__zoneImages||[]})
    });
    const auditReport=(result,label)=>{
      const stats=result?.estadisticas||{};
