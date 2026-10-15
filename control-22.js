@@ -5,7 +5,7 @@ function renderComprasLotePilot(){
  if(!container||!has("costes.ver"))return;
  container.innerHTML='<div class="card">'+
   '<h3>PDF por lotes · Pedidos, albaranes y facturas</h3>'+
-  '<p>Sube un PDF escaneado con varios documentos. La IA indica qué páginas corresponden a cada pedido, albarán o factura. En un pedido puedes trasladar sus materiales al formulario editable para guardarlo después de revisarlos.</p>'+
+  '<p>Una sola carga: la IA separa el PDF, realiza automáticamente dos lecturas independientes de cada documento y, cuando hay diferencias, intenta una tercera lectura para resolverlas. Solo los casos no verificados quedan pendientes de revisión.</p>'+
   '<label for="pcBatchFile">Archivo PDF (máximo 6 MB y 10 páginas)</label>'+
   '<input id="pcBatchFile" type="file" accept="application/pdf,.pdf">'+
   '<label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0">'+
@@ -33,8 +33,8 @@ function renderComprasLotePilot(){
     body:JSON.stringify({mime:"application/pdf",name:file.name,data})
    });
    if(!Array.isArray(output.documentos))throw Error("La IA no devolvió una lista verificable");
-   s.textContent="Análisis de "+output.paginas_pdf+" página(s). "+output.documentos.length+" documento(s) propuesto(s). Revisa la separación.";
-   res.innerHTML='<div class="module-note sensitive-note"><b>LECTURA NO VERIFICADA:</b> la separación de páginas no valida los materiales. Es obligatoria una segunda lectura independiente y revisar manualmente CADA línea antes de permitir la importación de un albarán.</div>'+
+   s.textContent="Documentos separados: "+output.documentos.length+". Iniciando auditorías automáticas, sin más botones…";
+   res.innerHTML='<div class="module-note sensitive-note"><b>Verificación automática:</b> DAFRICA realiza dos lecturas y compara cada línea; si discrepan, ejecuta una tercera lectura independiente. Los artículos sin consenso quedan bloqueados. No se modifica STEL.</div>'+
     (output.advertencias||[]).map(x=>'<p class="error">'+esc(x)+'</p>').join("")+
     output.documentos.map((d,i)=>{
      const lines=Array.isArray(d.lineas)?d.lineas:[];
@@ -55,8 +55,8 @@ function renderComprasLotePilot(){
       '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th><th>Revisado en PDF</th></tr></thead><tbody>'+
       (lineRows||'<tr><td colspan="6">Sin líneas detectadas.</td></tr>')+'</tbody></table></div>'+
       (d.dudas||[]).map(x=>'<p class="muted">• '+esc(x)+'</p>').join("")+
-      '<div class="module-note sensitive-note" id="pcBatchAuditStatus'+i+'"><b>Sin segunda lectura:</b> no se puede importar al pedido.</div>'+
-      (d.pdf_separado_b64?'<button type="button" class="btn secondary" data-pc-audit="'+i+'">Verificar este documento con segunda IA</button>':
+      '<div class="module-note sensitive-note" id="pcBatchAuditStatus'+i+'"><b>Esperando verificación automática.</b></div>'+
+      (d.pdf_separado_b64?'<button type="button" class="btn secondary" data-pc-audit="'+i+'">Repetir auditoría de este documento</button>':
         '<p class="error">No existe un PDF separado fiable. La auditoría y la importación quedan bloqueadas.</p>')+
       (d.tipo==="ALBARAN"&&has("costes.editar")?'<div id="pcBatchMatch'+i+'" style="margin-top:12px"></div>':"")+
       (d.pdf_separado_b64?'<button class="btn secondary" type="button" data-pc-download="'+i+'">Descargar PDF separado</button>':"")+
@@ -87,50 +87,132 @@ function renderComprasLotePilot(){
     const sel=$("pcBatchOrder"+control.dataset.pcDoc);
     if(sel?.value)sel.dispatchEvent(new Event("change"));
    }));
-   res.querySelectorAll("[data-pc-audit]").forEach(btn=>btn.addEventListener("click",async()=>{
-    const i=Number(btn.dataset.pcAudit),doc=output.documentos[i],status=$("pcBatchAuditStatus"+i);
-    if(!doc?.pdf_separado_b64)return;
-    btn.disabled=true;doc.__audit=null;
-    status.innerHTML='<b>Segunda lectura independiente en curso…</b> Se cotejarán todas las líneas, cantidades, referencias y PRY.';
-    try{
-     const first={
-      tipo:doc.tipo,numero:doc.numero,proveedor:doc.proveedor,
-      fecha:doc.fecha,codigo_proyecto:doc.codigo_proyecto,
-      lineas:(doc.lineas||[]).map(x=>({
+
+   let checkedCount=0;
+   const updateProgress=()=>{
+     if(!res.isConnected)return;
+     const approved=output.documentos.filter(d=>d.__audit?.auditoria_id).length;
+     const pending=output.documentos.length-approved;
+     s.textContent="Separados "+output.documentos.length+" documentos. Auditoría automática "+checkedCount+"/"+output.documentos.length+
+       " · "+approved+" con doble coincidencia · "+(checkedCount===output.documentos.length?pending+" pendientes de revisión":"procesando…");
+   };
+   const copyFirst=doc=>({
+     tipo:doc.tipo,numero:doc.numero,proveedor:doc.proveedor,
+     fecha:doc.fecha,codigo_proyecto:doc.codigo_proyecto,
+     lineas:(doc.lineas||[]).map(x=>({
        referencia:x.referencia,descripcion:x.descripcion,cantidad:x.cantidad,
        unidad:x.unidad,precio_unitario:x.precio_unitario
-      }))
-     };
-     const audit=await sb("/functions/v1/compras-verificar-documento",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first})
+     }))
+   });
+   const callAudit=async (doc,first)=>sb("/functions/v1/compras-verificar-documento",{
+     method:"POST",headers:{"Content-Type":"application/json"},
+     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first})
+   });
+   const auditReport=(result,label)=>{
+     const stats=result?.estadisticas||{};
+     const differences=(result?.diferencias||[]).slice(0,80).map(x=>'<p class="error">• '+esc(x)+'</p>').join("");
+     const rows=(result?.comparacion_lineas||[]).filter(x=>!x.coincide).slice(0,100)
+       .map(x=>'<p class="error">Fila '+esc(x.fila)+': '+esc(x.referencia_primera||"—")+
+       ' / '+esc(x.referencia_segunda||"—")+' · cantidad '+esc(x.cantidad_primera??"—")+
+       ' / '+esc(x.cantidad_segunda??"—")+
+       ' · '+esc((x.motivos||[]).join(", "))+'</p>').join("");
+     return '<p><b>'+esc(label)+':</b> '+esc(stats.lineas_primera??"?")+
+       ' / '+esc(stats.lineas_segunda??"?")+' líneas. Diferencias: '+esc(stats.lineas_diferentes??"?")+'</p>'+
+       differences+rows;
+   };
+   const syncFields=(i,doc)=>{
+     const project=$("pcBatchProject"+i);
+     if(project)project.value=doc.codigo_proyecto||"";
+     (doc.lineas||[]).forEach((line,j)=>{
+       for(const field of ["referencia","descripcion","cantidad"]){
+         const el=res.querySelector('.pcBatchEdit[data-pc-doc="'+i+'"][data-pc-row="'+j+'"][data-pc-field="'+field+'"]');
+         if(el)el.value=line[field]??"";
+       }
      });
-     doc.__audit=audit.estado==="DOBLE_COINCIDENCIA"&&audit.auditoria_id?audit:null;
-     const summary=audit.estadisticas||{};
-     const report='<p><b>Líneas:</b> 1ª lectura '+esc(summary.lineas_primera??"?")+
-      ' · 2ª lectura '+esc(summary.lineas_segunda??"?")+' · diferencias '+esc(summary.lineas_diferentes??"?")+'</p>'+
-      (audit.diferencias||[]).map(x=>'<p class="error">• '+esc(x)+'</p>').join("")+
-      (audit.comparacion_lineas||[]).filter(x=>!x.coincide).map(x=>
-       '<p class="error">Fila '+esc(x.fila)+': ref. '+esc(x.referencia_primera)+
-       ' / '+esc(x.referencia_segunda)+', cantidad '+esc(x.cantidad_primera??"—")+
-       ' / '+esc(x.cantidad_segunda??"—")+" · "+esc((x.motivos||[]).join(", "))+'</p>').join("");
-     if(doc.__audit){
-      status.innerHTML='<b>Dos lecturas coinciden.</b> '+report+
-       '<p>IMPORTANTE: esto no garantiza exactitud. Comprueba visualmente todas las filas y marca cada casilla antes de registrar.</p>';
-     }else{
-      status.innerHTML='<b>VERIFICACIÓN BLOQUEADA:</b> las lecturas son diferentes o presentan dudas. Corrige según el PDF y repite la segunda lectura. Ninguna entrega puede importarse hasta resolverlo.'+report;
+   };
+   const verify=async i=>{
+     const doc=output.documentos[i],status=$("pcBatchAuditStatus"+i);
+     const retry=res.querySelector('[data-pc-audit="'+i+'"]');
+     if(!doc||!status||!doc.pdf_separado_b64){
+       if(status)status.innerHTML='<b>Bloqueado:</b> no hay PDF separado fiable para verificar.';
+       return;
      }
-    }catch(err){
+     if(retry)retry.disabled=true;
      doc.__audit=null;
-     status.innerHTML='<b>Segunda lectura fallida:</b> '+esc(err?.message||String(err))+
-      '<p>No se permite registrar el albarán sin verificar.</p>';
-    }finally{
-     btn.disabled=false;
-     const sel=$("pcBatchOrder"+i);
-     if(sel?.value)sel.dispatchEvent(new Event("change"));
-    }
+     status.innerHTML='<b>Leyendo automáticamente por segunda vez…</b> Comprobando todas las referencias, cantidades y PRY.';
+     try{
+       const first=copyFirst(doc);
+       const second=await callAudit(doc,first);
+       if(second.estado==="DOBLE_COINCIDENCIA"&&second.auditoria_id){
+         doc.__audit=second;
+         status.innerHTML='<b>Verificado por dos lecturas coincidentes.</b>'+
+           '<p>Revisa el documento original antes del registro definitivo; dos lecturas coincidentes pueden compartir errores.</p>';
+       }else{
+         status.innerHTML='<b>Hay discrepancias; iniciando tercera lectura independiente automáticamente…</b>'+
+           auditReport(second,"Lecturas 1 y 2");
+         const candidate=second.lectura_independiente;
+         if(!candidate||!Array.isArray(candidate.lineas))throw Error("La segunda lectura no ha devuelto todas las líneas");
+         const secondAsFirst={
+           tipo:candidate.tipo,numero:candidate.numero,proveedor:candidate.proveedor,
+           fecha:candidate.fecha,codigo_proyecto:candidate.codigo_proyecto,
+           lineas:candidate.lineas.map(x=>({
+             referencia:x.referencia,descripcion:x.descripcion,cantidad:x.cantidad,
+             unidad:x.unidad,precio_unitario:x.precio_unitario
+           }))
+         };
+         const third=await callAudit(doc,secondAsFirst);
+         const headerSame=["tipo","numero","proveedor","fecha"].every(field=>
+           String(first[field]??"").trim().toUpperCase()===String(secondAsFirst[field]??"").trim().toUpperCase());
+         const lineCountSame=first.lineas.length===secondAsFirst.lineas.length;
+         const certified=third.estado==="DOBLE_COINCIDENCIA"&&!!third.auditoria_id;
+         if(certified&&headerSame&&lineCountSame){
+           // Conservar el orden y corregir automáticamente SOLO donde dos auditorías independientes coinciden.
+           const differences=first.lineas.reduce((n,x,j)=>{
+             const y=secondAsFirst.lineas[j];
+             return n+((x.referencia!==y.referencia||x.descripcion!==y.descripcion||
+               x.cantidad!==y.cantidad||x.unidad!==y.unidad||
+               x.precio_unitario!==y.precio_unitario)?1:0);
+           },0);
+           doc.codigo_proyecto=secondAsFirst.codigo_proyecto;
+           doc.lineas=secondAsFirst.lineas.map(x=>({...x}));
+           doc.__audit=third;
+           // El panel sigue siendo editable; cualquier modificación invalidará el certificado.
+           syncFields(i,doc);
+           status.innerHTML='<b>Corrección automática contrastada:</b> la segunda y tercera lecturas coinciden.'+
+             '<p>DAFRICA ha propuesto '+esc(differences)+' corrección(es) de línea y comprobado PRY '+
+             esc(doc.codigo_proyecto||"no identificado")+'. Sigue siendo necesaria la revisión del original antes del registro.</p>'+
+             auditReport(second,"Diferencias detectadas en lectura inicial");
+         }else{
+           doc.__audit=null;
+           status.innerHTML='<b>DOCUMENTO BLOQUEADO:</b> las lecturas no han logrado confirmar todos los datos.'+
+             '<p>No se inventarán referencias ni cantidades. Solo este documento necesita revisión humana.</p>'+
+             auditReport(second,"Lecturas 1 y 2")+
+             auditReport(third,"Lecturas 2 y 3");
+         }
+       }
+     }catch(err){
+       doc.__audit=null;
+       status.innerHTML='<b>Auditoría incompleta: documento bloqueado.</b><p class="error">'+
+         esc(err?.message||String(err))+'</p>';
+     }finally{
+       if(retry)retry.disabled=false;
+       const sel=$("pcBatchOrder"+i);
+       if(sel?.value)sel.dispatchEvent(new Event("change"));
+       checkedCount++;
+       updateProgress();
+     }
+   };
+   res.querySelectorAll("[data-pc-audit]").forEach(btn=>btn.addEventListener("click",()=>{
+     const i=Number(btn.dataset.pcAudit);
+     verify(i);
    }));
    if(has("costes.editar"))await pcBindBatchDeliveryMatches(output.documentos);
+   // Inicio automático: dos verificaciones en paralelo como máximo para proteger tiempos/costes.
+   const indices=output.documentos.map((_,i)=>i);
+   const workers=Array.from({length:Math.min(2,indices.length)},async()=>{
+     while(indices.length)await verify(indices.shift());
+   });
+   await Promise.allSettled(workers);
    document.querySelectorAll("[data-pc-download]").forEach(el=>el.addEventListener("click",()=>{
     try{
      const d=output.documentos[Number(el.dataset.pcDownload)];
