@@ -5,7 +5,7 @@ function renderComprasLotePilot(){
  if(!container||!has("costes.ver"))return;
  container.innerHTML='<div class="card">'+
   '<h3>PDF por lotes · Pedidos, albaranes y facturas</h3>'+
-  '<p>Una sola carga: la IA separa el PDF, realiza automáticamente dos lecturas independientes de cada documento y, cuando hay diferencias, intenta una tercera lectura para resolverlas. Solo los casos no verificados quedan pendientes de revisión.</p>'+
+  '<p>Una sola carga: la IA separa el PDF, realiza automáticamente tres lecturas del contenido de cada documento. Si la primera discrepa, contrasta las dos siguientes y propone correcciones. Solo revisas las filas conflictivas antes del registro.</p>'+
   '<label for="pcBatchFile">Archivo PDF (máximo 6 MB y 10 páginas)</label>'+
   '<input id="pcBatchFile" type="file" accept="application/pdf,.pdf">'+
   '<label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0">'+
@@ -52,7 +52,7 @@ function renderComprasLotePilot(){
       (d.cantidades_sospechosas?'<div class="module-note sensitive-note"><b>Revisión obligatoria de cantidades:</b> la IA ha repetido la misma cifra en gran parte de las filas. Corrige los números con el PDF original antes de registrar entregas.</div>':'')+
       (d.numero_pedido_mencionado?'<p><b>Pedido citado:</b> '+esc(d.numero_pedido_mencionado)+'</p>':"")+
       (d.albaranes_mencionados?.length?'<p><b>Albaranes citados:</b> '+esc(d.albaranes_mencionados.join(", "))+'</p>':"")+
-      '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th><th>Revisado en PDF</th></tr></thead><tbody>'+
+      '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th><th>Comprobación</th></tr></thead><tbody>'+
       (lineRows||'<tr><td colspan="6">Sin líneas detectadas.</td></tr>')+'</tbody></table></div>'+
       (d.dudas||[]).map(x=>'<p class="muted">• '+esc(x)+'</p>').join("")+
       '<div class="module-note sensitive-note" id="pcBatchAuditStatus'+i+'"><b>Esperando verificación automática.</b></div>'+
@@ -68,7 +68,9 @@ function renderComprasLotePilot(){
     const doc=output.documentos[Number(control.dataset.pcDoc)];
     if(!doc)return;
     doc.__audit=null;
+    doc.__reviewRows=null;
     doc.__revision=(doc.__revision||0)+1;
+    refreshManualChecks(Number(control.dataset.pcDoc),doc);
     const status=$("pcBatchAuditStatus"+control.dataset.pcDoc);
     if(status)status.innerHTML='<b>Verificación caducada:</b> has cambiado datos desde la última lectura. Vuelve a ejecutar la segunda IA.';
     const field=control.dataset.pcField;
@@ -121,6 +123,17 @@ function renderComprasLotePilot(){
        ' / '+esc(stats.lineas_segunda??"?")+' líneas. Diferencias: '+esc(stats.lineas_diferentes??"?")+'</p>'+
        differences+rows;
    };
+   const refreshManualChecks=(i,doc)=>{
+     const required=doc.__reviewRows instanceof Set?doc.__reviewRows:new Set((doc.lineas||[]).map((_,n)=>n));
+     const controls=[...res.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+i+'"]')];
+     controls.forEach(control=>{
+       const idx=Number(control.dataset.pcRow),needs=required.has(idx);
+       control.disabled=!needs;
+       if(!needs)control.checked=false;
+       const text=control.parentElement?.lastChild;
+       if(text)text.textContent=needs?"Revisar":"Verificado IA";
+     });
+   };
    const syncFields=(i,doc)=>{
      const project=$("pcBatchProject"+i);
      if(project)project.value=doc.codigo_proyecto||"";
@@ -152,8 +165,10 @@ function renderComprasLotePilot(){
          if((doc.__revision||0)!==revisionAtStart)throw Error("Los datos cambiaron mientras se verificaban; repite la auditoría.");
          if(third.estado==="DOBLE_COINCIDENCIA"&&third.auditoria_id){
            doc.__audit=third;
+           doc.__reviewRows=new Set();
            status.innerHTML='<b>Verificado: tres lecturas independientes coinciden.</b>'+
-             '<p>No garantiza exactitud absoluta: confirma visualmente cada línea antes de registrar el documento.</p>';
+             '<p>Las tres lecturas coinciden, sin excepciones. Confirma el documento antes del registro; no tienes que marcar cada línea.</p>';
+           refreshManualChecks(i,doc);
          }else{
            doc.__audit=null;
            status.innerHTML='<b>DOCUMENTO BLOQUEADO:</b> la tercera lectura ha encontrado diferencias.'+
@@ -181,6 +196,13 @@ function renderComprasLotePilot(){
          const certified=third.estado==="DOBLE_COINCIDENCIA"&&!!third.auditoria_id;
          if(certified&&headerSame&&lineCountSame){
            // Conservar el orden y corregir automáticamente SOLO donde dos auditorías independientes coinciden.
+           const correctedRowIndexes=first.lineas.map((x,j)=>{
+             const y=secondAsFirst.lineas[j];
+             return x.referencia!==y.referencia||x.descripcion!==y.descripcion||
+               x.cantidad!==y.cantidad||x.unidad!==y.unidad||
+               x.precio_unitario!==y.precio_unitario?j:-1;
+           }).filter(j=>j>=0);
+           doc.__reviewRows=new Set(correctedRowIndexes);
            const differences=first.lineas.reduce((n,x,j)=>{
              const y=secondAsFirst.lineas[j];
              return n+((x.referencia!==y.referencia||x.descripcion!==y.descripcion||
@@ -192,12 +214,15 @@ function renderComprasLotePilot(){
            doc.__audit=third;
            // El panel sigue siendo editable; cualquier modificación invalidará el certificado.
            syncFields(i,doc);
+           refreshManualChecks(i,doc);
            status.innerHTML='<b>Corrección automática contrastada:</b> la segunda y tercera lecturas coinciden.'+
              '<p>DAFRICA ha propuesto '+esc(differences)+' corrección(es) de línea y comprobado PRY '+
-             esc(doc.codigo_proyecto||"no identificado")+'. Sigue siendo necesaria la revisión del original antes del registro.</p>'+
+             esc(doc.codigo_proyecto||"no identificado")+'. Marca únicamente las filas corregidas y confirma el documento antes de registrar.</p>'+
              auditReport(second,"Diferencias detectadas en lectura inicial");
          }else{
            doc.__audit=null;
+           doc.__reviewRows=null;
+           refreshManualChecks(i,doc);
            status.innerHTML='<b>DOCUMENTO BLOQUEADO:</b> las lecturas no han logrado confirmar todos los datos.'+
              '<p>No se inventarán referencias ni cantidades. Solo este documento necesita revisión humana.</p>'+
              auditReport(second,"Lecturas 1 y 2")+
@@ -242,8 +267,9 @@ function renderComprasLotePilot(){
      }
      const j=String(el.dataset.pcLoadOrder);
      const lineChecks=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+j+'"]')];
-     if(lineChecks.length!==(d.lineas||[]).length||lineChecks.some(c=>!c.checked)){
-      alert("Antes de importar un pedido, revisa y confirma visualmente todas las líneas.");return;
+     const required=d.__reviewRows instanceof Set?d.__reviewRows:new Set((d.lineas||[]).map((_,n)=>n));
+     if(lineChecks.length!==(d.lineas||[]).length||lineChecks.some(c=>required.has(Number(c.dataset.pcRow))&&!c.checked)){
+      alert("Antes de importar el pedido, comprueba las líneas corregidas o no certificadas.");return;
      }
      if(!d||!Array.isArray(d.lineas)||!d.lineas.length)return;
      const form=$("pcCreate");if(!form){alert("No tienes permisos para crear pedidos");return;}
@@ -307,8 +333,9 @@ async function pcBindBatchDeliveryMatches(documents){
    if(!d.__audit||d.__audit.estado!=="DOBLE_COINCIDENCIA")
     problems.push("BLOQUEADO: pendiente de dos lecturas independientes coincidentes.");
    const allLineChecks=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+i+'"]')];
-   if(allLineChecks.length!==(d.lineas||[]).length||allLineChecks.some(x=>!x.checked))
-    problems.push("Debes verificar visualmente y marcar cada línea del PDF (no basta una casilla general).");
+   const rowsToReview=d.__reviewRows instanceof Set?d.__reviewRows:new Set((d.lineas||[]).map((_,j)=>j));
+   if(allLineChecks.length!==(d.lineas||[]).length||allLineChecks.some(x=>rowsToReview.has(Number(x.dataset.pcRow))&&!x.checked))
+    problems.push("Revisa las líneas corregidas o no certificadas: las tres lecturas no bastaron para aceptarlas sin comprobación.");
    if(d.codigo_proyecto&&norm(order.codigo_proyecto)&&norm(d.codigo_proyecto)!==norm(order.codigo_proyecto))
     problems.push("El código PRY del PDF no coincide con el proyecto registrado en este pedido.");
    for(const item of (d.lineas||[])){
@@ -343,8 +370,9 @@ async function pcBindBatchDeliveryMatches(documents){
      alert("Importación bloqueada: se requiere segunda lectura idéntica.");return;
     }
     const confirmations=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+i+'"]')];
-    if(confirmations.length!==(d.lineas||[]).length||confirmations.some(x=>!x.checked)){
-     alert("Falta confirmar visualmente alguna línea.");return;
+    const needed=d.__reviewRows instanceof Set?d.__reviewRows:new Set((d.lineas||[]).map((_,j)=>j));
+    if(confirmations.length!==(d.lineas||[]).length||confirmations.some(x=>needed.has(Number(x.dataset.pcRow))&&!x.checked)){
+     alert("Comprueba visualmente las filas corregidas antes de registrar.");return;
     }
     if(!$("pcBatchConfirm"+i).checked){alert("Confirma primero la revisión del albarán");return;}
     if(!confirm("Registrar "+matched.length+" líneas en el pedido "+order.numero+" desde el albarán "+d.numero+"? No se escribirá nada en STEL."))return;
