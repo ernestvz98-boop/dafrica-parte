@@ -178,10 +178,13 @@ function renderComprasLotePilot(){
    const completedAudits=new Set();
    const updateProgress=()=>{
      if(!res.isConnected)return;
-     const approved=output.documentos.filter(d=>d.__audit?.auditoria_id).length;
-     const pending=output.documentos.length-approved;
+     const checked=output.documentos.filter(d=>d.__audit?.materiales_verificados===true).length;
+     const projectPending=output.documentos.filter(d=>d.__audit?.materiales_verificados===true&&
+       (d.__audit.proyecto_pendiente===true||d.__proyectoDudoso===true)).length;
+     const blocked=output.documentos.length-checked;
      s.textContent="Separados "+output.documentos.length+" documentos. Auditoría automática "+completedAudits.size+"/"+output.documentos.length+
-       " · "+approved+" validados · "+(completedAudits.size===output.documentos.length?pending+" pendientes de revisión":"procesando…");
+       " · "+checked+" con materiales contrastados · "+projectPending+" obra(s) pendientes de confirmar"+
+       (completedAudits.size===output.documentos.length?" · "+blocked+" documento(s) sin verificar":" · procesando…");
    };
    const copyFirst=doc=>({
      tipo:doc.tipo,numero:doc.numero,proveedor:doc.proveedor,
