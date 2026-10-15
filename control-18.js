@@ -16,6 +16,7 @@ async function renderAlbaranesPiloto(){
       <h3>Albarán original · próxima etapa</h3>
       <p>En la siguiente etapa incorporaremos lectura de PDF y fotografías con IA y revisión de obra, fecha y abonos. No subas aquí documentación: este módulo todavía no procesa ni almacena archivos.</p>
     </div>`);
+  if(typeof renderAlbaranVisionPilot==="function") renderAlbaranVisionPilot();
   const button=$("stelFindProduct"), input=$("stelItemRef"), status=$("stelFindStatus"), result=$("stelProductResult");
   const find=async()=>{
     const reference=input.value.trim();
