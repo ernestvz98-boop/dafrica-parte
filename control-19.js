@@ -69,7 +69,8 @@ function renderAlbaranVisionPilot(){
        editField("Proyecto candidato manuscrito (PRY...)","codigo_proyecto_stel",d.codigo_proyecto_stel)+
        editField("Título sugerido","titulo_sugerido",automaticTitle)+
       '</div>'+
-      '<h4>Materiales ('+lines.length+') · revisa descripciones y cantidades</h4>'+
+      '<h4>Materiales ('+lines.length+') · comprueba referencias dígito a dígito</h4>'+
+      '<p class="muted">Atención: la IA puede omitir ceros en los códigos. Una sola cifra errónea cambia de producto. Contrasta cada referencia con la tabla original del proveedor antes de aprobarla.</p>'+
       (projectForLines?'<p class="muted">El código '+esc(projectForLines)+' se propone para estas líneas porque solo se ha encontrado un PRY manuscrito. Verifica el destino real de cada material.</p>':'')+
       '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Descripción editable</th><th>Unidades</th><th>Precio leído</th><th>Imputación propuesta por línea</th></tr></thead><tbody>'+
       (lines.map((x,i)=>'<tr>'+
@@ -90,6 +91,16 @@ function renderAlbaranVisionPilot(){
       '<button id="albConfirmReview" class="btn" type="button">Confirmar revisión y preparar JSON</button>'+
       '<p class="muted" id="albReviewStatus" aria-live="polite"></p>'+
       '<div id="albReviewPrepared"></div>';
+    $("albReviewType").addEventListener("change",()=>{
+      const title=$("albReview_titulo_sugerido");
+      if(!title||!projectIsCandidate)return;
+      const oldType=d.tipo_documento==="ABONO"?"ABONO":d.tipo_documento==="COMPRA"?"COMPRA":"REVISAR";
+      const current=String(title.value||"");
+      if(current===automaticTitle||current===d.titulo_sugerido||current.startsWith(oldType+" | "+codeCandidate)){
+        const next=$("albReviewType").value==="ABONO"?"ABONO":$("albReviewType").value==="COMPRA"?"COMPRA":"REVISAR";
+        title.value=(next+" | "+codeCandidate+" (PENDIENTE VERIFICAR) | "+String($("albReview_proveedor").value||"")+" | ALB. "+String($("albReview_numero_albaran").value||"")).slice(0,220);
+      }
+    });
     $("albConfirmReview").addEventListener("click",()=>{
       const date=$("albReviewDate").value;
       const type=$("albReviewType").value;
