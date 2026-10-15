@@ -2,6 +2,7 @@
 // Control privado de pedidos y conciliación, independiente de escrituras en STEL.
 let pedidoActualId=null;
 let pedidoOrigenFormulario="MANUAL";
+let pedidoArchivoPdfBase64=null;
 const pcNum=v=>Number(String(v??"").replace(",","."))||0;
 const pcMoney=v=>v===null||v===undefined?"Pendiente":Number(v).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:4})+" €";
 const pcFmt=v=>Number(v||0).toLocaleString("es-ES",{maximumFractionDigits:3});
@@ -79,7 +80,24 @@ async function renderPedidosCompras(){
     p_fecha:$("pcDate").value||null,p_codigo_proyecto:$("pcProject").value.trim(),
     p_lineas:lines,p_origen:pedidoOrigenFormulario
    })});
-   pedidoActualId=id;await renderPedidosCompras();
+   let uploadWarning="";
+   if(pedidoOrigenFormulario==="PDF"&&pedidoArchivoPdfBase64){
+    try{
+     const binary=atob(pedidoArchivoPdfBase64);
+     const buffer=new Uint8Array(binary.length);
+     for(let j=0;j<binary.length;j++)buffer[j]=binary.charCodeAt(j);
+     const location="pedidos/"+encodeURIComponent(id)+"/original.pdf";
+     await sb("/storage/v1/object/documentos-contables/"+location,{
+      method:"POST",headers:{"Content-Type":"application/pdf","x-upsert":"false"},body:buffer
+     });
+     await sb("/rest/v1/pedidos_compra?id=eq."+encodeURIComponent(id),{
+      method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({archivo_pdf_path:location})
+     });
+    }catch(error){uploadWarning="El pedido se ha guardado, pero no se pudo archivar el PDF privado: "+(error?.message||String(error));}
+   }
+   pedidoOrigenFormulario="MANUAL";pedidoArchivoPdfBase64=null;pedidoActualId=id;
+   await renderPedidosCompras();
+   if(uploadWarning)alert(uploadWarning);
   }catch(err){pcError(err);$("pcCreateBtn").disabled=false;}
  });
  document.querySelectorAll("[data-pc-open]").forEach(b=>b.addEventListener("click",()=>pcShowOrder(b.dataset.pcOpen)));
