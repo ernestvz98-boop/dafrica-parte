@@ -2,10 +2,10 @@
 // Piloto de solo lectura: STEL Products, sin crear documentos ni enviar fotografias.
 async function renderAlbaranesPiloto(){
   if(!has("costes.ver")){ setContent('<div class="error">No tienes permiso para este piloto.</div>'); return; }
-  setTopbar("Albaranes IA · piloto","Comprobación de albaranes, productos y lectura IA · sin cambios en STEL");
+  setTopbar("Consultas STEL · catálogo","Solo consulta de productos y albaranes STEL · sin cambios en STEL");
   setContent(`
     <div class="section-head"><div><h2>Comprobación de productos STEL</h2><p>Busca materiales por referencia o nombre para obtener su ID interno. Solo lectura.</p></div></div>
-    <div class="module-note"><b>Importante:</b> los buscadores no crean ni modifican albaranes; la lectura de fotos con IA está más abajo. Nunca introduzcas tu clave API en esta página.</div>
+    <div class="module-note"><b>Solo consulta:</b> aquí puedes buscar productos y albaranes existentes en STEL. Para leer PDF y fotografías utiliza exclusivamente el módulo «Pedidos y alertas», que aplica el lector de filas y comprobaciones automáticas. No introduzcas claves API aquí.</div>
     <div class="card">
       <label for="stelItemRef">Referencia del producto en STEL Order</label>
       <div class="toolbar"><input id="stelItemRef" type="text" maxlength="80" placeholder="Ej.: 1255007092" autocomplete="off"> <button class="btn" type="button" id="stelFindProduct">Buscar producto</button></div>
@@ -14,9 +14,9 @@ async function renderAlbaranesPiloto(){
       <p id="stelFindStatus" class="muted" aria-live="polite"></p>
       <div id="stelProductResult"></div>
     </div>
-    <div class="module-note">La lectura de fotos y PDF está disponible en la sección «Lectura IA», más abajo. Revisa cualquier resultado antes de registrar compras.</div>`);
+    <div class="card"><h3>Lectura de documentos</h3><p>El lector antiguo de un solo documento se ha retirado porque omitía materiales y podía leer mal códigos PRY y cantidades. Para analizar albaranes, pedidos o facturas abre el lector unificado, que bloquea datos no verificados.</p><button id="stelGoVerifiedReader" type="button" class="btn">Abrir lectura verificada · PDF por lotes</button></div>`);
   if(typeof renderBuscarAlbaranesSTEL==="function") renderBuscarAlbaranesSTEL();
-  if(typeof renderAlbaranVisionPilot==="function") renderAlbaranVisionPilot();
+  $("stelGoVerifiedReader")?.addEventListener("click",()=>navigate("pedidos"));
   const button=$("stelFindProduct"), input=$("stelItemRef"), itemName=$("stelItemName"), status=$("stelFindStatus"), result=$("stelProductResult");
   const makeRows=items=>'<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Producto</th><th>ID STEL (verificar)</th></tr></thead><tbody>'+
     items.map(p=>'<tr><td>'+esc(p.reference||"—")+'</td><td>'+esc(p.name||"—")+'</td><td><b>'+esc(p.id)+'</b></td></tr>').join("")+
