@@ -86,9 +86,10 @@ function renderComprasLotePilot(){
       l.precio_unitario??""
      ].join(" | ")).join("\n");
      pedidoOrigenFormulario="PDF";
+     pedidoArchivoPdfBase64=d.pdf_separado_b64||null;
      form.scrollIntoView({behavior:"smooth",block:"start"});
      $("pcNumber").focus();
-     alert("Datos cargados en el formulario, pero todavía NO se han guardado. Comprueba todas las referencias, cantidades, precios y obra antes de pulsar Guardar pedido.");
+     alert("Datos cargados para revisión. No se han guardado. Al guardar, se archivará el PDF individual en un bucket privado si la separación fue válida; comprueba referencias, cantidades, precios y obra.");
     });
    });
   }catch(e){s.textContent="No se pudo completar el lote: "+(e?.message||String(e));}
