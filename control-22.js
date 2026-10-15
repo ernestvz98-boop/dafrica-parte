@@ -105,7 +105,7 @@ function renderComprasLotePilot(){
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first})
      });
-     doc.__audit=audit.estado==="DOBLE_COINCIDENCIA"?audit:null;
+     doc.__audit=audit.estado==="DOBLE_COINCIDENCIA"&&audit.auditoria_id?audit:null;
      const summary=audit.estadisticas||{};
      const report='<p><b>Líneas:</b> 1ª lectura '+esc(summary.lineas_primera??"?")+
       ' · 2ª lectura '+esc(summary.lineas_segunda??"?")+' · diferencias '+esc(summary.lineas_diferentes??"?")+'</p>'+
