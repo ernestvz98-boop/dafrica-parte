@@ -173,6 +173,7 @@ async function pcShowOrder(id){
     '<button class="btn" type="submit">Registrar factura y comprobar precios</button></form></div></div>':'';
   root.innerHTML='<div class="card" style="margin-top:16px"><div class="section-head"><div><h3>Pedido '+esc(order.numero)+'</h3>'+
    '<p>'+esc(order.proveedor)+' · '+esc(order.codigo_proyecto||"Sin proyecto")+' · '+esc(order.estado)+'</p></div>'+
+   (order.archivo_pdf_path?'<button type="button" class="btn secondary" id="pcPdfDownload">Descargar pedido PDF</button>':'')+
    (canWrite?'<button type="button" class="btn" id="pcClose"'+(canClose?'':' disabled')+'>Cerrar pedido</button>':'')+'</div>'+
    '<p class="muted">Entrega: '+(complete?'Completa':'Pendiente / exceso')+' · Facturación: '+(invoiced?'Cuadrada':'Pendiente')+
    ' · Alertas abiertas: '+openAlerts.length+'. Solo se puede cerrar con todas las unidades recibidas, facturadas y sin incidencias.</p>'+
@@ -187,6 +188,19 @@ async function pcShowOrder(id){
    '<div class="card"><h3>Alertas e incidencias ('+openAlerts.length+' abiertas)</h3>'+
    '<div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Material</th><th>Incidencia</th><th>Precio</th><th>Estado</th><th></th></tr></thead><tbody>'+
    (issueRows||'<tr><td colspan="6">Sin incidencias</td></tr>')+'</tbody></table></div></div>';
+  $("pcPdfDownload")?.addEventListener("click",async()=>{
+   try{
+    const url=SUPABASE_URL+"/storage/v1/object/authenticated/documentos-contables/"+order.archivo_pdf_path;
+    const result=await authFetch(url);
+    if(!result.ok)throw Error("No se pudo obtener el archivo privado (HTTP "+result.status+")");
+    const blob=await result.blob();
+    const objectURL=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=objectURL;
+    a.download=("Pedido_"+order.numero+".pdf").replace(/[^A-Za-z0-9_.-]/g,"_");
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(objectURL),1000);
+   }catch(e){pcError(e);}
+  });
   if(canWrite){
    $("pcDelivery")?.addEventListener("submit",async ev=>{
     ev.preventDefault();
@@ -209,13 +223,15 @@ async function pcShowOrder(id){
     try{
      const derived=$("pcInvoiceCreateDelivery").checked;
      if(derived&&!confirm("Confirma que NO existió albarán previo. Se registrará una entrega interna bloqueada desde la factura, SIN escribir en STEL."))return;
-     await sb("/rest/v1/rpc/pedido_registrar_factura_linea",{method:"POST",body:JSON.stringify({
+     const result=await sb("/rest/v1/rpc/pedido_registrar_factura_linea",{method:"POST",body:JSON.stringify({
       p_pedido_id:id,p_numero_factura:$("pcInvoiceNum").value.trim(),
       p_fecha:$("pcInvoiceDate").value,p_pedido_linea_id:$("pcInvoiceLine").value,
       p_cantidad:pcNum($("pcInvoiceQty").value),p_precio:pcNum($("pcInvoicePrice").value),
       p_descuento:pcNum($("pcInvoiceDiscount").value),p_crear_entrega:derived
      })});
+     const fresh=await sb("/rest/v1/pedido_alertas?factura_linea_id=eq."+encodeURIComponent(result.factura_linea_id)+"&estado=eq.ABIERTA&select=tipo,mensaje,precio_base,precio_detectado,diferencia_pct").catch(()=>[]);
      await renderPedidosCompras();
+     if(fresh?.length)alert("ALERTA DE COMPRAS: "+fresh.map(x=>x.tipo+" · "+x.mensaje+(x.precio_base===null?"":" ("+pcMoney(x.precio_base)+" → "+pcMoney(x.precio_detectado)+")")).join("\n"));
     }catch(e){pcError(e);}
    });
    $("pcClose")?.addEventListener("click",async()=>{
