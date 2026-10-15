@@ -24,7 +24,17 @@ async function renderAlbaranesPiloto(){
     try{
       const data=await sb("/functions/v1/stel-productos-piloto",{method:"POST",body:JSON.stringify({reference})});
       const items=Array.isArray(data?.products)?data.products:[];
-      if(!items.length){status.textContent="Sin coincidencias exactas. No se inventará ningún ID.";return;}
+      if(!items.length){
+        const d=data?.diagnostic||{};
+        const n=Number.isInteger(d.received)?d.received:null;
+        status.textContent=n===0
+          ? "Conexión con STEL correcta, pero su API no devolvió artículos para esa referencia."
+          : "Conexión con STEL correcta. "+(n===null?"":("La API devolvió "+n+" registros; "))+"ninguno tiene esta referencia exacta en el campo de producto.";
+        const sample=Array.isArray(d.sample)?d.sample.filter(x=>x.reference).slice(0,4):[];
+        result.innerHTML='<p class="muted">La referencia impresa por el proveedor puede ser distinta de la referencia del catálogo de STEL. Revisa la ficha del artículo en STEL antes de asociarlo. No se inventará ningún ID.</p>'+
+           (sample.length?'<p class="muted">Ejemplos de referencias devueltas por la API (no son coincidencias): '+sample.map(x=>esc(x.reference)).join(", ")+'</p>':"");
+        return;
+      }
       status.textContent=items.length+" coincidencia(s) exacta(s) encontrada(s).";
       result.innerHTML='<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Producto</th><th>ID interno STEL</th></tr></thead><tbody>'+
         items.map(p=>'<tr><td>'+esc(p.reference)+'</td><td>'+esc(p.name)+'</td><td><b>'+esc(p.id)+'</b></td></tr>').join("")+
