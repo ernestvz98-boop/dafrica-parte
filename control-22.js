@@ -51,10 +51,24 @@ function renderComprasLotePilot(){
       '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th></tr></thead><tbody>'+
       (lineRows||'<tr><td colspan="5">Sin líneas detectadas.</td></tr>')+'</tbody></table></div>'+
       (d.dudas||[]).map(x=>'<p class="muted">• '+esc(x)+'</p>').join("")+
+      (d.pdf_separado_b64?'<button class="btn secondary" type="button" data-pc-download="'+i+'">Descargar PDF separado</button>':"")+
       (d.tipo==="PEDIDO"&&has("costes.editar")?'<button class="btn secondary" type="button" data-pc-load-order="'+i+'">Cargar pedido en formulario para revisar</button>':"")+
       '</div>';
     }).join("")+
     '<p class="muted">Las facturas y albaranes quedan clasificados pero todavía requieren vinculación con un pedido y comprobación de duplicados. Los originales no quedan guardados.</p>';
+   document.querySelectorAll("[data-pc-download]").forEach(el=>el.addEventListener("click",()=>{
+    try{
+     const d=output.documentos[Number(el.dataset.pcDownload)];
+     const binary=atob(String(d.pdf_separado_b64||""));
+     const bytes=new Uint8Array(binary.length);
+     for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+     const url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+     const a=document.createElement("a");a.href=url;
+     a.download=(String(d.tipo||"DOCUMENTO")+"_"+String(d.numero||"SIN_NUMERO")).replace(/[^a-zA-Z0-9_.-]/g,"_")+".pdf";
+     document.body.appendChild(a);a.click();a.remove();
+     URL.revokeObjectURL(url);
+    }catch(e){alert("No se pudo preparar el PDF separado: "+e.message);}
+   }));
    document.querySelectorAll("[data-pc-load-order]").forEach(el=>{
     el.addEventListener("click",()=>{
      const d=output.documentos[Number(el.dataset.pcLoadOrder)];
