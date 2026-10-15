@@ -2,10 +2,10 @@
 // Piloto de solo lectura: STEL Products, sin crear documentos ni enviar fotografias.
 async function renderAlbaranesPiloto(){
   if(!has("costes.ver")){ setContent('<div class="error">No tienes permiso para este piloto.</div>'); return; }
-  setTopbar("Albaranes IA · piloto","Comprobación de productos y referencias · sin cambios en STEL");
+  setTopbar("Albaranes IA · piloto","Comprobación de albaranes, productos y lectura IA · sin cambios en STEL");
   setContent(`
-    <div class="section-head"><div><h2>Comprobación de productos STEL</h2><p>Etapa 1 del piloto de albaranes: buscar la referencia del material y obtener su ID interno. Solo lectura.</p></div></div>
-    <div class="module-note"><b>Importante:</b> este piloto no analiza fotografías todavía y no registra albaranes. Nunca introduzcas tu clave API en esta página.</div>
+    <div class="section-head"><div><h2>Comprobación de productos STEL</h2><p>Busca materiales por referencia o nombre para obtener su ID interno. Solo lectura.</p></div></div>
+    <div class="module-note"><b>Importante:</b> los buscadores no crean ni modifican albaranes; la lectura de fotos con IA está más abajo. Nunca introduzcas tu clave API en esta página.</div>
     <div class="card">
       <label for="stelItemRef">Referencia del producto en STEL Order</label>
       <div class="toolbar"><input id="stelItemRef" type="text" maxlength="80" placeholder="Ej.: 1255007092" autocomplete="off"> <button class="btn" type="button" id="stelFindProduct">Buscar producto</button></div>
@@ -14,10 +14,8 @@ async function renderAlbaranesPiloto(){
       <p id="stelFindStatus" class="muted" aria-live="polite"></p>
       <div id="stelProductResult"></div>
     </div>
-    <div class="card">
-      <h3>Albarán original · próxima etapa</h3>
-      <p>En la siguiente etapa incorporaremos lectura de PDF y fotografías con IA y revisión de obra, fecha y abonos. No subas aquí documentación: este módulo todavía no procesa ni almacena archivos.</p>
-    </div>`);
+    <div class="module-note">La lectura de fotos y PDF está disponible en la sección «Lectura IA», más abajo. Revisa cualquier resultado antes de registrar compras.</div>`);
+  if(typeof renderBuscarAlbaranesSTEL==="function") renderBuscarAlbaranesSTEL();
   if(typeof renderAlbaranVisionPilot==="function") renderAlbaranVisionPilot();
   const button=$("stelFindProduct"), input=$("stelItemRef"), itemName=$("stelItemName"), status=$("stelFindStatus"), result=$("stelProductResult");
   const makeRows=items=>'<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Producto</th><th>ID STEL (verificar)</th></tr></thead><tbody>'+
