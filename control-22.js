@@ -38,7 +38,8 @@ function renderComprasLotePilot(){
    // para evitar depender de una lectura de página completa a baja resolución.
    for(let k=0;k<output.documentos.length;k++){
      const doc=output.documentos[k];
-     if(doc.tipo!=="ALBARAN"||!doc.pdf_separado_b64||!Array.isArray(doc.lineas)||doc.lineas.length<7)continue;
+     if(doc.tipo!=="ALBARAN"||!doc.pdf_separado_b64)continue;
+     doc.__franjasNecesarias=true;
      try{
        s.textContent="Ampliando tablas del documento "+(k+1)+"/"+output.documentos.length+
          " · lectura de 6 franjas por página…";
@@ -196,6 +197,13 @@ function renderComprasLotePilot(){
      if(!doc||!status||!doc.pdf_separado_b64){
        if(status)status.innerHTML='<b>Bloqueado:</b> no hay PDF separado fiable para verificar.';
        return;
+     }
+     if(doc.tipo==="ALBARAN"&&doc.__franjasNecesarias&&doc.__franjasAplicadas!==true){
+       doc.__audit=null;
+       status.innerHTML='<b>DOCUMENTO BLOQUEADO:</b> no se pudo completar una lectura fiable por franjas de la tabla'+
+         (doc.__errorFranjas?'. Motivo: '+esc(doc.__errorFranjas):'. Hay menos filas legibles en las ampliaciones que en el PDF completo.')+
+         '<p>Se requiere una nueva digitalización legible. No se aceptarán lecturas completas sin ampliar.</p>';
+       completedAudits.add(i);updateProgress();return;
      }
      if(retry)retry.disabled=true;
      const revisionAtStart=doc.__revision||0;
