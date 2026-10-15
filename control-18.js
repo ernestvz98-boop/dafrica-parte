@@ -9,6 +9,8 @@ async function renderAlbaranesPiloto(){
     <div class="card">
       <label for="stelItemRef">Referencia del producto en STEL Order</label>
       <div class="toolbar"><input id="stelItemRef" type="text" maxlength="80" placeholder="Ej.: 1255007092" autocomplete="off"> <button class="btn" type="button" id="stelFindProduct">Buscar producto</button></div>
+      <label for="stelItemName">Nombre o descripción del material (opcional)</label>
+      <input id="stelItemName" type="text" maxlength="120" placeholder="Ej.: CODO 92 M-H LATON 2" autocomplete="off">
       <p id="stelFindStatus" class="muted" aria-live="polite"></p>
       <div id="stelProductResult"></div>
     </div>
@@ -17,32 +19,38 @@ async function renderAlbaranesPiloto(){
       <p>En la siguiente etapa incorporaremos lectura de PDF y fotografías con IA y revisión de obra, fecha y abonos. No subas aquí documentación: este módulo todavía no procesa ni almacena archivos.</p>
     </div>`);
   if(typeof renderAlbaranVisionPilot==="function") renderAlbaranVisionPilot();
-  const button=$("stelFindProduct"), input=$("stelItemRef"), status=$("stelFindStatus"), result=$("stelProductResult");
+  const button=$("stelFindProduct"), input=$("stelItemRef"), itemName=$("stelItemName"), status=$("stelFindStatus"), result=$("stelProductResult");
+  const makeRows=items=>'<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Producto</th><th>ID STEL (verificar)</th></tr></thead><tbody>'+
+    items.map(p=>'<tr><td>'+esc(p.reference||"—")+'</td><td>'+esc(p.name||"—")+'</td><td><b>'+esc(p.id)+'</b></td></tr>').join("")+
+    '</tbody></table></div>';
   const find=async()=>{
-    const reference=input.value.trim();
-    if(!/^[A-Za-z0-9._\/-]{2,80}$/.test(reference)){status.textContent="Introduce una referencia válida (2–80 caracteres; letras, cifras, guiones, puntos o barras).";return;}
-    button.disabled=true;status.textContent="Buscando en STEL Order…";result.innerHTML="";
+    const reference=input.value.trim(), name=itemName.value.trim();
+    if(reference&&!/^[A-Za-z0-9._/-]{2,80}$/.test(reference)){status.textContent="Introduce una referencia válida.";return;}
+    if(name&&name.length<3){status.textContent="Escribe al menos tres caracteres del nombre.";return;}
+    if(!reference&&!name){status.textContent="Indica referencia o nombre del material.";return;}
+    button.disabled=true;status.textContent="Comprobando filtros y catálogo STEL…";result.innerHTML="";
     try{
-      const data=await sb("/functions/v1/stel-productos-piloto",{method:"POST",body:JSON.stringify({reference})});
+      const data=await sb("/functions/v1/stel-productos-piloto",{method:"POST",body:JSON.stringify({reference,name})});
       const items=Array.isArray(data?.products)?data.products:[];
-      if(!items.length){
-        const d=data?.diagnostic||{};
-        const n=Number.isInteger(d.received)?d.received:null;
-        status.textContent=n===0
-          ? "Conexión con STEL correcta, pero su API no devolvió artículos para esa referencia."
-          : "Conexión con STEL correcta. "+(n===null?"":("La API devolvió "+n+" registros; "))+"ninguno tiene esta referencia exacta en el campo de producto.";
-        const sample=Array.isArray(d.sample)?d.sample.filter(x=>x.reference).slice(0,4):[];
-        result.innerHTML='<p class="muted">La referencia impresa por el proveedor puede ser distinta de la referencia del catálogo de STEL. Revisa la ficha del artículo en STEL antes de asociarlo. No se inventará ningún ID.</p>'+
-           (sample.length?'<p class="muted">Ejemplos de referencias devueltas por la API (no son coincidencias): '+sample.map(x=>esc(x.reference)).join(", ")+'</p>':"");
-        return;
+      const candidates=Array.isArray(data?.candidates)?data.candidates:[];
+      const d=data?.diagnostic||{};
+      if(items.length){
+        status.textContent=items.length+" coincidencia(s) de referencia. Verifica el nombre antes de usar el ID.";
+        result.innerHTML=makeRows(items);
+      }else if(candidates.length){
+        status.textContent="Sin coincidencia exacta de referencia; estas son posibles coincidencias por nombre, NO confirmadas.";
+        result.innerHTML=makeRows(candidates);
+      }else{
+        const page=Number.isInteger(d.firstPageCount)?d.firstPageCount:0;
+        const filtered=Number.isInteger(d.referenceFilterCount)?d.referenceFilterCount:0;
+        status.textContent="Sin coincidencias verificadas en las consultas realizadas.";
+        result.innerHTML='<p class="muted">El filtro por referencia devolvió '+filtered+' registros y la primera página del catálogo, '+page+'. No hemos revisado todo el catálogo; por tanto, NO podemos afirmar que el artículo no exista.</p>'+
+          '<p class="muted">Prueba a escribir también el nombre impreso en el albarán. No crearemos productos automáticamente mientras pueda tratarse de un duplicado.</p>';
       }
-      status.textContent=items.length+" coincidencia(s) exacta(s) encontrada(s).";
-      result.innerHTML='<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Producto</th><th>ID interno STEL</th></tr></thead><tbody>'+
-        items.map(p=>'<tr><td>'+esc(p.reference)+'</td><td>'+esc(p.name)+'</td><td><b>'+esc(p.id)+'</b></td></tr>').join("")+
-        '</tbody></table></div>';
-    }catch(e){status.textContent="No se pudo consultar STEL: "+(e?.message||String(e))+". Comprueba que se haya configurado STEL_API_KEY en Supabase."; }
+    }catch(e){status.textContent="No se pudo consultar STEL: "+(e?.message||String(e));}
     finally{button.disabled=false;}
   };
   button.addEventListener("click",find);
   input.addEventListener("keydown",e=>{if(e.key==="Enter") find();});
+  itemName.addEventListener("keydown",e=>{if(e.key==="Enter") find();});
 }
