@@ -30,7 +30,7 @@ const modules = [
   {id:"epis", label:"EPIs", icon:"🦺", permission:"epis.ver"},
   {id:"localizacion", label:"Localización", icon:"⌖", permission:"localizacion.ver"},
   {id:"costes", label:"Costes / Consumos", icon:"€", permission:"costes.ver"},
-  {id:"albaranes-piloto", label:"Albaranes IA · piloto", icon:"▣", permission:"costes.ver"},
+  {id:"albaranes-piloto", label:"Consultas STEL · catálogo", icon:"▣", permission:"costes.ver"},
   {id:"pedidos", label:"Pedidos y alertas", icon:"📦", permission:"costes.ver"},
   {id:"historial", label:"Historial", icon:"🕘", permission:"auditoria.ver"},
   {id:"administracion", label:"Administración", icon:"🔐", any:["usuarios.ver","usuarios.gestionar","configuracion.gestionar"]}
