@@ -68,6 +68,7 @@ function renderComprasLotePilot(){
     const doc=output.documentos[Number(control.dataset.pcDoc)];
     if(!doc)return;
     doc.__audit=null;
+    doc.__revision=(doc.__revision||0)+1;
     const status=$("pcBatchAuditStatus"+control.dataset.pcDoc);
     if(status)status.innerHTML='<b>Verificación caducada:</b> has cambiado datos desde la última lectura. Vuelve a ejecutar la segunda IA.';
     const field=control.dataset.pcField;
@@ -88,13 +89,13 @@ function renderComprasLotePilot(){
     if(sel?.value)sel.dispatchEvent(new Event("change"));
    }));
 
-   let checkedCount=0;
+   const completedAudits=new Set();
    const updateProgress=()=>{
      if(!res.isConnected)return;
      const approved=output.documentos.filter(d=>d.__audit?.auditoria_id).length;
      const pending=output.documentos.length-approved;
-     s.textContent="Separados "+output.documentos.length+" documentos. Auditoría automática "+checkedCount+"/"+output.documentos.length+
-       " · "+approved+" con doble coincidencia · "+(checkedCount===output.documentos.length?pending+" pendientes de revisión":"procesando…");
+     s.textContent="Separados "+output.documentos.length+" documentos. Auditoría automática "+completedAudits.size+"/"+output.documentos.length+
+       " · "+approved+" validados · "+(completedAudits.size===output.documentos.length?pending+" pendientes de revisión":"procesando…");
    };
    const copyFirst=doc=>({
      tipo:doc.tipo,numero:doc.numero,proveedor:doc.proveedor,
@@ -138,15 +139,27 @@ function renderComprasLotePilot(){
        return;
      }
      if(retry)retry.disabled=true;
+     const revisionAtStart=doc.__revision||0;
      doc.__audit=null;
      status.innerHTML='<b>Leyendo automáticamente por segunda vez…</b> Comprobando todas las referencias, cantidades y PRY.';
      try{
        const first=copyFirst(doc);
        const second=await callAudit(doc,first);
+       if((doc.__revision||0)!==revisionAtStart)throw Error("El documento se editó mientras se analizaba; los resultados se han descartado.");
        if(second.estado==="DOBLE_COINCIDENCIA"&&second.auditoria_id){
-         doc.__audit=second;
-         status.innerHTML='<b>Verificado por dos lecturas coincidentes.</b>'+
-           '<p>Revisa el documento original antes del registro definitivo; dos lecturas coincidentes pueden compartir errores.</p>';
+         status.innerHTML='<b>Segunda lectura coincidente. Ejecutando tercera lectura independiente como control final…</b>';
+         const third=await callAudit(doc,first);
+         if((doc.__revision||0)!==revisionAtStart)throw Error("Los datos cambiaron mientras se verificaban; repite la auditoría.");
+         if(third.estado==="DOBLE_COINCIDENCIA"&&third.auditoria_id){
+           doc.__audit=third;
+           status.innerHTML='<b>Verificado: tres lecturas independientes coinciden.</b>'+
+             '<p>No garantiza exactitud absoluta: confirma visualmente cada línea antes de registrar el documento.</p>';
+         }else{
+           doc.__audit=null;
+           status.innerHTML='<b>DOCUMENTO BLOQUEADO:</b> la tercera lectura ha encontrado diferencias.'+
+             '<p>No se realizará ninguna importación automática.</p>'+
+             auditReport(third,"Lecturas 1 y 3");
+         }
        }else{
          status.innerHTML='<b>Hay discrepancias; iniciando tercera lectura independiente automáticamente…</b>'+
            auditReport(second,"Lecturas 1 y 2");
@@ -161,6 +174,7 @@ function renderComprasLotePilot(){
            }))
          };
          const third=await callAudit(doc,secondAsFirst);
+         if((doc.__revision||0)!==revisionAtStart)throw Error("Los datos se han editado durante la auditoría; resultados descartados.");
          const headerSame=["tipo","numero","proveedor","fecha"].every(field=>
            String(first[field]??"").trim().toUpperCase()===String(secondAsFirst[field]??"").trim().toUpperCase());
          const lineCountSame=first.lineas.length===secondAsFirst.lineas.length;
@@ -198,7 +212,7 @@ function renderComprasLotePilot(){
        if(retry)retry.disabled=false;
        const sel=$("pcBatchOrder"+i);
        if(sel?.value)sel.dispatchEvent(new Event("change"));
-       checkedCount++;
+       completedAudits.add(i);
        updateProgress();
      }
    };
@@ -207,12 +221,6 @@ function renderComprasLotePilot(){
      verify(i);
    }));
    if(has("costes.editar"))await pcBindBatchDeliveryMatches(output.documentos);
-   // Inicio automático: dos verificaciones en paralelo como máximo para proteger tiempos/costes.
-   const indices=output.documentos.map((_,i)=>i);
-   const workers=Array.from({length:Math.min(2,indices.length)},async()=>{
-     while(indices.length)await verify(indices.shift());
-   });
-   await Promise.allSettled(workers);
    document.querySelectorAll("[data-pc-download]").forEach(el=>el.addEventListener("click",()=>{
     try{
      const d=output.documentos[Number(el.dataset.pcDownload)];
@@ -257,6 +265,12 @@ function renderComprasLotePilot(){
      alert("Datos cargados para revisión. No se han guardado. Al guardar, se archivará el PDF individual en un bucket privado si la separación fue válida; comprueba referencias, cantidades, precios y obra.");
     });
    });
+   // Una sola subida: DAFRICA audita todos los documentos automáticamente, máximo dos en paralelo.
+   const indices=output.documentos.map((_,i)=>i);
+   const workers=Array.from({length:Math.min(2,indices.length)},async()=>{
+     while(indices.length)await verify(indices.shift());
+   });
+   await Promise.allSettled(workers);
   }catch(e){s.textContent="No se pudo completar el lote: "+(e?.message||String(e));}
   finally{ready();}
  });
