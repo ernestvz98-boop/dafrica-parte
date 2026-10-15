@@ -217,6 +217,10 @@ function renderComprasLotePilot(){
        }
      });
    };
+   const auditedLines=(result)=>!!(result&&result.materiales_verificados===true&&result.auditoria_id);
+   const verificationLabel=result=>result?.proyecto_pendiente
+     ? "Materiales coincidentes; código PRY pendiente de confirmar"
+     : "Materiales y código de obra coincidentes";
    const verify=async i=>{
      const doc=output.documentos[i],status=$("pcBatchAuditStatus"+i);
      const retry=res.querySelector('[data-pc-audit="'+i+'"]');
@@ -239,15 +243,18 @@ function renderComprasLotePilot(){
        const first=copyFirst(doc);
        const second=await callAudit(doc,first);
        if((doc.__revision||0)!==revisionAtStart)throw Error("El documento se editó mientras se analizaba; los resultados se han descartado.");
-       if(second.estado==="DOBLE_COINCIDENCIA"&&second.auditoria_id){
+       if(auditedLines(second)){
          status.innerHTML='<b>Segunda lectura coincidente. Ejecutando tercera lectura independiente como control final…</b>';
          const third=await callAudit(doc,first,true);
          if((doc.__revision||0)!==revisionAtStart)throw Error("Los datos cambiaron mientras se verificaban; repite la auditoría.");
-         if(third.estado==="DOBLE_COINCIDENCIA"&&third.auditoria_id){
+         if(auditedLines(third)){
            doc.__audit=third;
            doc.__reviewRows=new Set();
-           status.innerHTML='<b>Verificado: tres lecturas coinciden'+(third.ampliacion_automatica?' (con zoom automático por zonas)':'')+'.</b>'+
-             '<p>Las tres lecturas coinciden, sin excepciones. Confirma el documento antes del registro; no tienes que marcar cada línea.</p>';
+           doc.__proyectoDudoso=!!(second.proyecto_pendiente||third.proyecto_pendiente||doc.__proyectoDudoso);
+           status.innerHTML='<b>'+esc(verificationLabel(third))+'. Tres lecturas confirman las '+esc(doc.lineas.length)+' líneas.</b>'+
+             (doc.__proyectoDudoso
+               ? '<p>La lectura de materiales queda certificada por separado. El manuscrito PRY no coincide entre lectores: confirma su código con el pedido antes de registrar.</p>'
+               : '<p>Confirma el documento antes de registrar; no es necesario marcar cada línea.</p>');
            refreshManualChecks(i,doc);
          }else{
            doc.__audit=null;
@@ -273,7 +280,7 @@ function renderComprasLotePilot(){
          const headerSame=["tipo","numero","proveedor","fecha"].every(field=>
            String(first[field]??"").trim().toUpperCase()===String(secondAsFirst[field]??"").trim().toUpperCase());
          const lineCountSame=first.lineas.length===secondAsFirst.lineas.length;
-         const certified=third.estado==="DOBLE_COINCIDENCIA"&&!!third.auditoria_id;
+         const certified=auditedLines(third);
          if(certified&&headerSame&&lineCountSame){
            // Conservar el orden y corregir automáticamente SOLO donde dos auditorías independientes coinciden.
            const correctedRowIndexes=first.lineas.map((x,j)=>{
@@ -289,15 +296,17 @@ function renderComprasLotePilot(){
                x.cantidad!==y.cantidad||x.unidad!==y.unidad||
                x.precio_unitario!==y.precio_unitario)?1:0);
            },0);
-           doc.codigo_proyecto=secondAsFirst.codigo_proyecto;
            doc.lineas=secondAsFirst.lineas.map(x=>({...x}));
            doc.__audit=third;
+           doc.__proyectoDudoso=!!(second.proyecto_pendiente||third.proyecto_pendiente||doc.__proyectoDudoso);
+           if(!doc.__proyectoDudoso)doc.codigo_proyecto=secondAsFirst.codigo_proyecto;
            // El panel sigue siendo editable; cualquier modificación invalidará el certificado.
            syncFields(i,doc);
            refreshManualChecks(i,doc);
-           status.innerHTML='<b>Corrección automática contrastada:</b> la segunda y tercera lecturas coinciden.'+
-             '<p>DAFRICA ha propuesto '+esc(differences)+' corrección(es) de línea'+(third.ampliacion_automatica?' tras ampliar automáticamente el PDF por zonas':'')+' y comprobado PRY '+
-             esc(doc.codigo_proyecto||"no identificado")+'. Marca únicamente las filas corregidas y confirma el documento antes de registrar.</p>'+
+           status.innerHTML='<b>Materiales contrastados: '+esc(doc.lineas.length)+' líneas.</b>'+
+             '<p>DAFRICA ha propuesto '+esc(differences)+' corrección(es) de línea.'+
+             (doc.__proyectoDudoso?' El PRY manuscrito sigue pendiente de confirmación con el pedido.':' La obra coincide entre lecturas.')+
+             ' Comprueba solo las filas corregidas y confirma el documento antes de registrar.</p>'+
              auditReport(second,"Diferencias detectadas en lectura inicial");
          }else{
            doc.__audit=null;
@@ -342,7 +351,7 @@ function renderComprasLotePilot(){
    document.querySelectorAll("[data-pc-load-order]").forEach(el=>{
     el.addEventListener("click",()=>{
      const d=output.documentos[Number(el.dataset.pcLoadOrder)];
-     if(!d?.__audit||d.__audit.estado!=="DOBLE_COINCIDENCIA"){
+     if(!d?.__audit||d.__audit.materiales_verificados!==true){
       alert("La carga del pedido queda bloqueada hasta que una segunda IA confirme todos los datos.");return;
      }
      const j=String(el.dataset.pcLoadOrder);
@@ -410,7 +419,7 @@ async function pcBindBatchDeliveryMatches(documents){
    area.innerHTML="";if(!id)return;
    const order=orders.find(x=>x.id===id),validLines=lines.filter(x=>x.pedido_id===id);
    const problems=[],matched=[],used=new Set();
-   if(!d.__audit||d.__audit.estado!=="DOBLE_COINCIDENCIA")
+   if(!d.__audit||d.__audit.materiales_verificados!==true)
     problems.push("BLOQUEADO: pendiente de dos lecturas independientes coincidentes.");
    const allLineChecks=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+i+'"]')];
    const rowsToReview=d.__reviewRows instanceof Set?d.__reviewRows:new Set((d.lineas||[]).map((_,j)=>j));
@@ -446,7 +455,7 @@ async function pcBindBatchDeliveryMatches(documents){
     'Registrar '+matched.length+' línea(s) como entrega en DAFRICA</button>';
    const button=$("pcBatchSave"+i);
    if(button)button.addEventListener("click",async()=>{
-    if(!d.__audit||d.__audit.estado!=="DOBLE_COINCIDENCIA"){
+    if(!d.__audit||d.__audit.materiales_verificados!==true){
      alert("Importación bloqueada: se requiere segunda lectura idéntica.");return;
     }
     const confirmations=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+i+'"]')];
