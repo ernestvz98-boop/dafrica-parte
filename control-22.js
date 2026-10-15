@@ -58,6 +58,17 @@ function renderComprasLotePilot(){
           referencia:row.referencia,descripcion:row.descripcion,
           cantidad:row.cantidad,unidad:row.unidad,precio_unitario:row.precio_unitario
          }));
+         // Recalcular señales de calidad a partir de la lectura ACTUAL, no del OCR inicial.
+         const quantities=doc.lineas.map(row=>row.cantidad).filter(v=>typeof v==="number"&&Number.isFinite(v));
+         const counts=new Map();
+         quantities.forEach(v=>counts.set(v,(counts.get(v)||0)+1));
+         const most=Math.max(0,...counts.values());
+         doc.cantidades_sospechosas=quantities.length>=7&&most/quantities.length>=0.8;
+         doc.__cantidadAnalizadaSobre=quantities.length;
+         // El diagnóstico de la lectura preliminar ya no representa las 25 líneas finales.
+         doc.dudas=(Array.isArray(doc.dudas)?doc.dudas:[]).filter(x=>
+           !/REVISAR CANTIDADES:|cantidades sospechosamente repetidas/i.test(String(x))
+         );
          const code=String(zonal.codigo_proyecto||"").trim().toUpperCase();
          if((!usarSaltoki||zonal.codigo_pry_sin_conflictos===true)&&/^PRY[0-9]{4,8}$/.test(code)){
            doc.codigo_proyecto=code;
@@ -85,7 +96,14 @@ function renderComprasLotePilot(){
    s.textContent="Documentos preparados: "+output.documentos.length+
      ". Iniciando comprobación automática independiente…";
    res.innerHTML='<div class="module-note sensitive-note"><b>Verificación automática:</b> DAFRICA realiza dos lecturas y compara cada línea; si discrepan, ejecuta una tercera lectura independiente. Los artículos sin consenso quedan bloqueados. No se modifica STEL.</div>'+
-    (output.advertencias||[]).map(x=>'<p class="error">'+esc(x)+'</p>').join("")+
+    (output.advertencias||[]).filter(x=>{
+      const raw=String(x||"");
+      if(!/cantidades sospechosamente repetidas/i.test(raw))return true;
+      const affected=output.documentos.find(d=>raw.includes(String(d.numero||"__SIN_NUMERO__")));
+      // Sólo ocultar el aviso antiguo si efectivamente se sustituyó la lectura
+      // y la nueva tabla NO presenta un patrón masivo de cantidades iguales.
+      return !(affected&&affected.__franjasAplicadas===true&&affected.cantidades_sospechosas===false);
+    }).map(x=>'<p class="error">'+esc(x)+'</p>').join("")+
     output.documentos.map((d,i)=>{
      const lines=Array.isArray(d.lineas)?d.lineas:[];
      const regional=String(d.__lecturaGeometrica?" · FILAS/ COLUMNAS DETECTADAS":d.__franjasAplicadas===true?" · LECTURA POR FRANJAS":d.__errorFranjas?" · AMPLIACIÓN FALLIDA":"");
@@ -104,7 +122,7 @@ function renderComprasLotePilot(){
       ' · <b>Obra impresa:</b> '+esc(d.obra_impresa||"—")+'</p>'+
       '<label for="pcBatchProject'+i+'">Código PRY comprobado con el original (editable)</label>'+
       '<input id="pcBatchProject'+i+'" type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-field="codigo_proyecto" maxlength="30" value="'+esc(d.codigo_proyecto||"")+'">'+
-      (d.cantidades_sospechosas?'<div class="module-note sensitive-note"><b>Revisión obligatoria de cantidades:</b> la IA ha repetido la misma cifra en gran parte de las filas. Corrige los números con el PDF original antes de registrar entregas.</div>':'')+
+      (d.cantidades_sospechosas?'<div class="module-note sensitive-note"><b>Revisión obligatoria de cantidades:</b> '+esc((d.__cantidadAnalizadaSobre||"")+" materiales en la lectura actual")+'. Muchas filas contienen el mismo valor; comprueba cada cantidad frente al original.</div>':'')+
       (d.numero_pedido_mencionado?'<p><b>Pedido citado:</b> '+esc(d.numero_pedido_mencionado)+'</p>':"")+
       (d.albaranes_mencionados?.length?'<p><b>Albaranes citados:</b> '+esc(d.albaranes_mencionados.join(", "))+'</p>':"")+
       '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th><th>Comprobación</th></tr></thead><tbody>'+
