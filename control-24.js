@@ -68,6 +68,16 @@ async function pcLeerSaltokiFilas(doc){
   const sourceW=lastX-firstX,lead=65;
   const half=Math.min(spacing*.45,canvas.height*.009);
   const rowH=56,top=34,scaling=Math.min(1.35,1730/sourceW),bodyW=Math.ceil(sourceW*scaling);
+  // La anotación PRY manuscrita se trata aparte: no debe confundirse con las filas impresas.
+  const pryCrop=document.createElement("canvas");
+  const px0=Math.floor(canvas.width*.44),py0=Math.floor(canvas.height*.565);
+  const pw=Math.floor(canvas.width*.31),ph=Math.floor(canvas.height*.095);
+  pryCrop.width=1200;pryCrop.height=Math.round(1200*ph/pw);
+  const pryCtx=pryCrop.getContext("2d",{alpha:false});
+  pryCtx.fillStyle="#fff";pryCtx.fillRect(0,0,pryCrop.width,pryCrop.height);
+  pryCtx.drawImage(canvas,px0,py0,pw,ph,0,0,pryCrop.width,pryCrop.height);
+  const pryImagen=pryCrop.toDataURL("image/jpeg",.96);
+  pryCrop.width=0;pryCrop.height=0;
   const bands=[];
   for(let offset=0;offset<count;offset+=5){
    const m=Math.min(5,count-offset),out=document.createElement("canvas");
@@ -93,7 +103,7 @@ async function pcLeerSaltokiFilas(doc){
   }
   const parsed=await sb("/functions/v1/compras-saltoki-filas",{
    method:"POST",headers:{"Content-Type":"application/json"},
-   body:JSON.stringify({numero_filas:count,franjas:bands})
+   body:JSON.stringify({numero_filas:count,franjas:bands,imagen_codigo:pryImagen})
   });
   if(!Array.isArray(parsed.lineas)||parsed.lineas.length!==count)
    throw Error("La IA no ha devuelto todas las "+count+" filas detectadas");
@@ -106,7 +116,7 @@ async function pcLeerSaltokiFilas(doc){
     cantidad:x.cantidad,unidad:String(x.unidad||""),
     precio_unitario:x.precio_unitario
    })),
-   codigo_proyecto:"",codigo_proyecto_literal:"",
+   codigo_proyecto:String(parsed.codigo_proyecto||""),codigo_proyecto_literal:String(parsed.codigo_proyecto_literal||""),
    advertencias:warnings,imagenes_zonas:bands,
    fuente:"Columnas de referencias y cantidades alineadas físicamente"
   };
