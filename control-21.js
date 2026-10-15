@@ -54,7 +54,8 @@ async function renderPedidosCompras(){
    '<textarea id="pcLines" rows="5" required placeholder="0190090281 | Bandeja condensados | 1 | ud |&#10;1255007092 | Codo de latón | 4 | ud | 12,50"></textarea>'+
    '<div class="toolbar"><button type="submit" class="btn" id="pcCreateBtn">Guardar pedido abierto</button></div>'+
    '<p class="muted">No se cerrará automáticamente por el hecho de subir un documento.</p></form></div>':'')+
-  '<div class="card"><div class="section-head"><div><h3>Todos los pedidos</h3><p>Pulsa «Abrir» para consultar unidades entregadas, pendientes, facturas e incidencias.</p></div></div>'+
+  '<div class="card"><div class="section-head"><div><h3>Todos los pedidos</h3><p>Pulsa «Abrir» para consultar unidades entregadas, pendientes, facturas e incidencias.</p></div>'+
+    '<button class="btn secondary" id="pcExport" type="button">Exportar pedidos abiertos CSV</button></div>'+
    '<div class="table-wrap"><table><thead><tr><th>Número</th><th>Proveedor</th><th>Fecha</th><th>Obra</th><th>Recepción</th><th>Alertas</th><th>Estado</th><th></th></tr></thead><tbody>'+
    (rows||'<tr><td colspan="8">No hay pedidos registrados todavía.</td></tr>')+'</tbody></table></div></div>'+
   '<div id="pcBatch"></div><div id="pcDetail"></div>'
@@ -99,6 +100,24 @@ async function renderPedidosCompras(){
    await renderPedidosCompras();
    if(uploadWarning)alert(uploadWarning);
   }catch(err){pcError(err);$("pcCreateBtn").disabled=false;}
+ });
+ $("pcExport")?.addEventListener("click",()=>{
+  const rows=[["Pedido","Proveedor","Fecha","Proyecto","Referencia","Material","Unidad","Solicitado","Recibido","Pendiente","Facturado","Precio pactado","Alertas","Estado"]];
+  const open=orders.filter(x=>x.estado!=="CERRADO");
+  for(const order of open){
+   const ls=byOrder.get(order.id)||[];
+   for(const item of ls){
+    rows.push([order.numero,order.proveedor,order.fecha||"",order.codigo_proyecto||"",
+     item.referencia||"",item.descripcion,item.unidad,item.cantidad_pedida,item.cantidad_recibida,
+     item.cantidad_pendiente,item.cantidad_facturada,item.precio_pactado??"",
+     item.alertas_abiertas||0,Number(item.cantidad_pendiente)===0?"ENTREGADO":"PENDIENTE"]);
+   }
+  }
+  const csv="\uFEFFsep=;\r\n"+rows.map(row=>row.map(cell=>'"'+String(cell??"").replace(/"/g,'""').replace(/\r?\n/g," ")+'"').join(";")).join("\r\n");
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  const a=document.createElement("a");a.href=url;a.download="Pedidos_abiertos_DAFRICA_"+pcToday()+".csv";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
  });
  document.querySelectorAll("[data-pc-open]").forEach(b=>b.addEventListener("click",()=>pcShowOrder(b.dataset.pcOpen)));
  if(typeof renderComprasLotePilot==="function")renderComprasLotePilot();
