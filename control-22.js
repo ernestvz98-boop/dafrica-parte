@@ -42,14 +42,15 @@ function renderComprasLotePilot(){
      doc.__franjasNecesarias=true;
      try{
        s.textContent="Ampliando tablas del documento "+(k+1)+"/"+output.documentos.length+
-         " · lectura de 6 franjas por página…";
-       const zonal=await pcLeerDocumentoPorFranjas(doc);
+         " · identificando filas por columnas en Saltoki o franjas en otros formatos…";
+       const usarSaltoki=String(doc.proveedor||"").toUpperCase().includes("SALTOKI")&&Array.isArray(doc.lineas)&&doc.lineas.length>=7;
+       const zonal=usarSaltoki?await pcLeerSaltokiFilas(doc):await pcLeerDocumentoPorFranjas(doc);
        doc.__zonas=({
         lineas: Array.isArray(zonal.lineas)?zonal.lineas.length:0,
         avisos:Array.isArray(zonal.advertencias)?zonal.advertencias:[]
        });
        doc.__zoneImages=zonal.imagenes_zonas||[];
-       if(zonal.lineas.length>=doc.lineas.length&&zonal.lineas.length>0){
+       if(zonal.lineas.length>=doc.lineas.length&&zonal.lineas.length>0&&(!usarSaltoki||zonal.estado==="CANDIDATO_POR_FILAS")){
          doc.__primeraExtraccionResumen={
            lineas:doc.lineas.length,codigo_proyecto:doc.codigo_proyecto
          };
@@ -61,6 +62,7 @@ function renderComprasLotePilot(){
          if(/^PRY[0-9]{4,8}$/.test(code))doc.codigo_proyecto=code;
          if(zonal.codigo_proyecto_literal)doc.codigo_proyecto_literal=zonal.codigo_proyecto_literal;
          doc.__franjasAplicadas=true;
+         doc.__lecturaGeometrica=usarSaltoki;
        }else{
          doc.__franjasAplicadas=false;
        }
@@ -82,7 +84,7 @@ function renderComprasLotePilot(){
     (output.advertencias||[]).map(x=>'<p class="error">'+esc(x)+'</p>').join("")+
     output.documentos.map((d,i)=>{
      const lines=Array.isArray(d.lineas)?d.lineas:[];
-     const regional=String(d.__franjasAplicadas===true?" · LECTURA POR FRANJAS":d.__errorFranjas?" · AMPLIACIÓN FALLIDA":"");
+     const regional=String(d.__lecturaGeometrica?" · FILAS/ COLUMNAS DETECTADAS":d.__franjasAplicadas===true?" · LECTURA POR FRANJAS":d.__errorFranjas?" · AMPLIACIÓN FALLIDA":"");
      const lineRows=lines.map((l,j)=>'<tr><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="referencia" aria-label="Referencia fila '+(j+1)+'" style="min-width:122px" value="'+esc(l.referencia??"")+'"></td><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="descripcion" aria-label="Descripción fila '+(j+1)+'" style="min-width:215px" value="'+esc(l.descripcion??"")+'"></td>'+
       '<td><input type="number" step="0.001" min="0.001" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="cantidad" aria-label="Cantidad fila '+(j+1)+'" style="min-width:90px;max-width:105px" value="'+esc(l.cantidad??"")+'"></td><td>'+esc(l.unidad||"—")+'</td><td>'+esc(l.precio_unitario===null?"Sin precio":l.precio_unitario)+'</td>'+
       '<td><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="pcBatchLineChecked" style="width:auto" data-pc-doc="'+i+'" data-pc-row="'+j+'">Sí</label></td></tr>').join("");
