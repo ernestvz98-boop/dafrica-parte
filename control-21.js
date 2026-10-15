@@ -1,6 +1,7 @@
 "use strict";
 // Control privado de pedidos y conciliación, independiente de escrituras en STEL.
 let pedidoActualId=null;
+let pedidoOrigenFormulario="MANUAL";
 const pcNum=v=>Number(String(v??"").replace(",","."))||0;
 const pcMoney=v=>v===null||v===undefined?"Pendiente":Number(v).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:4})+" €";
 const pcFmt=v=>Number(v||0).toLocaleString("es-ES",{maximumFractionDigits:3});
@@ -55,7 +56,7 @@ async function renderPedidosCompras(){
   '<div class="card"><div class="section-head"><div><h3>Todos los pedidos</h3><p>Pulsa «Abrir» para consultar unidades entregadas, pendientes, facturas e incidencias.</p></div></div>'+
    '<div class="table-wrap"><table><thead><tr><th>Número</th><th>Proveedor</th><th>Fecha</th><th>Obra</th><th>Recepción</th><th>Alertas</th><th>Estado</th><th></th></tr></thead><tbody>'+
    (rows||'<tr><td colspan="8">No hay pedidos registrados todavía.</td></tr>')+'</tbody></table></div></div>'+
-  '<div id="pcDetail"></div>'
+  '<div id="pcBatch"></div><div id="pcDetail"></div>'
  );
  if(canWrite)$("pcCreate")?.addEventListener("submit",async e=>{
   e.preventDefault();
@@ -76,12 +77,13 @@ async function renderPedidosCompras(){
    const id=await sb("/rest/v1/rpc/pedido_crear_con_lineas",{method:"POST",body:JSON.stringify({
     p_numero:$("pcNumber").value.trim(),p_proveedor:$("pcSupplier").value.trim(),
     p_fecha:$("pcDate").value||null,p_codigo_proyecto:$("pcProject").value.trim(),
-    p_lineas:lines,p_origen:"MANUAL"
+    p_lineas:lines,p_origen:pedidoOrigenFormulario
    })});
    pedidoActualId=id;await renderPedidosCompras();
   }catch(err){pcError(err);$("pcCreateBtn").disabled=false;}
  });
  document.querySelectorAll("[data-pc-open]").forEach(b=>b.addEventListener("click",()=>pcShowOrder(b.dataset.pcOpen)));
+ if(typeof renderComprasLotePilot==="function")renderComprasLotePilot();
  if(pedidoActualId&&orders.some(x=>x.id===pedidoActualId))await pcShowOrder(pedidoActualId);
 }
 async function pcShowOrder(id){
