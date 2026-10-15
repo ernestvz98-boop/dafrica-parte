@@ -51,11 +51,13 @@ function renderComprasLotePilot(){
       '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th></tr></thead><tbody>'+
       (lineRows||'<tr><td colspan="5">Sin líneas detectadas.</td></tr>')+'</tbody></table></div>'+
       (d.dudas||[]).map(x=>'<p class="muted">• '+esc(x)+'</p>').join("")+
+      (d.tipo==="ALBARAN"&&has("costes.editar")?'<div id="pcBatchMatch'+i+'" style="margin-top:12px"></div>':"")+
       (d.pdf_separado_b64?'<button class="btn secondary" type="button" data-pc-download="'+i+'">Descargar PDF separado</button>':"")+
       (d.tipo==="PEDIDO"&&has("costes.editar")?'<button class="btn secondary" type="button" data-pc-load-order="'+i+'">Cargar pedido en formulario para revisar</button>':"")+
       '</div>';
     }).join("")+
     '<p class="muted">Las facturas y albaranes quedan clasificados pero todavía requieren vinculación con un pedido y comprobación de duplicados. Los originales no quedan guardados.</p>';
+   if(has("costes.editar"))await pcBindBatchDeliveryMatches(output.documentos);
    document.querySelectorAll("[data-pc-download]").forEach(el=>el.addEventListener("click",()=>{
     try{
      const d=output.documentos[Number(el.dataset.pcDownload)];
@@ -95,4 +97,80 @@ function renderComprasLotePilot(){
   }catch(e){s.textContent="No se pudo completar el lote: "+(e?.message||String(e));}
   finally{ready();}
  });
+}
+
+
+// La coincidencia de artículos es exacta: no se crean referencias nuevas ni se registra en STEL.
+async function pcBindBatchDeliveryMatches(documents){
+ let orders=[],lines=[];
+ try{
+  [orders,lines]=await Promise.all([
+   sb("/rest/v1/pedidos_compra?estado=neq.CERRADO&select=id,numero,proveedor,codigo_proyecto&limit=300"),
+   sb("/rest/v1/pedido_lineas?select=id,pedido_id,referencia,descripcion,unidad&limit=1500")
+  ]);
+ }catch{return;}
+ const norm=v=>String(v??"").trim().toUpperCase();
+ for(let i=0;i<documents.length;i++){
+  const d=documents[i],host=$("pcBatchMatch"+i);
+  if(!host||d.tipo!=="ALBARAN")continue;
+  const candidate=orders.filter(o=>
+    (d.numero_pedido_mencionado&&norm(o.numero)===norm(d.numero_pedido_mencionado))||
+    (d.codigo_proyecto&&norm(o.codigo_proyecto)===norm(d.codigo_proyecto))
+  );
+  host.innerHTML='<p class="muted"><b>Vincular albarán a pedido abierto:</b> selecciona el pedido y revisa las coincidencias exactas de artículos antes de registrar las unidades. No se modificarán albaranes de STEL.</p>'+
+   '<select id="pcBatchOrder'+i+'"><option value="">Selecciona pedido…</option>'+
+   orders.map(o=>'<option value="'+esc(o.id)+'">'+esc(o.numero+" · "+o.proveedor+(o.codigo_proyecto?" · "+o.codigo_proyecto:"")+
+   (candidate.some(c=>c.id===o.id)?" · CANDIDATO":""))+'</option>').join("")+'</select>'+
+   '<div id="pcBatchChecks'+i+'"></div>';
+  $("pcBatchOrder"+i).addEventListener("change",()=>{
+   const id=$("pcBatchOrder"+i).value,area=$("pcBatchChecks"+i);
+   area.innerHTML="";if(!id)return;
+   const order=orders.find(x=>x.id===id),validLines=lines.filter(x=>x.pedido_id===id);
+   const problems=[],matched=[],used=new Set();
+   if(d.codigo_proyecto&&norm(order.codigo_proyecto)&&norm(d.codigo_proyecto)!==norm(order.codigo_proyecto))
+    problems.push("El código PRY del PDF no coincide con el proyecto registrado en este pedido.");
+   for(const item of (d.lineas||[])){
+    const ref=norm(item.referencia);
+    const exact=ref?validLines.filter(x=>norm(x.referencia)===ref):[];
+    if(exact.length!==1){
+     problems.push("Referencia "+(item.referencia||"SIN CÓDIGO")+" no coincide de forma única con el pedido.");
+     continue;
+    }
+    const selected=exact[0],qty=Number(item.cantidad),price=item.precio_unitario;
+    if(used.has(selected.id)){problems.push("Artículo "+ref+" repetido: agrupa cantidades y revisa manualmente.");continue;}
+    if(!Number.isFinite(qty)||qty<=0){problems.push("Cantidad no verificada para "+ref);continue;}
+    if(price!==null&&price!==undefined&&(!Number.isFinite(Number(price))||Number(price)<0)){
+     problems.push("Precio no verificado para "+ref);continue;
+    }
+    used.add(selected.id);
+    matched.push({pedido_linea_id:selected.id,cantidad:qty,precio_unitario:price===null||price===undefined?null:Number(price)});
+   }
+   if(!d.numero||!/^\d{4}-\d{2}-\d{2}$/.test(String(d.fecha||"")))
+    problems.push("Número o fecha de albarán incorrectos.");
+   if(!(d.lineas||[]).length)problems.push("No se han detectado materiales.");
+   area.innerHTML='<p class="muted"><b>Coincidencia:</b> '+matched.length+'/'+(d.lineas||[]).length+
+    ' líneas · Pedido seleccionado: '+esc(order.numero)+'</p>'+
+    problems.map(p=>'<p class="error">'+esc(p)+'</p>').join("")+
+    '<label style="display:flex;align-items:flex-start;gap:8px"><input type="checkbox" style="width:auto" id="pcBatchConfirm'+i+'">'+
+    '<span>He verificado el albarán original, proveedor, código de obra, todas las referencias y cantidades. Confirmo que la entrega no está ya registrada.</span></label>'+
+    '<button type="button" class="btn" id="pcBatchSave'+i+'"'+(problems.length?" disabled":"")+'>'+
+    'Registrar '+matched.length+' línea(s) como entrega en DAFRICA</button>';
+   const button=$("pcBatchSave"+i);
+   if(button)button.addEventListener("click",async()=>{
+    if(!$("pcBatchConfirm"+i).checked){alert("Confirma primero la revisión del albarán");return;}
+    if(!confirm("Registrar "+matched.length+" líneas en el pedido "+order.numero+" desde el albarán "+d.numero+"? No se escribirá nada en STEL."))return;
+    button.disabled=true;
+    try{
+     await sb("/rest/v1/rpc/pedido_registrar_albaran_pdf",{
+      method:"POST",body:JSON.stringify({
+       p_pedido_id:id,p_numero:String(d.numero).trim(),p_fecha:d.fecha,p_lineas:matched
+      })
+     });
+     pedidoActualId=id;
+     await renderPedidosCompras();
+     alert("Entregas registradas internamente. Revisa el resumen del pedido y las cantidades pendientes.");
+    }catch(err){button.disabled=false;alert("No se pudieron registrar entregas: "+(err?.message||err));}
+   });
+  });
+ }
 }
