@@ -110,7 +110,7 @@ async function pcLeerSaltokiFilas(doc){
   const warnings=Array.isArray(parsed.advertencias)?parsed.advertencias:[];
   return {
    tipo:"SALTOKI_FILAS",numero_filas_geometricas:count,
-   estado:parsed.estado,lineas:parsed.lineas.map(x=>({
+   estado:parsed.estado,lineas_validas:parsed.lineas_validas===true,codigo_pry_sin_conflictos:parsed.codigo_pry_sin_conflictos===true,lineas:parsed.lineas.map(x=>({
     referencia:String(x.referencia||""),
     descripcion:String(x.descripcion||""),
     cantidad:x.cantidad,unidad:String(x.unidad||""),
