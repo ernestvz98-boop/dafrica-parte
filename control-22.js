@@ -430,14 +430,17 @@ async function pcBindBatchDeliveryMatches(documents){
    area.innerHTML="";if(!id)return;
    const order=orders.find(x=>x.id===id),validLines=lines.filter(x=>x.pedido_id===id);
    const problems=[],matched=[],used=new Set();
+   const projectNeedsConfirmation=d.__audit?.proyecto_pendiente===true||d.__proyectoDudoso===true;
    if(!d.__audit||d.__audit.materiales_verificados!==true)
     problems.push("BLOQUEADO: pendiente de dos lecturas independientes coincidentes.");
    const allLineChecks=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+i+'"]')];
    const rowsToReview=d.__reviewRows instanceof Set?d.__reviewRows:new Set((d.lineas||[]).map((_,j)=>j));
    if(allLineChecks.length!==(d.lineas||[]).length||allLineChecks.some(x=>rowsToReview.has(Number(x.dataset.pcRow))&&!x.checked))
     problems.push("Revisa las líneas corregidas o no certificadas: las tres lecturas no bastaron para aceptarlas sin comprobación.");
-   if(d.codigo_proyecto&&norm(order.codigo_proyecto)&&norm(d.codigo_proyecto)!==norm(order.codigo_proyecto))
-    problems.push("El código PRY del PDF no coincide con el proyecto registrado en este pedido.");
+   if(!/^PRY[0-9]{5}$/.test(norm(d.codigo_proyecto)))
+    problems.push("Introduce un código PRY de cinco cifras confirmado con el documento.");
+   if(!norm(order.codigo_proyecto)||norm(d.codigo_proyecto)!==norm(order.codigo_proyecto))
+    problems.push("El código PRY confirmado debe coincidir exactamente con el proyecto de este pedido.");
    for(const item of (d.lineas||[])){
     const ref=norm(item.referencia);
     const exact=ref?validLines.filter(x=>norm(x.referencia)===ref):[];
@@ -461,10 +464,18 @@ async function pcBindBatchDeliveryMatches(documents){
     ' líneas · Pedido seleccionado: '+esc(order.numero)+'</p>'+
     problems.map(p=>'<p class="error">'+esc(p)+'</p>').join("")+
     '<label style="display:flex;align-items:flex-start;gap:8px"><input type="checkbox" style="width:auto" id="pcBatchConfirm'+i+'">'+
-    '<span>He verificado el albarán original, proveedor, código de obra, todas las referencias y cantidades. Confirmo que la entrega no está ya registrada.</span></label>'+
-    '<button type="button" class="btn" id="pcBatchSave'+i+'"'+(problems.length?" disabled":"")+'>'+
+    '<span>He comprobado el albarán original y confirmo que la entrega no está ya registrada.</span></label>'+
+    (projectNeedsConfirmation?'<label style="display:flex;align-items:flex-start;gap:8px;margin:10px 0">'+
+      '<input type="checkbox" style="width:auto" id="pcBatchProjectConfirmed'+i+'">'+
+      '<span>He comprobado con el original y el pedido que la obra correcta es <b>'+esc(d.codigo_proyecto||"SIN CÓDIGO")+
+      '</b>. La escritura manuscrita es dudosa; autorizo solamente esta asociación interna.</span></label>':'')+
+    '<button type="button" class="btn" id="pcBatchSave'+i+'"'+(problems.length||projectNeedsConfirmation?" disabled":"")+'>'+
     'Registrar '+matched.length+' línea(s) como entrega en DAFRICA</button>';
    const button=$("pcBatchSave"+i);
+   const projectApproval=$("pcBatchProjectConfirmed"+i);
+   projectApproval?.addEventListener("change",()=>{
+     if(button)button.disabled=problems.length>0||!projectApproval.checked;
+   });
    if(button)button.addEventListener("click",async()=>{
     if(!d.__audit||d.__audit.materiales_verificados!==true){
      alert("Importación bloqueada: se requiere segunda lectura idéntica.");return;
@@ -474,13 +485,17 @@ async function pcBindBatchDeliveryMatches(documents){
     if(confirmations.length!==(d.lineas||[]).length||confirmations.some(x=>needed.has(Number(x.dataset.pcRow))&&!x.checked)){
      alert("Comprueba visualmente las filas corregidas antes de registrar.");return;
     }
+    if(projectNeedsConfirmation&&!projectApproval?.checked){
+      alert("Confirma la obra PRY del pedido. Los materiales ya están auditados, pero no podemos asignarlos sin esa comprobación.");return;
+    }
     if(!$("pcBatchConfirm"+i).checked){alert("Confirma primero la revisión del albarán");return;}
     if(!confirm("Registrar "+matched.length+" líneas en el pedido "+order.numero+" desde el albarán "+d.numero+"? No se escribirá nada en STEL."))return;
     button.disabled=true;
     try{
      await sb("/rest/v1/rpc/pedido_registrar_albaran_pdf",{
       method:"POST",body:JSON.stringify({
-       p_pedido_id:id,p_numero:String(d.numero).trim(),p_fecha:d.fecha,p_lineas:matched,p_auditoria_id:d.__audit.auditoria_id
+       p_pedido_id:id,p_numero:String(d.numero).trim(),p_fecha:d.fecha,p_lineas:matched,p_auditoria_id:d.__audit.auditoria_id,
+       p_codigo_obra_confirmado:norm(d.codigo_proyecto),p_confirmacion_obra:projectNeedsConfirmation?!!projectApproval?.checked:true
       })
      });
      pedidoActualId=id;
