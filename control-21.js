@@ -131,18 +131,25 @@ async function pcShowOrder(id){
   const canClose=complete&&invoiced&&!openAlerts.length&&canWrite;
   const rows=lines.map(l=>{
    const full=pcNum(l.cantidad_pendiente)===0,excess=pcNum(l.cantidad_recibida)>pcNum(l.cantidad_pedida);
+   const invoiceItems=invoicesMap.get(l.id)||[];
+   const invoicedQuantity=invoiceItems.reduce((sum,x)=>sum+Number(x.cantidad||0),0);
+   const amountNet=invoiceItems.reduce((sum,x)=>sum+Number(x.cantidad||0)*Number(x.precio_unitario||0)*(1-Number(x.descuento_pct||0)/100),0);
+   const invoicedPrice=invoicedQuantity>0?amountNet/invoicedQuantity:null;
+   const pricedDelivery=(receiptsMap.get(l.id)||[]).find(x=>x.precio_albaran!==null&&x.precio_albaran!==undefined);
    return '<tr><td>'+(full&&!excess?'<s>'+esc(l.referencia||"—")+'</s>':esc(l.referencia||"—"))+'</td>'+
     '<td>'+(full&&!excess?'<s>'+esc(l.descripcion)+'</s>':esc(l.descripcion))+'</td>'+
     '<td>'+pcFmt(l.cantidad_pedida)+' '+esc(l.unidad)+'</td>'+
     '<td>'+pcFmt(l.cantidad_recibida)+'</td><td><b>'+pcFmt(l.cantidad_pendiente)+'</b></td>'+
     '<td>'+pcFmt(l.cantidad_facturada)+'</td><td>'+currency(l.precio_pactado)+'</td>'+
+    '<td>'+currency(pricedDelivery?.precio_albaran)+'</td>'+
+    '<td><b>'+currency(invoicedPrice)+'</b></td>'+
     '<td>'+(excess?'<b class="error">Exceso de entrega</b>':full?'Entregado':'Pendiente')+
        (byAlert.get(l.id)?' · <b class="error">'+byAlert.get(l.id)+' alerta(s)</b>':'')+'</td></tr>';
   }).join("");
   const deliveryRows=receipts.map(d=>{
    const l=lines.find(x=>x.id===d.pedido_linea_id);
    return '<tr><td>'+esc(d.numero_albaran)+'</td><td>'+esc(d.fecha)+'</td><td>'+esc(l?.descripcion||"—")+'</td>'+
-    '<td>'+pcFmt(d.cantidad)+'</td><td>'+esc(d.origen)+'</td>'+
+    '<td>'+pcFmt(d.cantidad)+'</td><td>'+pcMoney(d.precio_albaran)+'</td><td>'+esc(d.origen)+'</td>'+
     '<td>'+(d.facturado?'<b>Bloqueado · facturado</b>':canWrite?'<button type="button" class="btn secondary" data-pc-lock="'+esc(d.id)+'">Marcar facturado</button>':'Pendiente')+'</td></tr>';
   }).join("");
   const invoiceRows=invoices.map(f=>'<tr><td>'+esc(f.numero_factura)+'</td><td>'+esc(f.fecha)+'</td>'+
@@ -178,11 +185,11 @@ async function pcShowOrder(id){
    '<p class="muted">Entrega: '+(complete?'Completa':'Pendiente / exceso')+' · Facturación: '+(invoiced?'Cuadrada':'Pendiente')+
    ' · Alertas abiertas: '+openAlerts.length+'. Solo se puede cerrar con todas las unidades recibidas, facturadas y sin incidencias.</p>'+
    '<h4>Materiales · se tachan al completar la entrega</h4>'+
-   '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Material</th><th>Pedido</th><th>Recibido</th><th>Pendiente</th><th>Facturado</th><th>Precio pactado</th><th>Estado</th></tr></thead><tbody>'+
-   (rows||'<tr><td colspan="8">Sin materiales</td></tr>')+'</tbody></table></div></div>'+
+   '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Material</th><th>Pedido</th><th>Recibido</th><th>Pendiente</th><th>Facturado</th><th>P. pedido</th><th>P. albarán</th><th>P. factura neto</th><th>Estado</th></tr></thead><tbody>'+
+   (rows||'<tr><td colspan="10">Sin materiales</td></tr>')+'</tbody></table></div></div>'+
    creation+
-   '<div class="card"><h3>Entregas vinculadas al pedido</h3><div class="table-wrap"><table><thead><tr><th>Albarán</th><th>Fecha</th><th>Material</th><th>Unidades</th><th>Origen</th><th>Protección</th></tr></thead><tbody>'+
-   (deliveryRows||'<tr><td colspan="6">Sin entregas</td></tr>')+'</tbody></table></div></div>'+
+   '<div class="card"><h3>Entregas vinculadas al pedido</h3><div class="table-wrap"><table><thead><tr><th>Albarán</th><th>Fecha</th><th>Material</th><th>Unidades</th><th>Precio albarán</th><th>Origen</th><th>Protección</th></tr></thead><tbody>'+
+   (deliveryRows||'<tr><td colspan="7">Sin entregas</td></tr>')+'</tbody></table></div></div>'+
    '<div class="card"><h3>Facturas relacionadas</h3><div class="table-wrap"><table><thead><tr><th>Factura</th><th>Fecha</th><th>Líneas</th></tr></thead><tbody>'+
    (invoiceRows||'<tr><td colspan="3">Sin facturas</td></tr>')+'</tbody></table></div></div>'+
    '<div class="card"><h3>Alertas e incidencias ('+openAlerts.length+' abiertas)</h3>'+
