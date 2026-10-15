@@ -48,7 +48,7 @@ async function pcLeerDocumentoPorFranjas(doc){
   await task.destroy();
   throw Error("La lectura visual por franjas admite por ahora hasta cinco páginas de un mismo documento.");
  }
- const allLines=[],alerts=[];
+ const allLines=[],alerts=[],allImages=[];
  let pry="",pryLiteral="",number="";
  try{
   for(let p=1;p<=pdf.numPages;p++){
@@ -65,6 +65,7 @@ async function pcLeerDocumentoPorFranjas(doc){
    ctx.fillRect(0,0,canvas.width,canvas.height);
    await page.render({canvasContext:ctx,viewport}).promise;
    const regions=Array.from({length:6},(_,i)=>pcImageBandFromCanvas(canvas,i));
+   allImages.push(...regions.map(x=>x.imagen));
    canvas.width=0;canvas.height=0;
    page.cleanup();
    const parsed=await sb("/functions/v1/compras-ocr-franjas",{
@@ -103,5 +104,5 @@ async function pcLeerDocumentoPorFranjas(doc){
   alerts.push("El número de documento de los recortes no coincide con la primera lectura");
  if(pry&&!/^PRY[0-9]{4,8}$/.test(pry))alerts.push("Código PRY no válido");
  return {lineas:allLines,codigo_proyecto:pry,codigo_proyecto_literal:pryLiteral,
-  numero_documento:number,advertencias:alerts};
+  numero_documento:number,advertencias:alerts,imagenes_zonas:allImages.length<=18?allImages:[]};
 }
