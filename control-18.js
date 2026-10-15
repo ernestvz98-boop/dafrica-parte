@@ -25,7 +25,7 @@ async function renderAlbaranesPiloto(){
     '</tbody></table></div>';
   const find=async()=>{
     const reference=input.value.trim(), name=itemName.value.trim();
-    if(reference&&!/^[A-Za-z0-9._/-]{2,80}$/.test(reference)){status.textContent="Introduce una referencia válida.";return;}
+    if(reference&&!/^[A-Za-z0-9._\/-]{2,80}$/.test(reference)){status.textContent="Introduce una referencia válida.";return;}
     if(name&&name.length<3){status.textContent="Escribe al menos tres caracteres del nombre.";return;}
     if(!reference&&!name){status.textContent="Indica referencia o nombre del material.";return;}
     button.disabled=true;status.textContent="Comprobando filtros y catálogo STEL…";result.innerHTML="";
