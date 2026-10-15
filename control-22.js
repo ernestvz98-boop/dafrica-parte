@@ -38,14 +38,17 @@ function renderComprasLotePilot(){
     (output.advertencias||[]).map(x=>'<p class="error">'+esc(x)+'</p>').join("")+
     output.documentos.map((d,i)=>{
      const lines=Array.isArray(d.lineas)?d.lineas:[];
-     const lineRows=lines.map(l=>'<tr><td>'+esc(l.referencia||"—")+'</td><td>'+esc(l.descripcion||"—")+'</td>'+
-      '<td>'+esc(l.cantidad??"—")+'</td><td>'+esc(l.unidad||"—")+'</td><td>'+esc(l.precio_unitario===null?"Sin precio":l.precio_unitario)+'</td></tr>').join("");
+     const lineRows=lines.map((l,j)=>'<tr><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="referencia" aria-label="Referencia fila '+(j+1)+'" style="min-width:122px" value="'+esc(l.referencia??"")+'"></td><td>'+esc(l.descripcion||"—")+'</td>'+
+      '<td><input type="number" step="0.001" min="0.001" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="cantidad" aria-label="Cantidad fila '+(j+1)+'" style="min-width:90px;max-width:105px" value="'+esc(l.cantidad??"")+'"></td><td>'+esc(l.unidad||"—")+'</td><td>'+esc(l.precio_unitario===null?"Sin precio":l.precio_unitario)+'</td></tr>').join("");
      return '<div class="card" style="margin-top:12px"><h4>Documento '+(i+1)+' · '+esc(d.tipo)+' · '+esc(d.numero||"Número sin identificar")+'</h4>'+
       '<p><b>Página(s) del PDF:</b> '+esc((d.paginas||[]).join(", ")||"Revisar")+
       ' · <b>Proveedor:</b> '+esc(d.proveedor||"—")+
       ' · <b>Fecha:</b> '+esc(d.fecha_literal||d.fecha||"—")+'</p>'+
-      '<p><b>Proyecto manuscrito:</b> '+esc(d.codigo_proyecto_literal||"No identificado")+
+      '<p><b>Proyecto manuscrito leído:</b> '+esc(d.codigo_proyecto_literal||"No identificado")+
       ' · <b>Obra impresa:</b> '+esc(d.obra_impresa||"—")+'</p>'+
+      '<label for="pcBatchProject'+i+'">Código PRY comprobado con el original (editable)</label>'+
+      '<input id="pcBatchProject'+i+'" type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-field="codigo_proyecto" maxlength="30" value="'+esc(d.codigo_proyecto||"")+'">'+
+      (d.cantidades_sospechosas?'<div class="module-note sensitive-note"><b>Revisión obligatoria de cantidades:</b> la IA ha repetido la misma cifra en gran parte de las filas. Corrige los números con el PDF original antes de registrar entregas.</div>':'')+
       (d.numero_pedido_mencionado?'<p><b>Pedido citado:</b> '+esc(d.numero_pedido_mencionado)+'</p>':"")+
       (d.albaranes_mencionados?.length?'<p><b>Albaranes citados:</b> '+esc(d.albaranes_mencionados.join(", "))+'</p>':"")+
       '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th></tr></thead><tbody>'+
@@ -57,6 +60,21 @@ function renderComprasLotePilot(){
       '</div>';
     }).join("")+
     '<p class="muted">Las facturas y albaranes quedan clasificados pero todavía requieren vinculación con un pedido y comprobación de duplicados. Los originales no quedan guardados.</p>';
+   res.querySelectorAll(".pcBatchEdit").forEach(control=>control.addEventListener("change",()=>{
+    const doc=output.documentos[Number(control.dataset.pcDoc)];
+    if(!doc)return;
+    const field=control.dataset.pcField;
+    const row=Number(control.dataset.pcRow);
+    const item=Number.isInteger(row)&&Array.isArray(doc.lineas)?doc.lineas[row]:null;
+    if(field==="referencia"&&item)item.referencia=control.value.trim();
+    if(field==="cantidad"&&item){
+      const text=control.value.trim();
+      item.cantidad=text===""?null:Number(text);
+    }
+    if(field==="codigo_proyecto")doc.codigo_proyecto=control.value.trim().toUpperCase().replace(/\s+/g,"");
+    const selected=$("pcBatchOrder"+control.dataset.pcDoc);
+    if(selected&&selected.value)selected.dispatchEvent(new Event("change"));
+   }));
    if(has("costes.editar"))await pcBindBatchDeliveryMatches(output.documentos);
    document.querySelectorAll("[data-pc-download]").forEach(el=>el.addEventListener("click",()=>{
     try{
