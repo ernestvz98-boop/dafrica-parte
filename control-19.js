@@ -37,10 +37,21 @@ function renderAlbaranVisionPilot(){
     const editField=(label,key,v)=>'<div class="kv"><label for="albReview_'+key+'">'+esc(label)+'</label>'+
       '<input id="albReview_'+key+'" data-review="'+key+'" type="text" maxlength="220" value="'+value(v)+'"></div>';
     const printDate=validation.printed||d.fecha_literal||"No extraída";
+    const codeCandidate=String(d.codigo_proyecto_stel||"").trim().toUpperCase().replace(/[^A-Z0-9]/g,"");
+    const projectIsCandidate=/^PRY[0-9]{4,8}$/.test(codeCandidate);
+    const projectForLines=projectIsCandidate&&!d.varias_obras?codeCandidate:"";
+    const automaticTitle=projectIsCandidate
+      ? ((d.tipo_documento==="ABONO"?"ABONO":d.tipo_documento==="COMPRA"?"COMPRA":"REVISAR")
+         +" | "+codeCandidate+" (PENDIENTE VERIFICAR) | "+String(d.proveedor||"")+" | ALB. "+String(d.numero_albaran||"")).slice(0,220)
+      : d.titulo_sugerido;
+
     // Si la IA ha devuelto una conversión incorrecta, no precargamos una fecha errónea.
     const initialDate=validation.consistent===true?String(d.fecha||""):"";
     output.innerHTML=warning+diagnostics+
       '<h4>Datos extraídos · revisa y corrige</h4>'+
+      (projectIsCandidate
+        ? '<div class="module-note"><b>Proyecto candidato por código manuscrito: '+esc(codeCandidate)+'</b>. Destino/obra impresa del proveedor: '+esc(d.obra_impresa||"—")+'. El código aún NO está contrastado con los proyectos de STEL. Verifica a qué obra corresponde y si el material debe imputarse completo.</div>'
+        : '<div class="module-note">No hay un código PRY confirmado por lectura. Comprueba la obra antes de imputar materiales.</div>')+
       '<p class="muted"><b>Referencia STEL escrita a mano:</b> '+esc(d.codigo_proyecto_stel_literal||"No detectada")+'. El código debe comprobarse contra el catálogo de proyectos.</p>'+
 
       '<p class="muted">Fecha literal impresa: <b>'+esc(printDate)+'</b>. Interpretación IA: <b>'+esc(d.fecha||"sin identificar")+'</b>. Verifica el año antes de continuar.</p>'+
@@ -53,19 +64,20 @@ function renderAlbaranVisionPilot(){
        '<select id="albReviewType"><option value="DESCONOCIDO">Revisar tipo</option>'+
        '<option value="COMPRA"'+(d.tipo_documento==="COMPRA"?" selected":"")+'>Compra</option>'+
        '<option value="ABONO"'+(d.tipo_documento==="ABONO"?" selected":"")+'>Abono</option></select></div>'+
-       editField("Obra escrita en el papel","obra_texto",d.obra_texto)+
-       editField("Obra impresa por proveedor","obra_impresa",d.obra_impresa)+
-       editField("Código manuscrito proyecto STEL (PRY...)","codigo_proyecto_stel",d.codigo_proyecto_stel)+
-       editField("Título sugerido","titulo_sugerido",d.titulo_sugerido)+
+       editField("Obra/destino leído en el papel","obra_texto",d.obra_texto)+
+       editField("Destino/obra impresa por proveedor","obra_impresa",d.obra_impresa)+
+       editField("Proyecto candidato manuscrito (PRY...)","codigo_proyecto_stel",d.codigo_proyecto_stel)+
+       editField("Título sugerido","titulo_sugerido",automaticTitle)+
       '</div>'+
       '<h4>Materiales ('+lines.length+') · revisa descripciones y cantidades</h4>'+
-      '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Descripción editable</th><th>Unidades</th><th>Precio leído</th><th>Obra de línea</th></tr></thead><tbody>'+
+      (projectForLines?'<p class="muted">El código '+esc(projectForLines)+' se propone para estas líneas porque solo se ha encontrado un PRY manuscrito. Verifica el destino real de cada material.</p>':'')+
+      '<div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Descripción editable</th><th>Unidades</th><th>Precio leído</th><th>Imputación propuesta por línea</th></tr></thead><tbody>'+
       (lines.map((x,i)=>'<tr>'+
        '<td><input class="albLineRef" data-row="'+i+'" style="min-width:115px" value="'+value(x.referencia)+'"></td>'+
        '<td><input class="albLineDesc" data-row="'+i+'" style="min-width:250px" value="'+value(x.descripcion)+'"></td>'+
        '<td><input class="albLineQty" data-row="'+i+'" type="number" step="0.001" style="min-width:80px" value="'+value(x.cantidad)+'"></td>'+
        '<td>'+esc(amount(x.precio_unitario))+'</td>'+
-       '<td><input class="albLineWork" data-row="'+i+'" style="min-width:180px" value="'+value(x.obra_texto)+'"></td>'+
+       '<td><input class="albLineWork" data-row="'+i+'" style="min-width:180px" value="'+value(projectForLines||x.obra_texto)+'"></td>'+
       '</tr>').join("")||'<tr><td colspan="5">No se identificaron líneas.</td></tr>')+
       '</tbody></table></div>'+
       '<h4>Advertencias y dudas</h4>'+
@@ -102,7 +114,7 @@ function renderAlbaranVisionPilot(){
       if(!revisedLines.length||revisedLines.some(x=>!x.referencia||!x.descripcion||x.cantidad===null||!Number.isFinite(x.cantidad)||x.cantidad<=0)){
         info.textContent="Revisa referencias, descripciones y cantidades de todas las líneas.";return;
       }
-      const projectCode=rvalue("codigo_proyecto_stel").toUpperCase().replace(/\\s+/g,"");
+      const projectCode=rvalue("codigo_proyecto_stel").toUpperCase().replace(/[^A-Z0-9]/g,"");
       if(projectCode&&!/^PRY[0-9]{4,8}$/.test(projectCode)){
         info.textContent="El código STEL no tiene el formato PRY + números. Comprueba la escritura del documento.";return;
       }
@@ -113,6 +125,8 @@ function renderAlbaranVisionPilot(){
         obra_texto:rvalue("obra_texto"),obra_impresa:rvalue("obra_impresa"),
         codigo_proyecto_stel:projectCode,
         codigo_proyecto_stel_literal:String(d.codigo_proyecto_stel_literal||""),
+        proyecto_imputacion_candidato:projectCode||"",
+        destino_proveedor_distinto_de_imputacion:!!projectCode&&/ALMAC/i.test(rvalue("obra_impresa")),
         titulo_sugerido:proposedTitle,
         lineas:revisedLines,estado:"REVISADO_LOCALMENTE_SIN_ENVIO_STEL",
         vinculacion_proyecto_stel:"NO_VERIFICADA"
