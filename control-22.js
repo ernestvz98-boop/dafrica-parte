@@ -140,13 +140,24 @@ function renderComprasLotePilot(){
    res.querySelectorAll(".pcBatchEdit").forEach(control=>control.addEventListener("change",()=>{
     const doc=output.documentos[Number(control.dataset.pcDoc)];
     if(!doc)return;
+    const field=control.dataset.pcField;
+    if(field==="codigo_proyecto"){
+      doc.codigo_proyecto=control.value.trim().toUpperCase().replace(/\s+/g,"");
+      doc.__proyectoDudoso=true;
+      const status=$("pcBatchAuditStatus"+control.dataset.pcDoc);
+      if(status&&doc.__audit?.materiales_verificados)
+       status.innerHTML='<b>Materiales verificados; proyecto pendiente de confirmación.</b>'+
+         '<p>La corrección del PRY no anula la comprobación de referencias ni cantidades. Selecciona un pedido con ese código y confirma expresamente la obra.</p>';
+      const sel=$("pcBatchOrder"+control.dataset.pcDoc);
+      if(sel?.value)sel.dispatchEvent(new Event("change"));
+      return;
+    }
     doc.__audit=null;
     doc.__reviewRows=null;
     doc.__revision=(doc.__revision||0)+1;
     refreshManualChecks(Number(control.dataset.pcDoc),doc);
     const status=$("pcBatchAuditStatus"+control.dataset.pcDoc);
-    if(status)status.innerHTML='<b>Verificación caducada:</b> has cambiado datos desde la última lectura. Vuelve a ejecutar la segunda IA.';
-    const field=control.dataset.pcField;
+    if(status)status.innerHTML='<b>Verificación de materiales caducada:</b> has corregido una referencia, descripción o cantidad. Repite la auditoría.';
     const row=Number(control.dataset.pcRow);
     const item=Number.isInteger(row)&&Array.isArray(doc.lineas)?doc.lineas[row]:null;
     if(field==="referencia"&&item)item.referencia=control.value.trim();
@@ -155,7 +166,7 @@ function renderComprasLotePilot(){
       const text=control.value.trim();
       item.cantidad=text===""?null:Number(text);
     }
-    if(field==="codigo_proyecto")doc.codigo_proyecto=control.value.trim().toUpperCase().replace(/\s+/g,"");
+
     const selected=$("pcBatchOrder"+control.dataset.pcDoc);
     if(selected&&selected.value)selected.dispatchEvent(new Event("change"));
    }));
@@ -182,7 +193,7 @@ function renderComprasLotePilot(){
    });
    const callAudit=async (doc,first,third=false)=>sb("/functions/v1/compras-verificar-documento",{
      method:"POST",headers:{"Content-Type":"application/json"},
-     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first,modo:third?"tercera":"segunda",ampliar:third&&(doc.lineas||[]).length>=7&&!(doc.__zoneImages?.length),imagenes_zonas:doc.__zoneImages||[]})
+     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first,codigo_proyecto_origen:doc.codigo_proyecto,modo:third?"tercera":"segunda",ampliar:third&&(doc.lineas||[]).length>=7&&!(doc.__zoneImages?.length),imagenes_zonas:doc.__zoneImages||[]})
    });
    const auditReport=(result,label)=>{
      const stats=result?.estadisticas||{};
