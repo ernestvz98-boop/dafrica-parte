@@ -38,7 +38,7 @@ function renderComprasLotePilot(){
     (output.advertencias||[]).map(x=>'<p class="error">'+esc(x)+'</p>').join("")+
     output.documentos.map((d,i)=>{
      const lines=Array.isArray(d.lineas)?d.lineas:[];
-     const lineRows=lines.map((l,j)=>'<tr><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="referencia" aria-label="Referencia fila '+(j+1)+'" style="min-width:122px" value="'+esc(l.referencia??"")+'"></td><td>'+esc(l.descripcion||"—")+'</td>'+
+     const lineRows=lines.map((l,j)=>'<tr><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="referencia" aria-label="Referencia fila '+(j+1)+'" style="min-width:122px" value="'+esc(l.referencia??"")+'"></td><td><input type="text" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="descripcion" aria-label="Descripción fila '+(j+1)+'" style="min-width:215px" value="'+esc(l.descripcion??"")+'"></td>'+
       '<td><input type="number" step="0.001" min="0.001" class="pcBatchEdit" data-pc-doc="'+i+'" data-pc-row="'+j+'" data-pc-field="cantidad" aria-label="Cantidad fila '+(j+1)+'" style="min-width:90px;max-width:105px" value="'+esc(l.cantidad??"")+'"></td><td>'+esc(l.unidad||"—")+'</td><td>'+esc(l.precio_unitario===null?"Sin precio":l.precio_unitario)+'</td>'+
       '<td><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="pcBatchLineChecked" style="width:auto" data-pc-doc="'+i+'" data-pc-row="'+j+'">Sí</label></td></tr>').join("");
      return '<div class="card" style="margin-top:12px"><h4>Documento '+(i+1)+' · '+esc(d.tipo)+' · '+esc(d.numero||"Número sin identificar")+'</h4>'+
@@ -74,6 +74,7 @@ function renderComprasLotePilot(){
     const row=Number(control.dataset.pcRow);
     const item=Number.isInteger(row)&&Array.isArray(doc.lineas)?doc.lineas[row]:null;
     if(field==="referencia"&&item)item.referencia=control.value.trim();
+    if(field==="descripcion"&&item)item.descripcion=control.value.trim();
     if(field==="cantidad"&&item){
       const text=control.value.trim();
       item.cantidad=text===""?null:Number(text);
@@ -146,6 +147,14 @@ function renderComprasLotePilot(){
    document.querySelectorAll("[data-pc-load-order]").forEach(el=>{
     el.addEventListener("click",()=>{
      const d=output.documentos[Number(el.dataset.pcLoadOrder)];
+     if(!d?.__audit||d.__audit.estado!=="DOBLE_COINCIDENCIA"){
+      alert("La carga del pedido queda bloqueada hasta que una segunda IA confirme todos los datos.");return;
+     }
+     const j=String(el.dataset.pcLoadOrder);
+     const lineChecks=[...document.querySelectorAll('.pcBatchLineChecked[data-pc-doc="'+j+'"]')];
+     if(lineChecks.length!==(d.lineas||[]).length||lineChecks.some(c=>!c.checked)){
+      alert("Antes de importar un pedido, revisa y confirma visualmente todas las líneas.");return;
+     }
      if(!d||!Array.isArray(d.lineas)||!d.lineas.length)return;
      const form=$("pcCreate");if(!form){alert("No tienes permisos para crear pedidos");return;}
      $("pcNumber").value=d.numero||"";
