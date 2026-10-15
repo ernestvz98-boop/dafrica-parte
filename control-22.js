@@ -107,9 +107,9 @@ function renderComprasLotePilot(){
        unidad:x.unidad,precio_unitario:x.precio_unitario
      }))
    });
-   const callAudit=async (doc,first)=>sb("/functions/v1/compras-verificar-documento",{
+   const callAudit=async (doc,first,third=false)=>sb("/functions/v1/compras-verificar-documento",{
      method:"POST",headers:{"Content-Type":"application/json"},
-     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first})
+     body:JSON.stringify({data:"data:application/pdf;base64,"+doc.pdf_separado_b64,primera_lectura:first,modo:third?"tercera":"segunda"})
    });
    const auditReport=(result,label)=>{
      const stats=result?.estadisticas||{};
@@ -161,7 +161,7 @@ function renderComprasLotePilot(){
        if((doc.__revision||0)!==revisionAtStart)throw Error("El documento se editó mientras se analizaba; los resultados se han descartado.");
        if(second.estado==="DOBLE_COINCIDENCIA"&&second.auditoria_id){
          status.innerHTML='<b>Segunda lectura coincidente. Ejecutando tercera lectura independiente como control final…</b>';
-         const third=await callAudit(doc,first);
+         const third=await callAudit(doc,first,true);
          if((doc.__revision||0)!==revisionAtStart)throw Error("Los datos cambiaron mientras se verificaban; repite la auditoría.");
          if(third.estado==="DOBLE_COINCIDENCIA"&&third.auditoria_id){
            doc.__audit=third;
@@ -188,7 +188,7 @@ function renderComprasLotePilot(){
              unidad:x.unidad,precio_unitario:x.precio_unitario
            }))
          };
-         const third=await callAudit(doc,secondAsFirst);
+         const third=await callAudit(doc,secondAsFirst,true);
          if((doc.__revision||0)!==revisionAtStart)throw Error("Los datos se han editado durante la auditoría; resultados descartados.");
          const headerSame=["tipo","numero","proveedor","fecha"].every(field=>
            String(first[field]??"").trim().toUpperCase()===String(secondAsFirst[field]??"").trim().toUpperCase());
