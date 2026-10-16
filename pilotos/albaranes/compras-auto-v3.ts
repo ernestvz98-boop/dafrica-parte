@@ -60,25 +60,22 @@ function canon(v:unknown){return norm(v).replace(/[^A-Z0-9]/g,"");}
 function decideGeo(geo:any,readings:any[],header:any,expected:string){
  const problems:string[]=[],notices:string[]=[],n=geo.numero_filas,original=geo.lineas;
  if(!Array.isArray(original)||original.length!==n||n<7||n>50)problems.push("Geometría incompleta");
- if(!Array.isArray(readings[0]?.lineas)||readings[0].lineas.length!==n)problems.push("Lectura independiente sin las "+n+" filas");
- const approved:any[]=[];const pending:number[]=[];const debug:any[]=[];
+ if(!Array.isArray(readings[0]?.lineas)||readings[0].lineas.length!==n)notices.push("La primera auditoría omitió filas; se usarán los recortes geométricos como referencia");
+ const approved:any[]=[],pending:number[]=[];
+ const key=(v:any)=>v&&String(v.referencia||"").trim()&&typeof v.cantidad==="number"&&v.cantidad>0&&Number.isFinite(v.cantidad)&&canon(v.descripcion)?
+  JSON.stringify([String(v.referencia).trim(),v.cantidad,canon(v.descripcion),norm(v.unidad),v.precio_unitario??null]):"";
  for(let i=0;i<n;i++){
-  const candidates=[original[i],...readings.map(r=>r.lineas?.[i])];
-  const refValues=candidates.map(v=>String(v?.referencia||"").trim());
-  const qtyValues=candidates.map(v=>v?.cantidad);
-  const descValues=candidates.map(v=>canon(v?.descripcion||""));
-  const choose=(values:any[])=>{
-    const groups=new Map<string,{n:number,val:any}>();
-    values.forEach(v=>{const k=JSON.stringify(v);const o=groups.get(k)||{n:0,val:v};o.n++;groups.set(k,o)});
-    return [...groups.values()].sort((a,b)=>b.n-a.n)[0];
-  };
-  const refs=choose(refValues),qty=choose(qtyValues),desc=choose(descValues);
-  const validIdx=readings.every(r=>r.lineas?.[i]?.indice===i+1);
-  const valid=validIdx&&refs.n>=2&&refs.val&&qty.n>=2&&typeof qty.val==="number"&&Number.isFinite(qty.val)&&qty.val>0&&desc.n>=2&&desc.val.length>0;
-  if(!valid){pending.push(i+1);debug.push({fila:i+1,referencias:refValues,cantidades:qtyValues,descripcion_coincidente:desc.n});}
-  const idx=refValues.findIndex((v,j)=>v===refs.val&&qtyValues[j]===qty.val&&descValues[j]===desc.val);
-  const chosen=candidates[idx>=0?idx:0]||{};
-  approved.push({referencia:refs.val||"",descripcion:chosen.descripcion||original[i]?.descripcion||"",cantidad:qty.val??null,unidad:String(chosen.unidad||""),precio_unitario:chosen.precio_unitario??null});
+  const all=[original[i],...readings.map(r=>r.lineas?.[i])];
+  const votes=new Map<string,{count:number,item:any}>();
+  all.forEach((row,j)=>{
+   if(j>0&&readings[j-1]?.lineas?.[i]?.indice!==i+1)return;
+   const k=key(row);if(!k)return;
+   const vote=votes.get(k)||{count:0,item:row};vote.count++;votes.set(k,vote);
+  });
+  const selected=[...votes.values()].sort((a,b)=>b.count-a.count)[0];
+  if(!selected||selected.count<2)pending.push(i+1);
+  const v=selected?.item||original[i]||{};
+  approved.push({referencia:String(v.referencia||""),descripcion:String(v.descripcion||""),cantidad:v.cantidad??null,unidad:String(v.unidad||""),precio_unitario:v.precio_unitario??null});
  }
  if(pending.length)problems.push("Filas sin consenso automático: "+pending.join(", "));
  if(!goodDate(header.fecha)||!norm(header.numero))problems.push("Número o fecha de documento no comprobados");
@@ -86,10 +83,9 @@ function decideGeo(geo:any,readings:any[],header:any,expected:string){
  if(header.tipo!=="ALBARAN")problems.push("El documento no es un albarán");
  const guessed=norm(geo.codigo_proyecto),project=/^PRY\d{5}$/.test(guessed)&&guessed===norm(header.pry_codigo)?guessed:null;
  if(!project)notices.push("Código PRY no verificado: materiales independientes de la obra");
- if(readings.some(r=>Array.isArray(r.dudas)&&r.dudas.length))notices.push("El lector independiente comunicó dudas");
- return {errors:problems,notices,project,items:approved,validated:problems.length===0,review_rows:pending,debug,geometry:n,rows_vision:readings.map(r=>r.lineas?.length??0)};
+ if(readings.some(r=>Array.isArray(r.dudas)&&r.dudas.length))notices.push("Una lectura comunicó dudas; los artículos solo se aceptan con consenso de filas");
+ return {errors:problems,notices,project,items:approved,validated:problems.length===0,review_rows:pending,geometry:n,rows_vision:readings.map(r=>r.lineas?.length??0)};
 }
-
 Deno.serve(async(req:Request)=>{
  if(req.method==="OPTIONS")return new Response(null,{headers:cors});
  if(req.method!=="POST")return reply({error:"Método no permitido"},405);
