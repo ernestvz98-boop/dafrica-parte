@@ -59,17 +59,91 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
   '<button class="btn" type="button" id="pcAutoStart">Procesar y archivar automáticamente</button>'+
   '<p id="pcAutoStatus" class="muted" role="status">Selecciona un archivo.</p>'+
   '<div id="pcAutoResults"></div>'+
-  '<h4>Últimos documentos procesados</h4><button type="button" class="btn secondary" id="pcAutoRetry" style="margin-bottom:10px">Reprocesar retenidos (sin subir PDF)</button><div id="pcAutoHistory" class="muted">Cargando…</div>'+
+  '<h4>Lecturas de albaranes y materiales guardados</h4><div id="pcAutoOverview"></div><button type="button" class="btn secondary" id="pcAutoRetry" style="margin-bottom:10px">Reprocesar retenidos (sin subir PDF)</button><div id="pcAutoHistory" class="muted">Cargando…</div>'+
   '</div>';
  const file=$("pcAutoFile"),consent=$("pcAutoConsent"),button=$("pcAutoStart"),status=$("pcAutoStatus"),results=$("pcAutoResults"),history=$("pcAutoHistory"),retry=$("pcAutoRetry");
+ const overview=$("pcAutoOverview");
+ let firstHistory=true;
+ let loadedDocuments=new Map();
+ const safeQuantity=v=>v===null||v===undefined||v===""?"—":Number.isFinite(Number(v))?Number(v).toLocaleString("es-ES",{maximumFractionDigits:4}):String(v);
+ const lineFingerprint=x=>[
+  String(x.codigo_articulo??x.referencia??"").trim(),
+  Number(x.cantidad).toString(),
+  String(x.descripcion??"").trim()
+ ].join("¦");
+ const rowsMatch=(read,stored)=>{
+  if(!Array.isArray(read)||!Array.isArray(stored)||read.length!==stored.length||read.length===0)return false;
+  const count=new Map();
+  for(const line of stored){const key=lineFingerprint(line);count.set(key,(count.get(key)||0)+1)}
+  for(const line of read){const key=lineFingerprint(line);const left=count.get(key)||0;if(!left)return false;count.set(key,left-1)}
+  return [...count.values()].every(n=>n===0);
+ };
  const renderHistory=async()=>{
   try{
-   const rows=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,archivo_path,ia_estado,ia_datos,created_at&order=created_at.desc&limit=30");
-   history.innerHTML=rows.length?'<div class="table-wrap"><table><thead><tr><th>Albarán</th><th>Proveedor</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>'+
-    rows.map(d=>'<tr><td>'+esc(d.numero_documento||"Sin número")+'</td><td>'+esc(d.proveedor_nombre||"—")+'</td><td>'+esc(d.fecha_documento||"—")+'</td><td>'+esc(d.ia_estado||"PENDIENTE")+'</td></tr>').join("")+'</tbody></table></div>':
-    'Aún no hay documentos archivados.';
-  }catch(e){history.textContent="No se pudo consultar el historial: "+(e?.message||e)}
+   const rows=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,archivo_path,obra_id,ia_estado,ia_datos,created_at&order=created_at.desc&limit=30");
+   loadedDocuments=new Map(rows.map(d=>[d.id,d]));
+   const ids=rows.map(d=>String(d.id)).filter(id=>/^[0-9a-f-]{36}$/i.test(id));
+   let stored=[],linesLoaded=true;
+   if(ids.length){
+    try{
+     stored=await sb("/rest/v1/coste_lineas?select=documento_id,codigo_articulo,descripcion,cantidad,unidad,precio_unitario&documento_id=in.("+ids.join(",")+")&limit=1000");
+     if(stored.length===1000)linesLoaded=false; // do not claim exhaustive comparison if paginated.
+    }catch(e){linesLoaded=false}
+   }
+   const storedByDoc=new Map();
+   for(const line of stored){if(!storedByDoc.has(line.documento_id))storedByDoc.set(line.documento_id,[]);storedByDoc.get(line.documento_id).push(line)}
+   const oldOpen=new Set([...history.querySelectorAll("details[data-doc-id][open]")].map(x=>x.dataset.docId));
+   const openOnLoad=firstHistory&&rows.length<=3;firstHistory=false;
+   const info=rows.map(d=>{
+    const materials=Array.isArray(d.ia_datos?.materiales)?d.ia_datos.materiales:[];
+    const saved=storedByDoc.get(d.id)||[];
+    const matched=linesLoaded&&rowsMatch(materials,saved);
+    const verified=d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"&&matched;
+    const warnings=Array.isArray(d.ia_datos?.avisos)?d.ia_datos.avisos:[];
+    const errors=Array.isArray(d.ia_datos?.errores)?d.ia_datos.errores:[];
+    const withPrice=materials.filter(x=>x.precio_unitario!==null&&x.precio_unitario!==undefined).length;
+    return {d,materials,saved,matched,verified,warnings,errors,withPrice};
+   });
+   const verifiedDocs=info.filter(x=>x.verified);
+   const verifiedRows=verifiedDocs.reduce((n,x)=>n+x.saved.length,0);
+   overview.innerHTML='<p><b>Lecturas almacenadas:</b> '+esc(rows.length)+' documento(s) en el historial · '+esc(verifiedDocs.length)+' con materiales contrastados y comprobados en la base de datos · '+esc(verifiedRows)+' líneas comprobadas.</p>'+
+    '<p class="muted">«Contrastado sin imputación» significa que se archivaron las referencias y cantidades, NO que existan precios o una obra asignada. La información puede consultarse sin volver a ejecutar IA.</p>';
+   history.innerHTML=rows.length?info.map(({d,materials,saved,matched,verified,warnings,errors,withPrice})=>{
+     const statusLabel=verified?"Materiales contrastados":d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"?"Auditoría contrastada, comprobar archivo de líneas":d.ia_estado==="RETENIDO_AUTOMATICAMENTE"?"Retenido, sin aceptar materiales":d.ia_estado||"Pendiente";
+     const opened=openOnLoad||oldOpen.has(d.id);
+     const table=materials.length?'<div class="table-wrap" style="max-height:600px;overflow:auto"><table><thead><tr><th>Fila</th><th>Referencia</th><th>Descripción leída</th><th>Cantidad</th><th>Unidad</th><th>Precio unitario</th></tr></thead><tbody>'+
+      materials.map((line,i)=>'<tr><td>'+esc(i+1)+'</td><td>'+esc(line.referencia||"Sin referencia")+'</td><td>'+esc(line.descripcion||"Sin descripción")+'</td><td>'+esc(safeQuantity(line.cantidad))+'</td><td>'+esc(line.unidad||"—")+'</td><td>'+esc(line.precio_unitario===null||line.precio_unitario===undefined?"No consta":safeQuantity(line.precio_unitario)+" €")+'</td></tr>').join("")+
+      '</tbody></table></div>':'<p>La lectura no contiene materiales disponibles.</p>';
+     return '<details data-doc-id="'+esc(d.id)+'" '+(opened?'open':'')+' style="border:1px solid #d6dee8;border-radius:10px;padding:12px;margin:9px 0">'+
+      '<summary style="cursor:pointer"><b>Albarán '+esc(d.numero_documento||"sin número")+'</b> · '+esc(materials.length)+' fila(s) leída(s) · '+esc(saved.length)+' guardada(s) · '+esc(statusLabel)+'</summary>'+
+      '<p><b>Proveedor:</b> '+esc(d.proveedor_nombre||"No reconocido")+' · <b>Fecha:</b> '+esc(d.fecha_documento||"No reconocida")+'</p>'+
+      '<p><b>Obra:</b> '+esc(d.obra_id?"Asignación registrada":"Sin asignar")+' · <b>PRY:</b> '+esc(d.ia_datos?.proyecto_candidato||"Sin confirmar")+' · <b>Precios encontrados:</b> '+esc(withPrice)+'/'+esc(materials.length)+'</p>'+
+      '<p><b>Comprobación de guardado:</b> '+esc(matched?"Las referencias, conceptos y cantidades coinciden con las filas registradas":linesLoaded?"La lectura y los registros no coinciden o faltan líneas":"No se ha podido comprobar el registro completo")+'</p>'+
+      table+
+      (warnings.length?'<p class="muted"><b>Avisos:</b> '+esc(warnings.join(" · "))+'</p>':'')+
+      (errors.length?'<p><b>Incidencias:</b> '+esc(errors.join(" · "))+'</p>':'')+
+      (d.archivo_path?'<p><button type="button" class="btn secondary" data-pdf-id="'+esc(d.id)+'">Descargar PDF original archivado</button></p>':'')+
+      '</details>';
+   }).join(""):'Aún no hay documentos archivados.';
+  }catch(e){history.textContent="No se pudo consultar el historial: "+(e?.message||e);overview.textContent="No se han podido comprobar las lecturas registradas."}
  };
+ history.addEventListener("click",async e=>{
+  const clicked=e.target?.closest?.("button[data-pdf-id]");
+  if(!clicked)return;
+  const record=loadedDocuments.get(clicked.dataset.pdfId);
+  if(!record||!record.archivo_path||!/^[A-Za-z0-9._/-]+$/.test(record.archivo_path))return;
+  clicked.disabled=true;const before=clicked.textContent;clicked.textContent="Preparando PDF privado…";
+  try{
+   const url=SUPABASE_URL+"/storage/v1/object/authenticated/costes-auto/"+record.archivo_path.split("/").map(encodeURIComponent).join("/");
+   const response=await authFetch(url);
+   if(!response.ok)throw Error("No se pudo recuperar el PDF (HTTP "+response.status+")");
+   const blob=await response.blob(),objectUrl=URL.createObjectURL(blob),a=document.createElement("a");
+   a.href=objectUrl;a.download="Albaran_"+String(record.numero_documento||"documento").replace(/[^A-Za-z0-9.-]/g,"_")+".pdf";
+   document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(objectUrl),60000);
+  }catch(err){status.textContent="Error al recuperar el PDF: "+(err?.message||err)}
+  finally{clicked.disabled=false;clicked.textContent=before}
+ });
  renderHistory();
  retry.addEventListener("click",async()=>{
    if(!has("costes.editar")||!consent.checked){status.textContent="Para reprocesar, autoriza el análisis documental y comprueba tus permisos.";return}
