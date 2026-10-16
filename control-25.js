@@ -150,10 +150,10 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    await Promise.all(Array.from({length:Math.min(2,work.length)},()=>consume()));
    const ok=out.filter(x=>x.estado==="CONTRASTADO_SIN_IMPUTACION").length;
    const held=out.filter(x=>x.estado==="RETENIDO_AUTOMATICAMENTE"||x.estado==="RETENIDO").length;
-   const duplicates=out.filter(x=>x.estado==="DUPLICADO").length;
+   const already=out.filter(x=>x.estado==="YA_PROCESADO"||x.estado==="DUPLICADO").length;
    const errors=out.filter(x=>x.estado==="ERROR"||x.estado==="LINEAS_PENDIENTES"||x.estado==="RETENIDO_SIN_PROCESAR").length;
    const archived=out.filter(x=>!!x.documento_id).length;
-   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos analizados.</b> '+esc(ok)+' contrastados, '+esc(held)+' retenidos, '+esc(duplicates)+' duplicados, <b>'+esc(errors)+' errores</b>.</p>'+
+   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos analizados.</b> '+esc(ok)+' nuevos contrastados, '+esc(held)+' retenidos, '+esc(already)+' ya archivados, <b>'+esc(errors)+' errores</b>.</p>'+
     out.map((x,i)=>'<div class="module-note sensitive-note"><b>'+esc(x.numero||split.documentos[i]?.numero||"Documento "+(i+1))+' · '+esc(x.estado||"ERROR")+'</b>'+
     '<p>'+esc(x.lineas_detectadas??"?")+' líneas; obra: '+esc(x.proyecto_candidato||"sin asociar")+'</p>'+
     (x.geometryWarning?'<p class="muted">'+esc(x.geometryWarning)+'</p>':'')+
@@ -161,7 +161,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
     ((x.incidencias||[]).length>12?'<p class="muted">'+esc(x.incidencias.length-12)+' incidencias adicionales; no se han aceptado datos inciertos.</p>':"")+
     (x.avisos||[]).map(z=>'<p class="muted">• '+esc(z)+'</p>').join("")+'</div>').join("")+
     '<p class="muted">Registro documental automático. No se contabilizan costes sin importes fiables ni asignación de obra comprobada. STEL no se modifica.</p>';
-   status.textContent=errors?"Proceso incompleto: "+errors+" documento(s) con error; "+archived+" archivo(s) registrados. Consulta los detalles.": "Proceso terminado: "+archived+" archivo(s) registrados y "+duplicates+" duplicado(s) detectados.";
+   status.textContent=errors?"Proceso incompleto: "+errors+" documento(s) con error; "+archived+" archivo(s) registrados. Consulta los detalles.": "Proceso terminado: "+ok+" nuevo(s) contrastado(s), "+already+" previamente archivado(s), "+held+" retenido(s). STEL y costes no modificados.";
    await renderHistory();
   }catch(e){status.textContent="Lote retenido sin registrar: "+(e?.message||String(e))}
   finally{button.disabled=false}
