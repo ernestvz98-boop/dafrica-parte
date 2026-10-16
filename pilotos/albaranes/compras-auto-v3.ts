@@ -58,24 +58,67 @@ async function auditBands(key:string,images:string[],n:number,model:string){
 }
 function canon(v:unknown){return norm(v).replace(/[^A-Z0-9]/g,"");}
 function decideGeo(geo:any,readings:any[],header:any,expected:string){
- const problems:string[]=[],notices:string[]=[],n=geo.numero_filas,original=geo.lineas;
- if(!Array.isArray(original)||original.length!==n||n<1||n>50)problems.push("Geometría incompleta");
- if(!Array.isArray(readings[0]?.lineas)||readings[0].lineas.length!==n)notices.push("La primera auditoría omitió filas; se usarán los recortes geométricos como referencia");
+ const problems:string[]=[],notices:string[]=[],n=geo.numero_filas,initial=geo.lineas;
  const approved:any[]=[],pending:number[]=[];
- const key=(v:any)=>v&&(String(v.referencia||"").trim()||geo.sin_codigo_permitido===true)&&typeof v.cantidad==="number"&&v.cantidad>0&&Number.isFinite(v.cantidad)&&canon(v.descripcion)?
-  JSON.stringify([String(v.referencia).trim(),v.cantidad,canon(v.descripcion),v.precio_unitario??null]):"";
+ if(!Array.isArray(initial)||initial.length!==n||n<1||n>50)problems.push("Recuento físico o clasificación incompletos");
+ if(readings.length<2||readings.some(r=>!Array.isArray(r?.lineas)||r.lineas.length!==n))
+   problems.push("Se necesitan dos lecturas completas e independientes de las filas físicas");
+ const identity=(v:any)=>{
+   const ref=canon(v?.referencia);
+   const qty=Number(v?.cantidad);
+   if(!v||(!ref&&!geo.sin_codigo_permitido)||!Number.isFinite(qty)||qty<=0)return "";
+   return JSON.stringify([ref,qty]);
+ };
+ const words=(s:any)=>new Set(norm(s).split(/[^A-Z0-9]+/).filter((x:string)=>x.length>=2));
+ const similarity=(a:any,b:any)=>{
+   const a0=canon(a),b0=canon(b);
+   if(!a0||!b0)return 0;
+   if(a0===b0)return 1;
+   const wa=words(a),wb=words(b);
+   if(!wa.size||!wb.size)return 0;
+   let common=0;for(const w of wa)if(wb.has(w))common++;
+   return 2*common/(wa.size+wb.size);
+ };
  for(let i=0;i<n;i++){
-  const all=[original[i],...readings.map(r=>r.lineas?.[i])];
-  const votes=new Map<string,{count:number,item:any}>();
-  all.forEach((row,j)=>{
-   if(j>0&&readings[j-1]?.lineas?.[i]?.indice!==i+1)return;
-   const k=key(row);if(!k)return;
-   const vote=votes.get(k)||{count:0,item:row};vote.count++;votes.set(k,vote);
-  });
-  const selected=[...votes.values()].sort((a,b)=>b.count-a.count)[0];
-  if(!selected||selected.count<2)pending.push(i+1);
-  const v=selected?.item||original[i]||{};
-  approved.push({referencia:String(v.referencia||""),descripcion:String(v.descripcion||""),cantidad:v.cantidad??null,unidad:String(v.unidad||""),precio_unitario:v.precio_unitario??null});
+   const original=initial?.[i]||{};
+   const proposed=identity(original);
+   const matches=new Map<string,{items:any[],count:number}>();
+   for(const reading of readings){
+     const item=reading?.lineas?.[i];
+     if(!item||item.indice!==i+1)continue;
+     const k=identity(item);
+     if(!k)continue;
+     const group=matches.get(k)||{items:[],count:0};
+     group.items.push(item);group.count++;matches.set(k,group);
+   }
+   const best=[...matches].sort((a,b)=>b[1].count-a[1].count)[0];
+   const independentVotes=best?.[1]?.count??0;
+   const sameAsClassifier=best?.[0]===proposed;
+   // If the classifier was wrong, require ALL THREE independent readings
+   // to agree before replacing any code or quantity, rather than a 2/3 vote.
+   const enough=independentVotes>=2&&(sameAsClassifier||
+      (readings.length>=3&&independentVotes===3));
+   const consensusRows=best?.[1]?.items||[];
+   const conceptsAgree=consensusRows.length>=2&&
+      consensusRows.every((r:any)=>similarity(r.descripcion,consensusRows[0].descripcion)>=.55);
+   const code=best?.[0]?JSON.parse(best[0])[0]:"";
+   if(!enough||!conceptsAgree||(!code&&!geo.sin_codigo_permitido))pending.push(i+1);
+   const selection=enough&&conceptsAgree?consensusRows[0]:original;
+   const hasIndependentVerified=enough&&conceptsAgree&&!!selection;
+   if(hasIndependentVerified&&!sameAsClassifier)
+     notices.push("Fila "+(i+1)+": código/cantidad corregidos tras tres lecturas independientes");
+   if(!conceptsAgree)
+     notices.push("Fila "+(i+1)+": descripción sin concordancia suficiente entre lectores");
+   // Do NOT source unverified unit prices from a delivery note. Financial
+   // amounts are completed later from a separately verified invoice.
+   const price=header?.tipo==="ALBARAN"?null:selection?.precio_unitario??null;
+   approved.push({
+     referencia:hasIndependentVerified?String(selection.referencia||""):String(original.referencia||""),
+     descripcion:hasIndependentVerified?String(selection.descripcion||""):String(original.descripcion||""),
+     cantidad:hasIndependentVerified?Number(selection.cantidad):original.cantidad??null,
+     unidad:String(selection.unidad||original.unidad||""),
+     precio_unitario:price
+   });
  }
  if(pending.length)problems.push("Filas sin consenso automático: "+pending.join(", "));
  if(!goodDate(header.fecha)||!norm(header.numero))problems.push("Número o fecha de documento no comprobados");
@@ -83,8 +126,8 @@ function decideGeo(geo:any,readings:any[],header:any,expected:string){
  if(header.tipo!=="ALBARAN")problems.push("El documento no es un albarán");
  const guessed=norm(geo.codigo_proyecto),project=/^PRY\d{5}$/.test(guessed)&&guessed===norm(header.pry_codigo)?guessed:null;
  if(!project)notices.push("Código PRY no verificado: materiales independientes de la obra");
- if(readings.some(r=>Array.isArray(r.dudas)&&r.dudas.length))notices.push("Una lectura comunicó dudas; los artículos solo se aceptan con consenso de filas");
- return {errors:problems,notices,project,items:approved,validated:problems.length===0,review_rows:pending,geometry:n,rows_vision:readings.map(r=>r.lineas?.length??0)};
+ return {errors:problems,notices,project,items:approved,validated:problems.length===0,
+   review_rows:pending,geometry:n,rows_vision:readings.map(r=>r.lineas?.length??0)};
 }
 
 const headSchema={type:"object",additionalProperties:false,properties:{
@@ -262,9 +305,12 @@ Deno.serve(async(req:Request)=>{
   if(hasSpatial){
     if(!Array.isArray(rows)||rows.length!==n||!Array.isArray(bands)||bands.length!==Math.ceil(n/5))
       return reply({estado:"RETENIDO_SIN_PROCESAR",error:"Falta tabla geométrica completa; no se sustituirá por lectura de página entera",numero:input?.numero_esperado||""},422);
-    const [head,checked]=await Promise.all([
+    // Both cropped physical-row readings run every time: the classifier
+    // is NOT counted as one of the two independent OCR votes.
+    const [head,checked,independent]=await Promise.all([
       vision(key,pdf,Deno.env.get("OPENAI_VISION_MODEL")||"gpt-4o"),
-      auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_GEOMETRIC_AUDIT_MODEL")||"gpt-4o")
+      auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_GEOMETRIC_AUDIT_MODEL")||"gpt-4o"),
+      auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_REGION_MODEL")||"gpt-4.1")
     ]);
     first=head;second={...head,lineas:checked.lineas};
     if(input?.imagen_cabecera){
@@ -279,11 +325,11 @@ Deno.serve(async(req:Request)=>{
       else resultCabeceraErrors=consistent.errors;
       second={...first,lineas:checked.lineas};
     }
-    result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked],first,cabeceraConfirmada?"":String(input?.numero_esperado||""));
+    result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked,independent],first,cabeceraConfirmada?"":String(input?.numero_esperado||""));
     if(result.review_rows.length){
       etapa="relectura_automatica_filas";
-      const third=await auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_REGION_MODEL")||"gpt-4.1");
-      result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked,third],first,cabeceraConfirmada?"":String(input?.numero_esperado||""));
+      const third=await auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_GEOMETRIC_AUDIT_MODEL")||"gpt-4o");
+      result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked,independent,third],first,cabeceraConfirmada?"":String(input?.numero_esperado||""));
     }
   }else{
     const pair=await Promise.all([vision(key,pdf,Deno.env.get("OPENAI_VISION_MODEL")||"gpt-4o"),vision(key,pdf,Deno.env.get("OPENAI_VISION_AUDIT_MODEL")||"gpt-4.1")]);
