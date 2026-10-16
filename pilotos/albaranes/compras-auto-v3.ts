@@ -232,7 +232,7 @@ Deno.serve(async(req:Request)=>{
   etapa="lectura_estructurada";
   const n=Number(input?.lineas_geometricas),rows=input?.geometria_filas,bands=input?.geometria_imagenes;
   const hasSpatial=Number.isInteger(n)&&n>=1&&n<=50;
-  let first:any,second:any,result:any,resultCabeceraErrors:string[]=[];
+  let first:any,second:any,result:any,resultCabeceraErrors:string[]=[],cabeceraConfirmada=false;
   if(hasSpatial){
     if(!Array.isArray(rows)||rows.length!==n||!Array.isArray(bands)||bands.length!==Math.ceil(n/5))
       return reply({estado:"RETENIDO_SIN_PROCESAR",error:"Falta tabla geométrica completa; no se sustituirá por lectura de página entera",numero:input?.numero_esperado||""},422);
@@ -249,15 +249,15 @@ Deno.serve(async(req:Request)=>{
         h2=await auditHeader(key,input.imagen_cabecera,"gpt-4o");
         consistent=reconcileHeader(head,h1,h2);
       }
-      if(!consistent.errors.length)first={...head,...consistent.header};
+      if(!consistent.errors.length){first={...head,...consistent.header};cabeceraConfirmada=true;}
       else resultCabeceraErrors=consistent.errors;
       second={...first,lineas:checked.lineas};
     }
-    result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked],first,String(input?.numero_esperado||""));
+    result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked],first,cabeceraConfirmada?"":String(input?.numero_esperado||""));
     if(result.review_rows.length){
       etapa="relectura_automatica_filas";
       const third=await auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_REGION_MODEL")||"gpt-4.1");
-      result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked,third],first,String(input?.numero_esperado||""));
+      result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked,third],first,cabeceraConfirmada?"":String(input?.numero_esperado||""));
     }
   }else{
     const pair=await Promise.all([vision(key,pdf,Deno.env.get("OPENAI_VISION_MODEL")||"gpt-4o"),vision(key,pdf,Deno.env.get("OPENAI_VISION_AUDIT_MODEL")||"gpt-4.1")]);
@@ -265,6 +265,9 @@ Deno.serve(async(req:Request)=>{
     if(Array.isArray(first.lineas)&&first.lineas.length>=7)result.errors.push("Documento con tabla larga sin geometría: no publicar");
   }
   if(resultCabeceraErrors.length){result.errors.push(...resultCabeceraErrors);result.validated=false;}
+  if(cabeceraConfirmada&&input?.numero_esperado&&canon(first.numero)!==canon(input.numero_esperado)){
+    result.notices.push("La cabecera impresa confirmó "+String(first.numero)+"; la clasificación inicial había leído "+String(input.numero_esperado));
+  }
   const geo=hasSpatial?n:null;
   const allowed=["ALBARAN","FACTURA","ABONO"].includes(first.tipo)?first.tipo:"OTRO";
   const date=goodDate(first.fecha)&&first.fecha===second.fecha?first.fecha:null;
