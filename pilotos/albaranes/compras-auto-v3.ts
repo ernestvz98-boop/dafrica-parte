@@ -169,6 +169,10 @@ Deno.serve(async(req:Request)=>{
     result.errors.push("Las lecturas no coinciden en los números de albaranes asociados a la factura");
     result.validated=false;
   }
+  const pryCandidates=[result.project,input?.geometria_proyecto,input?.pry_primera_lectura,first?.pry_codigo,second?.pry_codigo]
+   .map(x=>norm(x)).filter(x=>/^PRY[0-9]{5,8}$/.test(x));
+  const candidateList=[...new Set(pryCandidates)];
+  const candidate=allowed==="ALBARAN"&&candidateList.length===1?candidateList[0]:null;
   const verified=result.validated&&allowed!=="OTRO"&&!!date&&!!norm(first.numero);
   const path="ingesta/"+sha+".pdf";
   etapa="almacenar_pdf";
@@ -176,9 +180,9 @@ Deno.serve(async(req:Request)=>{
    const upload=await fetch(base+"/storage/v1/object/costes-auto/"+path,{method:"POST",headers:{apikey:srv,authorization:jwt,"Content-Type":"application/pdf","x-upsert":"false"},body:bin,signal:AbortSignal.timeout(20000)});
    if(!upload.ok)throw Error("Archivo privado no guardado: "+upload.status);
   }
-  const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:date,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina",fuente_sha256:sha,albaranes_referenciados:invoiceRefs,titulo_documento:String(first.numero||""),estado_precios:allowed==="ALBARAN"?"PENDIENTE_FACTURA":"FUENTE_FACTURA"}};
+  const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:date,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina",fuente_sha256:sha,pry_ocr_candidato:candidate,pry_ocr_candidatos:allowed==="ALBARAN"?candidateList:[],pry_estado:allowed==="ALBARAN"?"CANDIDATO_SIN_CONFIRMAR":null,albaranes_referenciados:invoiceRefs,titulo_documento:String(first.numero||""),estado_precios:allowed==="ALBARAN"?"PENDIENTE_FACTURA":"FUENTE_FACTURA"}};
   etapa="registrar_documento";
-  const changed=old?{ia_estado:record.ia_estado,ia_datos:{...old.ia_datos,...record.ia_datos}}:record;
+  const changed=old?{ia_estado:record.ia_estado,ia_datos:{...old.ia_datos,...record.ia_datos,pry_codigo_confirmado:old.ia_datos?.pry_codigo_confirmado||null,pry_estado:old.ia_datos?.pry_codigo_confirmado?"CONFIRMADO_STEL":record.ia_datos.pry_estado}}:record;
   const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(changed),signal:AbortSignal.timeout(15000)});
   if(!saved.ok){const info=await saved.json().catch(()=>({}));throw Error("Fallo al guardar documento HTTP "+saved.status+" código "+String(info.code||"desconocido")+" - "+String(info.message||"sin detalles").slice(0,120))}
   const entries=await saved.json(),docId=entries?.[0]?.id||old?.id||null;
