@@ -188,43 +188,60 @@ Deno.serve(async(req:Request)=>{
     if(candidates.length===1){
       const canonical=candidates[0];
       const existing=Array.isArray(canonical.ia_datos?.materiales)?canonical.ia_datos.materiales:[];
-      const sameRows=!!validPhysicalRows&&geoRows.length===existing.length&&geoRows.every((v:any,i:number)=>
-        normalizedRow(v)===normalizedRow(existing[i]));
-      if(sameRows){
-        const linesURL=new URL(base+"/rest/v1/coste_lineas");
-        linesURL.searchParams.set("select","codigo_articulo,descripcion,cantidad");
-        linesURL.searchParams.set("documento_id","eq."+canonical.id);
-        linesURL.searchParams.set("limit","100");
-        const linesResponse=await fetch(linesURL,{headers:dbHead,signal:AbortSignal.timeout(10000)});
-        if(!linesResponse.ok)throw Error("No se pudieron verificar materiales ya guardados");
-        const stored=await linesResponse.json();
-        const storedMultiset=(array:any[])=>{
-          const map=new Map<string,number>();
-          for(const line of array){
-            const key=normalizedRow(line);
-            map.set(key,(map.get(key)||0)+1);
-          }
-          return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
-        };
-        const sameStored=stored.length===geoRows.length&&
-          JSON.stringify(storedMultiset(stored))===JSON.stringify(storedMultiset(geoRows));
-        const conceptVariants=geoRows.reduce((n:number,row:any,i:number)=>n+(canon(row.descripcion)!==canon(existing[i]?.descripcion)?1:0),0);
-        if(sameStored)return reply({
-          estado:"YA_PROCESADO",documento_id:canonical.id,numero:canonical.numero_documento,
-          ia_estado:canonical.ia_estado,lineas_detectadas:stored.length,
-          motivo:"Documento y materiales ya contrastados: se evita nueva lectura OCR y nuevos registros",
-          comprobacion:"numero_proveedor_fecha_y_referencias_cantidades_guardadas",
-          observacion:conceptVariants?String(conceptVariants)+" descripción(es) transcritas de forma diferente; se conserva lectura original":null,
-          escritura_stel:false
-        });
-      }
-      // An existing business document with different physical lines must not
-      // silently create a competing albaran or modify the original.
-      return reply({
-        estado:"CONFLICTO_DOCUMENTAL",documento_id:canonical.id,numero:canonical.numero_documento,
-        error:"Ya existe este número, proveedor y fecha, pero las filas físicas no se han podido corroborar. Se mantiene el archivo original sin cambios.",
+      // A second reading is not authoritative. Confirm that the original
+      // verified document has its complete materials stored before replying.
+      const linesURL=new URL(base+"/rest/v1/coste_lineas");
+      linesURL.searchParams.set("select","codigo_articulo,descripcion,cantidad");
+      linesURL.searchParams.set("documento_id","eq."+canonical.id);
+      linesURL.searchParams.set("limit","100");
+      const linesResponse=await fetch(linesURL,{headers:dbHead,signal:AbortSignal.timeout(10000)});
+      if(!linesResponse.ok)throw Error("No se pudieron verificar materiales ya guardados");
+      const stored=await linesResponse.json();
+      const storedMultiset=(array:any[])=>{
+        const map=new Map<string,number>();
+        for(const line of array){
+          const k=normalizedRow(line);
+          map.set(k,(map.get(k)||0)+1);
+        }
+        return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+      };
+      const canonicalIsComplete=existing.length>0&&stored.length===existing.length&&
+        JSON.stringify(storedMultiset(stored))===JSON.stringify(storedMultiset(existing));
+      if(!canonicalIsComplete)return reply({
+        estado:"ARCHIVO_EXISTENTE_INCOMPLETO",documento_id:canonical.id,numero:canonical.numero_documento,
+        incidencias:["La ficha original no coincide con todas sus líneas persistidas. No se sobrescribe ni se registra otro documento."],
+        lineas_archivadas:stored.length,comparacion_valida:false,escritura_stel:false
+      });
+      const sameRows=!!validPhysicalRows&&geoRows.length===existing.length&&
+        JSON.stringify(storedMultiset(geoRows))===JSON.stringify(storedMultiset(existing));
+      if(sameRows)return reply({
+        estado:"YA_PROCESADO",documento_id:canonical.id,numero:canonical.numero_documento,
+        ia_estado:canonical.ia_estado,lineas_detectadas:stored.length,lineas_archivadas:stored.length,
+        motivo:"Identidad documental y filas coincidentes con el documento ya archivado",
+        comprobacion:"numero_proveedor_fecha_filas_materiales_persistidas",
         escritura_stel:false
-      },409);
+      });
+      // A stable supplier/number/date can collide with a different physical
+      // document. Never mark this as a verified duplicate or a technical
+      // failure. Make the inconsistency visible; do not perform any writes.
+      const changes:string[]=[];
+      if(!validPhysicalRows)changes.push("La tabla de la lectura actual no es verificable");
+      if(Array.isArray(geoRows)&&geoRows.length!==existing.length)
+        changes.push("Número de filas de esta lectura distinto del archivo contrastado");
+      if(Array.isArray(geoRows)&&geoRows.length===existing.length){
+        for(let i=0;i<existing.length;i++){
+          if(normalizedRow(geoRows[i])!==normalizedRow(existing[i]))changes.push("Fila "+(i+1)+" incompatible con archivo contrastado");
+        }
+      }
+      return reply({
+        estado:"LECTURA_DIFIERE_DE_ARCHIVO",documento_id:canonical.id,numero:canonical.numero_documento,
+        ia_estado:canonical.ia_estado,lineas_detectadas:Array.isArray(geoRows)?geoRows.length:null,
+        lineas_archivadas:stored.length,comparacion_valida:false,
+        incidencias:changes.length?changes:["Lectura no comprobable contra el documento archivado"],
+        avisos:["El documento original permanece archivado sin cambios. La nueva lectura no se considera verificada."],
+        comprobacion:"identidad_coincidente_materiales_discrepantes",
+        escritura_stel:false
+      });
     }
     if(candidates.length>1)return reply({
       estado:"CONFLICTO_DOCUMENTAL",error:"Existen varias fichas verificadas con la misma identidad documental",escritura_stel:false
