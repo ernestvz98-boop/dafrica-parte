@@ -59,7 +59,7 @@ async function auditBands(key:string,images:string[],n:number,model:string){
 function canon(v:unknown){return norm(v).replace(/[^A-Z0-9]/g,"");}
 function decideGeo(geo:any,readings:any[],header:any,expected:string){
  const problems:string[]=[],notices:string[]=[],n=geo.numero_filas,original=geo.lineas;
- if(!Array.isArray(original)||original.length!==n||n<7||n>50)problems.push("Geometría incompleta");
+ if(!Array.isArray(original)||original.length!==n||n<1||n>50)problems.push("Geometría incompleta");
  if(!Array.isArray(readings[0]?.lineas)||readings[0].lineas.length!==n)notices.push("La primera auditoría omitió filas; se usarán los recortes geométricos como referencia");
  const approved:any[]=[],pending:number[]=[];
  const key=(v:any)=>v&&String(v.referencia||"").trim()&&typeof v.cantidad==="number"&&v.cantidad>0&&Number.isFinite(v.cantidad)&&canon(v.descripcion)?
@@ -114,10 +114,10 @@ Deno.serve(async(req:Request)=>{
   const found=await previous.json();
   let old=found[0]||null;
   if(old && !["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado))
-    return reply({estado:"DUPLICADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado});
+    return reply({estado:"YA_PROCESADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado,motivo:"Documento ya archivado previamente; no se vuelve a registrar",escritura_stel:false});
   etapa="lectura_estructurada";
   const n=Number(input?.lineas_geometricas),rows=input?.geometria_filas,bands=input?.geometria_imagenes;
-  const hasSpatial=Number.isInteger(n)&&n>=7&&n<=50;
+  const hasSpatial=Number.isInteger(n)&&n>=1&&n<=50;
   let first:any,second:any,result:any;
   if(hasSpatial){
     if(!Array.isArray(rows)||rows.length!==n||!Array.isArray(bands)||bands.length!==Math.ceil(n/5))
