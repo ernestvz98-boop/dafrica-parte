@@ -224,15 +224,15 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
        let binary="";for(let n=0;n<fileBuffer.length;n+=8192)binary+=String.fromCharCode(...fileBuffer.subarray(n,n+8192));
        const pdfb64=btoa(binary);
        const doc={pdf_separado_b64:pdfb64,proveedor:d.proveedor_nombre||"",numero:d.numero_documento||"",tipo:"ALBARAN",lineas:Array.isArray(d.ia_datos?.materiales)?d.ia_datos.materiales:[]};
-       let geo=null,rows=null,images=null,geoProject="";
+       let geo=null,rows=null,images=null,geoProject="",headerImage=null,profile="",allowNoRef=false;
        if(doc.lineas.length>=1&&doc.lineas.length<=5){
         const parsed=String(doc.proveedor).toUpperCase().includes("SALTOKI")?(doc.lineas.length===1?await pcLeerSaltokiFilaUnica(doc):await pcLeerSaltokiFilas(doc)):await pcLeerTablaMixta(doc);
         if(parsed.lineas_validas===true&&parsed.numero_filas_geometricas===parsed.lineas?.length){
-         geo=parsed.numero_filas_geometricas;rows=parsed.lineas;images=parsed.imagenes_zonas;
+         geo=parsed.numero_filas_geometricas;rows=parsed.lineas;images=parsed.imagenes_zonas;headerImage=parsed.imagen_cabecera||null;profile=parsed.perfil_formato||"";allowNoRef=parsed.permite_sin_referencia===true;
          geoProject=parsed.codigo_pry_sin_conflictos?parsed.codigo_proyecto:"";
         }
        }
-       const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"reproceso_"+String(doc.numero||"documento")+".pdf",data:"data:application/pdf;base64,"+pdfb64,lineas_geometricas:geo,geometria_filas:rows,geometria_imagenes:images,geometria_proyecto:geoProject,pry_primera_lectura:String(d.ia_datos?.pry_ocr_candidato||""),numero_esperado:doc.numero,fecha_esperada:d.fecha_documento||null,proveedor_esperado:doc.proveedor,tipo_esperado:"ALBARAN",reprocesar:true})});
+       const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"reproceso_"+String(doc.numero||"documento")+".pdf",data:"data:application/pdf;base64,"+pdfb64,lineas_geometricas:geo,geometria_filas:rows,geometria_imagenes:images,imagen_cabecera:headerImage,perfil_formato:profile,permite_sin_referencia:allowNoRef,geometria_proyecto:geoProject,pry_primera_lectura:String(d.ia_datos?.pry_ocr_candidato||""),numero_esperado:doc.numero,fecha_esperada:d.fecha_documento||null,proveedor_esperado:doc.proveedor,tipo_esperado:"ALBARAN",reprocesar:true})});
        const value=await response.json().catch(()=>({error:"Respuesta inválida"}));
        if(!response.ok)throw Error([value.error,value.etapa,value.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
        outcomes.push({numero:doc.numero,estado:value.estado,filas:value.lineas_detectadas??0,problemas:value.incidencias||[]});
@@ -265,17 +265,17 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
      const {d,i}=work.shift();
      if(!d.pdf_separado_b64){out[i]={estado:"RETENIDO",numero:d.numero,incidencias:["Documento sin PDF separable"]};continue}
      status.textContent="Procesando "+(i+1)+"/"+split.documentos.length+" · "+String(d.numero||"sin número");
-     let geo=null,geometryWarning="",geometryRows=null,geometryImages=null,geometryProject="";
+     let geo=null,geometryWarning="",geometryRows=null,geometryImages=null,geometryProject="",headerImage=null,profile="",allowNoRef=false;
      if((d.lineas||[]).length>=1&&(d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
       try{
        const parsed=String(d.proveedor||"").toUpperCase().includes("SALTOKI")?(d.lineas.length===1?await pcLeerSaltokiFilaUnica(d):await pcLeerSaltokiFilas(d)):await pcLeerTablaMixta(d);
        if(parsed.lineas_validas===true&&Number.isInteger(parsed.numero_filas_geometricas)&&parsed.lineas?.length===parsed.numero_filas_geometricas&&Array.isArray(parsed.imagenes_zonas)){
-        geo=parsed.numero_filas_geometricas;geometryRows=parsed.lineas;geometryImages=parsed.imagenes_zonas;geometryProject=parsed.codigo_pry_sin_conflictos===true?parsed.codigo_proyecto:"";
+        geo=parsed.numero_filas_geometricas;geometryRows=parsed.lineas;geometryImages=parsed.imagenes_zonas;headerImage=parsed.imagen_cabecera||null;profile=parsed.perfil_formato||"";allowNoRef=parsed.permite_sin_referencia===true;geometryProject=parsed.codigo_pry_sin_conflictos===true?parsed.codigo_proyecto:"";
        }else geometryWarning="Se identificaron filas pero faltan datos; la lectura queda retenida";
       }catch(err){geometryWarning="No se completó la geometría: "+(err?.message||err)}
      }
      try{
-      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo,geometria_filas:geometryRows,geometria_imagenes:geometryImages,geometria_proyecto:geometryProject,pry_primera_lectura:String(d.codigo_proyecto||""),numero_esperado:String(d.numero||""),fecha_esperada:d.fecha||null,proveedor_esperado:d.proveedor||"",tipo_esperado:d.tipo||"",reprocesar:true})});
+      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo,geometria_filas:geometryRows,geometria_imagenes:geometryImages,imagen_cabecera:headerImage,perfil_formato:profile,permite_sin_referencia:allowNoRef,geometria_proyecto:geometryProject,pry_primera_lectura:String(d.codigo_proyecto||""),numero_esperado:String(d.numero||""),fecha_esperada:d.fecha||null,proveedor_esperado:d.proveedor||"",tipo_esperado:d.tipo||"",reprocesar:true})});
       const result=await response.json().catch(()=>({error:"Respuesta del servidor no interpretable"}));
       if(!response.ok)throw Error([result.error,result.etapa?"Etapa: "+result.etapa:"",result.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
       out[i]={...result,geometryWarning};
