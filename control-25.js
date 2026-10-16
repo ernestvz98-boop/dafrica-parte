@@ -47,16 +47,17 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
      const {d,i}=work.shift();
      if(!d.pdf_separado_b64){out[i]={estado:"RETENIDO",numero:d.numero,incidencias:["Documento sin PDF separable"]};continue}
      status.textContent="Procesando "+(i+1)+"/"+split.documentos.length+" · "+String(d.numero||"sin número");
-     let geo=null,geometryWarning="";
-     if(String(d.proveedor||"").toUpperCase().includes("SALTOKI")&&(d.lineas||[]).length>=7){
+     let geo=null,geometryWarning="",geometryRows=null,geometryImages=null;
+     if(String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
       try{
        const parsed=await pcLeerSaltokiFilas(d);
-       if(parsed.lineas_validas===true&&Number.isInteger(parsed.numero_filas_geometricas))geo=parsed.numero_filas_geometricas;
-       else geometryWarning="Geometría detectada, pero existen filas ilegibles";
+       if(parsed.lineas_validas===true&&Number.isInteger(parsed.numero_filas_geometricas)&&parsed.lineas?.length===parsed.numero_filas_geometricas&&Array.isArray(parsed.imagenes_zonas)){
+        geo=parsed.numero_filas_geometricas;geometryRows=parsed.lineas;geometryImages=parsed.imagenes_zonas;
+       }else geometryWarning="Se identificaron filas pero faltan datos; la lectura queda retenida";
       }catch(err){geometryWarning="No se completó la geometría: "+(err?.message||err)}
      }
      try{
-      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v2",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo})});
+      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v2",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo,geometria_filas:geometryRows,geometria_imagenes:geometryImages,numero_esperado:String(d.numero||""),reprocesar:true})});
       const result=await response.json().catch(()=>({error:"Respuesta del servidor no interpretable"}));
       if(!response.ok)throw Error([result.error,result.etapa?"Etapa: "+result.etapa:"",result.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
       out[i]={...result,geometryWarning};
