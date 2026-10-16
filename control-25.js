@@ -31,7 +31,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    if(!has("costes.editar")||!consent.checked){status.textContent="Para reprocesar, autoriza el análisis documental y comprueba tus permisos.";return}
    retry.disabled=true;button.disabled=true;results.textContent="";
    try{
-    const docs=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,archivo_path,ia_estado,ia_datos&ia_estado=eq.RETENIDO_AUTOMATICAMENTE&order=created_at.desc&limit=10");
+    const docs=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,archivo_path,ia_estado,ia_datos&ia_estado=eq.RETENIDO_AUTOMATICAMENTE&order=created_at.desc&limit=10");
     if(!docs.length){status.textContent="No hay documentos retenidos pendientes de reprocesar.";return}
     const outcomes=[];
     for(const d of docs){
@@ -53,7 +53,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
          geoProject=parsed.codigo_pry_sin_conflictos?parsed.codigo_proyecto:"";
         }
        }
-       const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"reproceso_"+String(doc.numero||"documento")+".pdf",data:"data:application/pdf;base64,"+pdfb64,lineas_geometricas:geo,geometria_filas:rows,geometria_imagenes:images,geometria_proyecto:geoProject,numero_esperado:doc.numero,reprocesar:true})});
+       const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"reproceso_"+String(doc.numero||"documento")+".pdf",data:"data:application/pdf;base64,"+pdfb64,lineas_geometricas:geo,geometria_filas:rows,geometria_imagenes:images,geometria_proyecto:geoProject,numero_esperado:doc.numero,fecha_esperada:d.fecha_documento||null,proveedor_esperado:doc.proveedor,tipo_esperado:"ALBARAN",reprocesar:true})});
        const value=await response.json().catch(()=>({error:"Respuesta inválida"}));
        if(!response.ok)throw Error([value.error,value.etapa,value.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
        outcomes.push({numero:doc.numero,estado:value.estado,filas:value.lineas_detectadas??0,problemas:value.incidencias||[]});
@@ -96,7 +96,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
       }catch(err){geometryWarning="No se completó la geometría: "+(err?.message||err)}
      }
      try{
-      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo,geometria_filas:geometryRows,geometria_imagenes:geometryImages,geometria_proyecto:geometryProject,numero_esperado:String(d.numero||""),reprocesar:true})});
+      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo,geometria_filas:geometryRows,geometria_imagenes:geometryImages,geometria_proyecto:geometryProject,numero_esperado:String(d.numero||""),fecha_esperada:d.fecha||null,proveedor_esperado:d.proveedor||"",tipo_esperado:d.tipo||"",reprocesar:true})});
       const result=await response.json().catch(()=>({error:"Respuesta del servidor no interpretable"}));
       if(!response.ok)throw Error([result.error,result.etapa?"Etapa: "+result.etapa:"",result.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
       out[i]={...result,geometryWarning};
