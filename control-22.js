@@ -235,6 +235,13 @@ function renderComprasLotePilot(){
    const verificationLabel=result=>result?.proyecto_pendiente
      ? "Materiales coincidentes; código PRY pendiente de confirmar"
      : "Materiales y código de obra coincidentes";
+   const cosmeticSummary=result=>{
+     const diffs=Array.isArray(result?.avisos_descripcion)?result.avisos_descripcion:[];
+     if(!diffs.length)return "";
+     return '<p><b>'+esc(diffs.length)+' diferencia(s) ortográfica(s) menor(es) de descripción:</b> '+
+       diffs.map(x=>esc('Fila '+x.fila+' · '+x.referencia)).join('; ')+
+       '. Referencias, cantidades, unidades, precios y cifras técnicas coinciden. No se han cambiado códigos de producto.</p>';
+   };
    const verify=async i=>{
      const doc=output.documentos[i],status=$("pcBatchAuditStatus"+i);
      const retry=res.querySelector('[data-pc-audit="'+i+'"]');
@@ -266,6 +273,7 @@ function renderComprasLotePilot(){
            doc.__reviewRows=new Set();
            doc.__proyectoDudoso=!!(second.proyecto_pendiente||third.proyecto_pendiente||doc.__proyectoDudoso);
            status.innerHTML='<b>'+esc(verificationLabel(third))+'. Tres lecturas confirman las '+esc(doc.lineas.length)+' líneas.</b>'+
+             cosmeticSummary(second)+cosmeticSummary(third)+
              (doc.__proyectoDudoso
                ? '<p>La lectura de materiales queda certificada por separado. El manuscrito PRY no coincide entre lectores: confirma su código con el pedido antes de registrar.</p>'
                : '<p>Confirma el documento antes de registrar; no es necesario marcar cada línea.</p>');
@@ -321,6 +329,7 @@ function renderComprasLotePilot(){
              '<p>DAFRICA ha propuesto '+esc(differences)+' corrección(es) de línea.'+
              (doc.__proyectoDudoso?' El PRY manuscrito sigue pendiente de confirmación con el pedido.':' La obra coincide entre lecturas.')+
              ' Comprueba solo las filas corregidas y confirma el documento antes de registrar.</p>'+
+             cosmeticSummary(second)+cosmeticSummary(third)+
              auditReport(second,"Diferencias detectadas en lectura inicial");
          }else{
            doc.__audit=null;
