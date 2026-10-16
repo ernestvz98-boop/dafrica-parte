@@ -230,6 +230,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos analizados.</b> '+esc(ok)+' nuevos contrastados, '+esc(held)+' retenidos, '+esc(already)+' ya archivados, <b>'+esc(errors)+' errores</b>.</p>'+
     out.map((x,i)=>'<div class="module-note sensitive-note"><b>'+esc(x.numero||split.documentos[i]?.numero||"Documento "+(i+1))+' · '+esc(x.estado||"ERROR")+'</b>'+
     '<p>'+esc(x.lineas_detectadas??"?")+' líneas; obra: '+esc(x.proyecto_candidato||"sin asociar")+'</p>'+
+    (x.documento_id?'<p><a href="#pcAutoHistory"><b>Ver lectura completa y materiales guardados ↓</b></a></p>':'')+
     (x.geometryWarning?'<p class="muted">'+esc(x.geometryWarning)+'</p>':'')+
     (x.incidencias||[]).slice(0,12).map(z=>'<p class="error">• '+esc(z)+'</p>').join("")+
     ((x.incidencias||[]).length>12?'<p class="muted">'+esc(x.incidencias.length-12)+' incidencias adicionales; no se han aceptado datos inciertos.</p>':"")+
