@@ -292,7 +292,7 @@ Deno.serve(async(req:Request)=>{
   }
 
   etapa="buscar_duplicado";
-  const previous=await fetch(base+"/rest/v1/coste_documentos?hash_archivo=eq."+sha+"&select=id,ia_estado,numero_documento,ia_datos&limit=1",{headers:dbHead,signal:AbortSignal.timeout(10000)});
+  const previous=await fetch(base+"/rest/v1/coste_documentos?hash_archivo=eq."+sha+"&select=id,ia_estado,tipo,numero_documento,proveedor_nombre,fecha_documento,ia_datos&limit=1",{headers:dbHead,signal:AbortSignal.timeout(10000)});
   if(!previous.ok)throw Error("Error consultando duplicados HTTP "+previous.status);
   const found=await previous.json();
   let old=found[0]||null;
@@ -384,8 +384,55 @@ Deno.serve(async(req:Request)=>{
    .map(x=>norm(x)).filter(x=>/^PRY[0-9]{5,8}$/.test(x));
   const candidateList=[...new Set(pryCandidates)];
   const candidate=allowed==="ALBARAN"&&candidateList.length===1?candidateList[0]:null;
-  if(old&&[old.numero_documento,old.proveedor_nombre,old.fecha_documento].some((v,i)=>norm(v)!==norm([first.numero,first.proveedor,dateForRecord][i])))result.errors.push("La cabecera corregida no coincide con la ficha retenida; no se sobrescribe su identidad");
+  const oldNumberDiff=old?.numero_documento&&canon(old.numero_documento)!==canon(first.numero);
+  const oldSupplierDiff=old?.proveedor_nombre&&legal(old.proveedor_nombre)!==legal(first.proveedor);
+  const oldWasRecipient=!!oldSupplierDiff&&/^DAFRICABIERZO(?:SLU|SL)?$/.test(canon(old.proveedor_nombre));
+  const recipientCorrection=oldWasRecipient&&cabeceraConfirmada&&
+    !/^DAFRICABIERZO(?:SLU|SL)?$/.test(canon(first.proveedor));
+  const oldDateDiff=old?.fecha_documento&&String(old.fecha_documento)!==String(dateForRecord);
+  const missingDateWithoutProof=old&&!old.fecha_documento&&dateForRecord&&!cabeceraConfirmada;
+  if(old&&(oldNumberDiff||(oldSupplierDiff&&!recipientCorrection)||oldDateDiff||missingDateWithoutProof))
+    result.errors.push("La identidad de la ficha retenida no pudo verificarse: no se sustituye el original");
   const verified=result.validated&&result.errors.length===0&&allowed!=="OTRO"&&!!date&&!!norm(first.numero);
+  if(old&&verified){
+    // Compare repaired identity against previously VERIFIED business documents.
+    // The same scan may have been retained under multiple historical SHA hashes.
+    const endpoint=new URL(base+"/rest/v1/coste_documentos");
+    endpoint.searchParams.set("select","id,numero_documento,proveedor_nombre,fecha_documento,ia_estado");
+    endpoint.searchParams.set("tipo","eq.ALBARAN");
+    endpoint.searchParams.set("numero_documento","eq."+first.numero);
+    endpoint.searchParams.set("fecha_documento","eq."+dateForRecord);
+    endpoint.searchParams.set("limit","100");
+    const identity=await fetch(endpoint,{headers:dbHead,signal:AbortSignal.timeout(10000)});
+    if(!identity.ok)throw Error("Fallo comprobando identidad antes de recuperar albarán: HTTP "+identity.status);
+    const duplicates=(await identity.json()).filter((d:any)=>d.id!==old.id&&
+      legal(d.proveedor_nombre)===legal(first.proveedor)&&
+      d.ia_estado==="CONTRASTADO_SIN_IMPUTACION");
+    if(duplicates.length){
+      if(duplicates.length!==1)return reply({estado:"LECTURA_DIFIERE_DE_ARCHIVO",numero:first.numero,
+        incidencias:["Existen varias fichas contrastadas con la misma identidad. No se crean duplicados."],escritura_stel:false});
+      const canonical=duplicates[0];
+      const rows=await fetch(base+"/rest/v1/coste_lineas?documento_id=eq."+canonical.id+
+        "&select=codigo_articulo,descripcion,cantidad&limit=100",{headers:dbHead,signal:AbortSignal.timeout(10000)});
+      if(!rows.ok)throw Error("No se pudieron comprobar las líneas de la ficha existente");
+      const stored=await rows.json();
+      const countRows=(all:any[])=>{
+        const map=new Map<string,number>();
+        for(const row of all){const k=normalizedRow(row);map.set(k,(map.get(k)||0)+1);}
+        return JSON.stringify([...map].sort((a,b)=>a[0].localeCompare(b[0])));
+      };
+      const identical=stored.length===result.items.length&&countRows(stored)===countRows(result.items);
+      return reply({
+        estado:identical?"YA_PROCESADO":"LECTURA_DIFIERE_DE_ARCHIVO",
+        documento_id:canonical.id,numero:canonical.numero_documento,
+        lineas_detectadas:result.items.length,lineas_archivadas:stored.length,
+        comparacion_valida:identical,
+        incidencias:identical?[]:["Esta lectura difiere del archivo contrastado: no se cambia ni se duplica"],
+        escritura_stel:false,importes_contabilizados:false
+      });
+    }
+  }
+
   const path="ingesta/"+sha+".pdf";
   etapa="almacenar_pdf";
   if(!old){
@@ -394,7 +441,18 @@ Deno.serve(async(req:Request)=>{
   }
   const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:dateForRecord,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina",fuente_sha256:sha,cabecera_impresa_verificada:cabeceraConfirmada?{numero:first.numero,proveedor:first.proveedor,fecha:first.fecha}:null,pry_ocr_candidato:candidate,pry_ocr_candidatos:allowed==="ALBARAN"?candidateList:[],pry_estado:allowed==="ALBARAN"?"CANDIDATO_SIN_CONFIRMAR":null,albaranes_referenciados:invoiceRefs,titulo_documento:String(first.numero||""),estado_precios:allowed==="ALBARAN"?"PENDIENTE_FACTURA":"FUENTE_FACTURA"}};
   etapa="registrar_documento";
-  const changed=old?{ia_estado:record.ia_estado,ia_datos:{...old.ia_datos,...record.ia_datos,pry_codigo_confirmado:old.ia_datos?.pry_codigo_confirmado||null,pry_estado:old.ia_datos?.pry_codigo_confirmado?"CONFIRMADO_STEL":record.ia_datos.pry_estado}}:record;
+  const repaired=old&&verified?{
+    ...(recipientCorrection?{proveedor_nombre:record.proveedor_nombre}:{}),
+    ...(!old.fecha_documento&&cabeceraConfirmada?{fecha_documento:record.fecha_documento}:{})
+  }:{};
+  const changed=old?{...repaired,ia_estado:record.ia_estado,
+    ia_datos:{...old.ia_datos,...record.ia_datos,
+      identidad_lectura_original:old.ia_datos?.identidad_lectura_original||{
+        numero:old.numero_documento,proveedor:old.proveedor_nombre,fecha:old.fecha_documento
+      },
+      pry_codigo_confirmado:old.ia_datos?.pry_codigo_confirmado||null,
+      pry_estado:old.ia_datos?.pry_codigo_confirmado?"CONFIRMADO_STEL":record.ia_datos.pry_estado
+    }}:record;
   const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(changed),signal:AbortSignal.timeout(15000)});
   if(!saved.ok){const info=await saved.json().catch(()=>({}));throw Error("Fallo al guardar documento HTTP "+saved.status+" código "+String(info.code||"desconocido")+" - "+String(info.message||"sin detalles").slice(0,120))}
   const entries=await saved.json(),docId=entries?.[0]?.id||old?.id||null;
