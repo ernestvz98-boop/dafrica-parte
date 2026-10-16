@@ -65,6 +65,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
  const overview=$("pcAutoOverview");
  let firstHistory=true;
  let loadedDocuments=new Map();
+ const pryChecked=new Set();
  const safeQuantity=v=>v===null||v===undefined||v===""?"—":Number.isFinite(Number(v))?Number(v).toLocaleString("es-ES",{maximumFractionDigits:4}):String(v);
  const lineFingerprint=x=>[
   String(x.codigo_articulo??x.referencia??"").trim(),
@@ -115,9 +116,9 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
       materials.map((line,i)=>'<tr><td>'+esc(i+1)+'</td><td>'+esc(line.referencia||"Sin referencia")+'</td><td>'+esc(line.descripcion||"Sin descripción")+'</td><td>'+esc(safeQuantity(line.cantidad))+'</td><td>'+esc(line.unidad||"—")+'</td><td>'+esc(line.precio_unitario===null||line.precio_unitario===undefined?"No consta":safeQuantity(line.precio_unitario)+" €")+'</td></tr>').join("")+
       '</tbody></table></div>':'<p>La lectura no contiene materiales disponibles.</p>';
      return '<details data-doc-id="'+esc(d.id)+'" '+(opened?'open':'')+' style="border:1px solid #d6dee8;border-radius:10px;padding:12px;margin:9px 0">'+
-      '<summary style="cursor:pointer"><b>Albarán '+esc(d.numero_documento||"sin número")+'</b> · '+esc(materials.length)+' fila(s) leída(s) · '+esc(saved.length)+' guardada(s) · '+esc(statusLabel)+'</summary>'+
+      '<summary style="cursor:pointer"><b>Albarán nº '+esc(d.ia_datos?.titulo_documento||d.numero_documento||"sin número")+'</b> · '+esc(materials.length)+' fila(s) leída(s) · '+esc(saved.length)+' guardada(s) · '+esc(statusLabel)+'</summary>'+
       '<p><b>Proveedor:</b> '+esc(d.proveedor_nombre||"No reconocido")+' · <b>Fecha:</b> '+esc(d.fecha_documento||"No reconocida")+'</p>'+
-      '<p><b>Obra:</b> '+esc(d.obra_id?"Asignación registrada":"Sin asignar")+' · <b>PRY:</b> '+esc(d.ia_datos?.proyecto_candidato||"Sin confirmar")+' · <b>Precios encontrados:</b> '+esc(withPrice)+'/'+esc(materials.length)+'</p>'+
+      '<p><b>Obra:</b> '+esc(d.obra_id?"Asignación registrada":"Sin asignar")+' · <b>PRY:</b> <span data-pry-doc="'+esc(d.id)+'">'+esc(d.ia_datos?.pry_codigo_confirmado?"Confirmado STEL: "+d.ia_datos.pry_codigo_confirmado:d.ia_datos?.pry_ocr_candidato?"Candidato OCR: "+d.ia_datos.pry_ocr_candidato+" (sin confirmar)":"Sin confirmar")+'</span> · <b>Precios:</b> '+esc(withPrice)+'/'+esc(materials.length)+' ('+esc(withPrice===materials.length?"Completados desde origen documentado":"Pendientes de factura vinculada")+')</p>'+
       '<p><b>Comprobación de guardado:</b> '+esc(matched?"Las referencias, conceptos y cantidades coinciden con las filas registradas":linesLoaded?"La lectura y los registros no coinciden o faltan líneas":"No se ha podido comprobar el registro completo")+'</p>'+
       table+
       (warnings.length?'<p class="muted"><b>Avisos:</b> '+esc(warnings.join(" · "))+'</p>':'')+
@@ -125,6 +126,24 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
       (d.archivo_path?'<p><button type="button" class="btn secondary" data-pdf-id="'+esc(d.id)+'">Descargar PDF original archivado</button></p>':'')+
       '</details>';
    }).join(""):'Aún no hay documentos archivados.';
+   const consultables=rows.filter(d=>d.tipo!=="FACTURA"&&d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"&&!d.ia_datos?.pry_codigo_confirmado&&!pryChecked.has(d.id)).slice(0,6);
+   for(const d of consultables)pryChecked.add(d.id);
+   if(consultables.length){
+     Promise.all(consultables.map(async d=>{
+       const statusCell=history.querySelector('[data-pry-doc="'+d.id+'"]');
+       if(!statusCell)return;
+       const prior=statusCell.textContent;
+       statusCell.textContent=prior+" · Consultando STEL…";
+       try{
+         const value=await sb("/functions/v1/compras-stel-pry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({documento_id:d.id})});
+         statusCell.textContent=value.confirmado?"Confirmado en STEL: "+value.candidato_ocr+(value.proyecto_stel?.name?" · "+value.proyecto_stel.name:""):
+           (value.candidato_ocr?"Candidato "+value.candidato_ocr+" sin confirmar en STEL":"PRY no legible");
+         if(value.similares?.length)statusCell.textContent+=" · Similares: "+value.similares.map(x=>x.code).join(", ");
+         if(value.estado==="STEL_SIN_CLAVE")statusCell.textContent+=" · API no configurada";
+         if(value.fuente)statusCell.title="Comprobación: "+value.fuente+"; proyectos examinados: "+String(value.comprobados??0);
+       }catch(e){statusCell.textContent=prior+" · Consulta STEL no disponible";}
+     })).catch(()=>{});
+   }
   }catch(e){history.textContent="No se pudo consultar el historial: "+(e?.message||e);overview.textContent="No se han podido comprobar las lecturas registradas."}
  };
  history.addEventListener("click",async e=>{
