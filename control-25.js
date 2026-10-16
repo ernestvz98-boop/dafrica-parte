@@ -135,18 +135,27 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
       (d.archivo_path?'<p><button type="button" class="btn secondary" data-pdf-id="'+esc(d.id)+'">Descargar PDF original archivado</button></p>':'')+
       '</details>';
    }).join(""):'Aún no hay documentos archivados.';
-   const consultables=rows.filter(d=>d.tipo!=="FACTURA"&&d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"&&!d.ia_datos?.pry_codigo_confirmado&&!pryChecked.has(d.id)).slice(0,6);
+   const consultables=rows.filter(d=>d.tipo!=="FACTURA"&&d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"&&!d.obra_id&&!pryChecked.has(d.id)).slice(0,6);
    for(const d of consultables)pryChecked.add(d.id);
    if(consultables.length){
      Promise.all(consultables.map(async d=>{
        const statusCell=history.querySelector('[data-pry-doc="'+d.id+'"]');
+       const workCell=history.querySelector('[data-obra-doc="'+d.id+'"]');
        if(!statusCell)return;
        const prior=statusCell.textContent;
        statusCell.textContent=prior+" · Consultando STEL…";
        try{
          const value=await sb("/functions/v1/compras-stel-pry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({documento_id:d.id})});
-         statusCell.textContent=value.confirmado?"Confirmado en STEL: "+value.candidato_ocr+(value.proyecto_stel?.name?" · "+value.proyecto_stel.name:""):
-           (value.candidato_ocr?"Candidato "+value.candidato_ocr+" sin confirmar en STEL":"PRY no legible");
+         if(value.obra_asignada){
+           statusCell.textContent="Confirmado y asignado · "+value.candidato_ocr;
+           if(workCell)workCell.textContent=value.obra_nombre||value.proyecto_stel?.name||"Obra STEL confirmada";
+         }else if(value.confirmado){
+           statusCell.textContent="Confirmado STEL: "+value.candidato_ocr+" · Asignación pendiente ("+(value.detalle_asignacion||"sin detalles")+")";
+         }else{
+           statusCell.textContent=value.candidato_ocr?"Candidato "+value.candidato_ocr+" sin confirmar en STEL":"PRY no legible";
+           if(value.fuente==="CATALOGO_NO_VERIFICADO_COMPLETO"||value.fuente==="STEL_ALBARAN_REFERENCIADO_MUESTRA")
+             statusCell.textContent+=" · Catálogo STEL no verificable completamente";
+         }
          if(value.similares?.length)statusCell.textContent+=" · Similares: "+value.similares.map(x=>x.code).join(", ");
          if(value.estado==="STEL_SIN_CLAVE")statusCell.textContent+=" · API no configurada";
          if(value.fuente)statusCell.title="Comprobación: "+value.fuente+"; proyectos examinados: "+String(value.comprobados??0);
