@@ -102,24 +102,33 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
     const verified=d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"&&matched;
     const warnings=Array.isArray(d.ia_datos?.avisos)?d.ia_datos.avisos:[];
     const errors=Array.isArray(d.ia_datos?.errores)?d.ia_datos.errores:[];
-    const withPrice=materials.filter(x=>x.precio_unitario!==null&&x.precio_unitario!==undefined).length;
-    return {d,materials,saved,matched,verified,warnings,errors,withPrice};
+    // OCR readings are immutable evidence. Prices belong to the persisted
+    // material line and are enriched only after a verified invoice link.
+    const remaining=saved.map(x=>({...x,_used:false}));
+    const displayLines=materials.map(x=>{
+      const y=remaining.find(z=>!z._used&&lineFingerprint(z)===lineFingerprint(x));
+      if(y)y._used=true;
+      return {...x,unidad:y?.unidad??x.unidad,precio_unitario:y?.precio_unitario??x.precio_unitario};
+    });
+    const withPrice=displayLines.filter(x=>x.precio_unitario!==null&&x.precio_unitario!==undefined).length;
+    return {d,materials,displayLines,saved,matched,verified,warnings,errors,withPrice};
    });
    const verifiedDocs=info.filter(x=>x.verified);
    const verifiedRows=verifiedDocs.reduce((n,x)=>n+x.saved.length,0);
    overview.innerHTML='<p><b>Lecturas almacenadas:</b> '+esc(rows.length)+' documento(s) en el historial · '+esc(verifiedDocs.length)+' con materiales contrastados y comprobados en la base de datos · '+esc(verifiedRows)+' líneas comprobadas.</p>'+
     '<p class="muted">«Contrastado sin imputación» significa que se archivaron las referencias y cantidades, NO que existan precios o una obra asignada. La información puede consultarse sin volver a ejecutar IA.</p>';
-   history.innerHTML=rows.length?info.map(({d,materials,saved,matched,verified,warnings,errors,withPrice})=>{
+   history.innerHTML=rows.length?info.map(({d,materials,displayLines,saved,matched,verified,warnings,errors,withPrice})=>{
      const statusLabel=verified?"Materiales contrastados":d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"?"Auditoría contrastada, comprobar archivo de líneas":d.ia_estado==="RETENIDO_AUTOMATICAMENTE"?"Retenido, sin aceptar materiales":d.ia_estado||"Pendiente";
      const opened=openOnLoad||oldOpen.has(d.id);
      const table=materials.length?'<div class="table-wrap" style="max-height:600px;overflow:auto"><table><thead><tr><th>Fila</th><th>Referencia</th><th>Descripción leída</th><th>Cantidad</th><th>Unidad</th><th>Precio unitario</th></tr></thead><tbody>'+
-      materials.map((line,i)=>'<tr><td>'+esc(i+1)+'</td><td>'+esc(line.referencia||"Sin referencia")+'</td><td>'+esc(line.descripcion||"Sin descripción")+'</td><td>'+esc(safeQuantity(line.cantidad))+'</td><td>'+esc(line.unidad||"—")+'</td><td>'+esc(line.precio_unitario===null||line.precio_unitario===undefined?"No consta":safeQuantity(line.precio_unitario)+" €")+'</td></tr>').join("")+
+      displayLines.map((line,i)=>'<tr><td>'+esc(i+1)+'</td><td>'+esc(line.referencia||"Sin referencia")+'</td><td>'+esc(line.descripcion||"Sin descripción")+'</td><td>'+esc(safeQuantity(line.cantidad))+'</td><td>'+esc(line.unidad||"—")+'</td><td>'+esc(line.precio_unitario===null||line.precio_unitario===undefined?"No consta":safeQuantity(line.precio_unitario)+" €")+'</td></tr>').join("")+
       '</tbody></table></div>':'<p>La lectura no contiene materiales disponibles.</p>';
      return '<details data-doc-id="'+esc(d.id)+'" '+(opened?'open':'')+' style="border:1px solid #d6dee8;border-radius:10px;padding:12px;margin:9px 0">'+
       '<summary style="cursor:pointer"><b>'+esc(d.tipo==="FACTURA"?"Factura nº ":"Albarán nº ")+esc(d.ia_datos?.titulo_documento||d.numero_documento||"sin número")+'</b> · '+esc(materials.length)+' fila(s) leída(s) · '+esc(saved.length)+' guardada(s) · '+esc(statusLabel)+'</summary>'+
       '<p><b>Proveedor:</b> '+esc(d.proveedor_nombre||"No reconocido")+' · <b>Fecha:</b> '+esc(d.fecha_documento||"No reconocida")+'</p>'+
-      '<p><b>Obra:</b> '+esc(d.obra_id?"Asignación registrada":"Sin asignar")+' · <b>PRY:</b> <span data-pry-doc="'+esc(d.id)+'">'+esc(d.ia_datos?.pry_codigo_confirmado?"Confirmado STEL: "+d.ia_datos.pry_codigo_confirmado:d.ia_datos?.pry_ocr_candidato?"Candidato OCR: "+d.ia_datos.pry_ocr_candidato+" (sin confirmar)":"Sin confirmar")+'</span> · <b>Precios:</b> '+esc(withPrice)+'/'+esc(materials.length)+' ('+esc(withPrice===materials.length?"Completados desde origen documentado":"Pendientes de factura vinculada")+')</p>'+
+      '<p><b>Obra:</b> '+esc(d.obra_id?"Asignación registrada":"Sin asignar")+' · <b>PRY:</b> <span data-pry-doc="'+esc(d.id)+'">'+esc(d.ia_datos?.pry_codigo_confirmado?"Confirmado STEL: "+d.ia_datos.pry_codigo_confirmado:d.ia_datos?.pry_ocr_candidato?"Candidato OCR: "+d.ia_datos.pry_ocr_candidato+" (sin confirmar)":"Sin confirmar")+'</span> · <b>Precios:</b> '+esc(withPrice)+'/'+esc(materials.length)+' ('+esc(withPrice===materials.length?"Precios disponibles":d.tipo==="FACTURA"?"Factura sin todos los precios legibles":"Pendientes de factura vinculada")+')</p>'+
       '<p><b>Comprobación de guardado:</b> '+esc(matched?"Las referencias, conceptos y cantidades coinciden con las filas registradas":linesLoaded?"La lectura y los registros no coinciden o faltan líneas":"No se ha podido comprobar el registro completo")+'</p>'+
+      (d.ia_datos?.factura_origen?'<p><b>Precio vinculado desde factura:</b> '+esc(d.ia_datos.factura_origen)+'</p>':'')+
       table+
       (warnings.length?'<p class="muted"><b>Avisos:</b> '+esc(warnings.join(" · "))+'</p>':'')+
       (errors.length?'<p><b>Incidencias:</b> '+esc(errors.join(" · "))+'</p>':'')+
