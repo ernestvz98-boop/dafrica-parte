@@ -491,13 +491,23 @@ async function pcBindBatchDeliveryMatches(documents){
       '<input type="checkbox" style="width:auto" id="pcBatchProjectConfirmed'+i+'">'+
       '<span>He comprobado con el original y el pedido que la obra correcta es <b>'+esc(d.codigo_proyecto||"SIN CÓDIGO")+
       '</b>. La escritura manuscrita es dudosa; autorizo solamente esta asociación interna.</span></label>':'')+
-    '<button type="button" class="btn" id="pcBatchSave'+i+'"'+(problems.length||projectNeedsConfirmation?" disabled":"")+'>'+
+    (d.__totalLineasDudoso?'<label style="display:flex;align-items:flex-start;gap:8px;margin:10px 0">'+
+      '<input type="checkbox" style="width:auto" id="pcBatchTotalConfirmed'+i+'">'+
+      '<span>He contado las filas en el PDF original: confirmo que el albarán contiene <b>'+esc(d.lineas.length)+
+      '</b> líneas aunque una lectura del total impreso discrepe.</span></label>':'')+
+    '<button type="button" class="btn" id="pcBatchSave'+i+'"'+
+      (problems.length||projectNeedsConfirmation||d.__totalLineasDudoso?" disabled":"")+'>'+
     'Registrar '+matched.length+' línea(s) como entrega en DAFRICA</button>';
    const button=$("pcBatchSave"+i);
    const projectApproval=$("pcBatchProjectConfirmed"+i);
-   projectApproval?.addEventListener("change",()=>{
-     if(button)button.disabled=problems.length>0||!projectApproval.checked;
-   });
+   const countApproval=$("pcBatchTotalConfirmed"+i);
+   const refreshSave=()=>{
+     if(button)button.disabled=problems.length>0||
+       (projectNeedsConfirmation&&!projectApproval?.checked)||
+       (d.__totalLineasDudoso&&!countApproval?.checked);
+   };
+   projectApproval?.addEventListener("change",refreshSave);
+   countApproval?.addEventListener("change",refreshSave);
    if(button)button.addEventListener("click",async()=>{
     if(!d.__audit||d.__audit.materiales_verificados!==true){
      alert("Importación bloqueada: se requiere segunda lectura idéntica.");return;
@@ -510,6 +520,9 @@ async function pcBindBatchDeliveryMatches(documents){
     if(projectNeedsConfirmation&&!projectApproval?.checked){
       alert("Confirma la obra PRY del pedido. Los materiales ya están auditados, pero no podemos asignarlos sin esa comprobación.");return;
     }
+    if(d.__totalLineasDudoso&&!countApproval?.checked){
+      alert("Confirma contra el PDF original el número de filas del albarán.");return;
+    }
     if(!$("pcBatchConfirm"+i).checked){alert("Confirma primero la revisión del albarán");return;}
     if(!confirm("Registrar "+matched.length+" líneas en el pedido "+order.numero+" desde el albarán "+d.numero+"? No se escribirá nada en STEL."))return;
     button.disabled=true;
@@ -517,7 +530,9 @@ async function pcBindBatchDeliveryMatches(documents){
      await sb("/rest/v1/rpc/pedido_registrar_albaran_pdf",{
       method:"POST",body:JSON.stringify({
        p_pedido_id:id,p_numero:String(d.numero).trim(),p_fecha:d.fecha,p_lineas:matched,p_auditoria_id:d.__audit.auditoria_id,
-       p_codigo_obra_confirmado:norm(d.codigo_proyecto),p_confirmacion_obra:projectNeedsConfirmation?!!projectApproval?.checked:true
+       p_codigo_obra_confirmado:norm(d.codigo_proyecto),p_confirmacion_obra:projectNeedsConfirmation?!!projectApproval?.checked:true,
+       p_filas_descripcion_confirmadas:[...(d.__reviewRows instanceof Set?d.__reviewRows:new Set())].map(j=>j+1),
+       p_confirma_total_impreso:!!(d.__totalLineasDudoso&&countApproval?.checked)
       })
      });
      pedidoActualId=id;
