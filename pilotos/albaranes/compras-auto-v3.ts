@@ -109,12 +109,12 @@ Deno.serve(async(req:Request)=>{
   const digest=await crypto.subtle.digest("SHA-256",bin);const sha=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,"0")).join("");
   const dbHead={apikey:srv,authorization:jwt,"Content-Type":"application/json"};
   etapa="buscar_duplicado";
-  const previous=await fetch(base+"/rest/v1/coste_documentos?hash_archivo=eq."+sha+"&select=id,ia_estado,numero_documento&limit=1",{headers:dbHead,signal:AbortSignal.timeout(10000)});
+  const previous=await fetch(base+"/rest/v1/coste_documentos?hash_archivo=eq."+sha+"&select=id,ia_estado,numero_documento,ia_datos&limit=1",{headers:dbHead,signal:AbortSignal.timeout(10000)});
   if(!previous.ok)throw Error("Error consultando duplicados HTTP "+previous.status);
   const found=await previous.json();
   let old=found[0]||null;
   if(old && !["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado))
-    return reply({estado:"YA_PROCESADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado,motivo:"Documento ya archivado previamente; no se vuelve a registrar",escritura_stel:false});
+    return reply({estado:"YA_PROCESADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado,motivo:"Documento ya archivado previamente; no se vuelve a registrar",lineas_detectadas:old.ia_datos?.materiales?.length??null,proyecto_candidato:old.ia_datos?.proyecto_candidato??null,escritura_stel:false});
   etapa="lectura_estructurada";
   const n=Number(input?.lineas_geometricas),rows=input?.geometria_filas,bands=input?.geometria_imagenes;
   const hasSpatial=Number.isInteger(n)&&n>=1&&n<=50;
@@ -146,7 +146,7 @@ Deno.serve(async(req:Request)=>{
   if(!old&&allowed!=="OTRO"&&date&&norm(first.numero)&&norm(first.proveedor)){
     etapa="buscar_identidad_documental";
     const query=new URL(base+"/rest/v1/coste_documentos");
-    query.searchParams.set("select","id,ia_estado,numero_documento,proveedor_nombre,fecha_documento,tipo,hash_archivo");
+    query.searchParams.set("select","id,ia_estado,numero_documento,proveedor_nombre,fecha_documento,tipo,hash_archivo,ia_datos");
     query.searchParams.set("tipo","eq."+allowed);
     query.searchParams.set("fecha_documento","eq."+date);
     query.searchParams.set("numero_documento","eq."+String(first.numero).trim());
@@ -156,7 +156,7 @@ Deno.serve(async(req:Request)=>{
     const candidates=await lookup.json();
     old=candidates.find((d:any)=>norm(d.proveedor_nombre)===norm(first.proveedor)&&norm(d.numero_documento)===norm(first.numero))||null;
     if(old&&!["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado))
-      return reply({estado:"YA_PROCESADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado,motivo:"Identidad documental ya archivada; se evita crear duplicados",escritura_stel:false});
+      return reply({estado:"YA_PROCESADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado,motivo:"Identidad documental ya archivada; se evita crear duplicados",lineas_detectadas:old.ia_datos?.materiales?.length??null,proyecto_candidato:old.ia_datos?.proyecto_candidato??null,escritura_stel:false});
   }
   if(input?.fecha_esperada&&String(input.fecha_esperada)!==String(first.fecha))result.errors.push("Fecha incompatible con la clasificación del PDF original");
   if(input?.tipo_esperado&&norm(input.tipo_esperado)!==norm(first.tipo))result.errors.push("Tipo incompatible con la clasificación independiente");
