@@ -154,7 +154,8 @@ Deno.serve(async(req:Request)=>{
   }
   const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:date,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina"}};
   etapa="registrar_documento";
-  const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(record),signal:AbortSignal.timeout(15000)});
+  const changed=old?{ia_estado:record.ia_estado,ia_datos:record.ia_datos}:record;
+  const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(changed),signal:AbortSignal.timeout(15000)});
   if(!saved.ok){if(saved.status===409)return reply({estado:"DUPLICADO",numero:first.numero});throw Error("No se pudo registrar el documento de control: "+saved.status)}
   const entries=await saved.json(),docId=entries?.[0]?.id||old?.id||null;
   let archiveStatus=verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",savedRows=0;
