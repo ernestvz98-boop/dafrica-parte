@@ -297,12 +297,12 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    }
    await Promise.all(Array.from({length:Math.min(2,work.length)},()=>consume()));
    const ok=out.filter(x=>x.estado==="CONTRASTADO_SIN_IMPUTACION").length;
-   const held=out.filter(x=>x.estado==="RETENIDO_AUTOMATICAMENTE"||x.estado==="RETENIDO").length;
+   const held=out.filter(x=>["RETENIDO_AUTOMATICAMENTE","RETENIDO","ARCHIVO_EXISTENTE_INCOMPLETO"].includes(x.estado)).length;
    const already=out.filter(x=>x.estado==="YA_PROCESADO"||x.estado==="DUPLICADO").length;
-   const errors=out.filter(x=>x.estado==="ERROR"||x.estado==="LINEAS_PENDIENTES"||x.estado==="RETENIDO_SIN_PROCESAR").length;
-   const archived=out.filter(x=>!!x.documento_id).length;
+   const discrepancies=out.filter(x=>x.estado==="LECTURA_DIFIERE_DE_ARCHIVO").length;
+   const errors=out.filter(x=>["ERROR","LINEAS_PENDIENTES","RETENIDO_SIN_PROCESAR"].includes(x.estado)).length;
    const accepted=ok+already,rate=split.documentos.length?Math.round(100*accepted/split.documentos.length):0;
-   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos analizados.</b> <b>'+esc(accepted)+' aceptados o ya archivados ('+esc(rate)+'%)</b>; <b>'+esc(held)+' retenidos por lectura no verificada</b>; '+esc(errors)+' errores técnicos. Los retenidos NO son documentos procesados correctamente.</p>'+
+   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos analizados.</b> <b>'+esc(accepted)+' aceptados o coincidentes con el archivo ('+esc(rate)+'%)</b>; <b>'+esc(held)+' retenidos</b>; <b>'+esc(discrepancies)+' relecturas diferentes de registros existentes</b>; '+esc(errors)+' errores técnicos. Las relecturas diferentes NO se contabilizan como nuevas verificaciones.</p>'+
     out.map((x,i)=>'<div class="module-note sensitive-note"><b>'+esc(x.numero||split.documentos[i]?.numero||"Documento "+(i+1))+' · '+esc(x.estado||"ERROR")+'</b>'+
     '<p>'+esc(x.lineas_detectadas??"?")+' líneas; obra: '+esc(x.proyecto_candidato||"sin asociar")+'</p>'+
     (x.documento_id?'<p><a href="#pcAutoHistory"><b>Ver lectura completa y materiales guardados ↓</b></a></p>':'')+
@@ -311,7 +311,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
     ((x.incidencias||[]).length>12?'<p class="muted">'+esc(x.incidencias.length-12)+' incidencias adicionales; no se han aceptado datos inciertos.</p>':"")+
     (x.avisos||[]).map(z=>'<p class="muted">• '+esc(z)+'</p>').join("")+'</div>').join("")+
     '<p class="muted">Registro documental automático. No se contabilizan costes sin importes fiables ni asignación de obra comprobada. STEL no se modifica.</p>';
-   status.textContent=errors?"Proceso incompleto: "+errors+" documento(s) con error; "+archived+" archivo(s) registrados. Consulta los detalles.": "Proceso terminado: "+ok+" nuevo(s) contrastado(s), "+already+" previamente archivado(s), "+held+" retenido(s). STEL y costes no modificados.";
+   status.textContent=errors?"Proceso incompleto: "+errors+" error(es) técnicos. Consulta los detalles.":"Proceso finalizado: "+ok+" nuevos contrastados, "+already+" existentes coincidentes, "+discrepancies+" relecturas contradictorias y "+held+" retenidos. No se han modificado albaranes existentes ni costes.";
    await renderHistory();
   }catch(e){status.textContent="Lote retenido sin registrar: "+(e?.message||String(e))}
   finally{button.disabled=false}
