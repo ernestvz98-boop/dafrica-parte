@@ -256,7 +256,7 @@ Deno.serve(async(req:Request)=>{
     result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked],first,String(input?.numero_esperado||""));
     if(result.review_rows.length){
       etapa="relectura_automatica_filas";
-      const third=await auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_REGION_MODEL")||"gpt-4o");
+      const third=await auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_REGION_MODEL")||"gpt-4.1");
       result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked,third],first,String(input?.numero_esperado||""));
     }
   }else{
