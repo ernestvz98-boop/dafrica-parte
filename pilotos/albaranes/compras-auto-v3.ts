@@ -120,7 +120,7 @@ Deno.serve(async(req:Request)=>{
   const geoRows=Array.isArray(input?.geometria_filas)?input.geometria_filas:null;
   const normalizedRow=(v:any)=>JSON.stringify([
     String(v?.referencia??v?.codigo_articulo??"").trim(),
-    Number(v?.cantidad),canon(v?.descripcion)
+    Number(v?.cantidad)
   ]);
   const validPhysicalRows=geoRows&&geoRows.length>0&&geoRows.length<=50&&
     geoRows.every((x:any)=>String(x?.referencia||"").trim()&&Number(x?.cantidad)>0&&canon(x?.descripcion));
@@ -158,11 +158,13 @@ Deno.serve(async(req:Request)=>{
         };
         const sameStored=stored.length===geoRows.length&&
           JSON.stringify(storedMultiset(stored))===JSON.stringify(storedMultiset(geoRows));
+        const conceptVariants=geoRows.reduce((n:number,row:any,i:number)=>n+(canon(row.descripcion)!==canon(existing[i]?.descripcion)?1:0),0);
         if(sameStored)return reply({
           estado:"YA_PROCESADO",documento_id:canonical.id,numero:canonical.numero_documento,
           ia_estado:canonical.ia_estado,lineas_detectadas:stored.length,
           motivo:"Documento y materiales ya contrastados: se evita nueva lectura OCR y nuevos registros",
-          comprobacion:"numero_proveedor_fecha_y_filas_geometricas_con_lineas_guardadas",
+          comprobacion:"numero_proveedor_fecha_y_referencias_cantidades_guardadas",
+          observacion:conceptVariants?String(conceptVariants)+" descripción(es) transcritas de forma diferente; se conserva lectura original":null,
           escritura_stel:false
         });
       }
