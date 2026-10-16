@@ -112,7 +112,7 @@ Deno.serve(async(req:Request)=>{
   const previous=await fetch(base+"/rest/v1/coste_documentos?hash_archivo=eq."+sha+"&select=id,ia_estado,numero_documento&limit=1",{headers:dbHead,signal:AbortSignal.timeout(10000)});
   if(!previous.ok)throw Error("Error consultando duplicados HTTP "+previous.status);
   const found=await previous.json();
-  const old=found[0]||null;
+  let old=found[0]||null;
   if(old && !["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado))
     return reply({estado:"DUPLICADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado});
   etapa="lectura_estructurada";
@@ -141,6 +141,23 @@ Deno.serve(async(req:Request)=>{
   const geo=hasSpatial?n:null;
   const allowed=["ALBARAN","FACTURA","ABONO"].includes(first.tipo)?first.tipo:"OTRO";
   const date=goodDate(first.fecha)&&first.fecha===second.fecha?first.fecha:null;
+  // The PDF separator may reserialize an identical page with a different SHA-256.
+  // Match the business document identity as well, before attempting to insert.
+  if(!old&&allowed!=="OTRO"&&date&&norm(first.numero)&&norm(first.proveedor)){
+    etapa="buscar_identidad_documental";
+    const query=new URL(base+"/rest/v1/coste_documentos");
+    query.searchParams.set("select","id,ia_estado,numero_documento,proveedor_nombre,fecha_documento,tipo,hash_archivo");
+    query.searchParams.set("tipo","eq."+allowed);
+    query.searchParams.set("fecha_documento","eq."+date);
+    query.searchParams.set("numero_documento","eq."+String(first.numero).trim());
+    query.searchParams.set("limit","100");
+    const lookup=await fetch(query,{headers:dbHead,signal:AbortSignal.timeout(10000)});
+    if(!lookup.ok)throw Error("No se pudo comprobar identidad documental HTTP "+lookup.status);
+    const candidates=await lookup.json();
+    old=candidates.find((d:any)=>norm(d.proveedor_nombre)===norm(first.proveedor)&&norm(d.numero_documento)===norm(first.numero))||null;
+    if(old&&!["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado))
+      return reply({estado:"YA_PROCESADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado,motivo:"Identidad documental ya archivada; se evita crear duplicados",escritura_stel:false});
+  }
   if(input?.fecha_esperada&&String(input.fecha_esperada)!==String(first.fecha))result.errors.push("Fecha incompatible con la clasificación del PDF original");
   if(input?.tipo_esperado&&norm(input.tipo_esperado)!==norm(first.tipo))result.errors.push("Tipo incompatible con la clasificación independiente");
   if(input?.proveedor_esperado&&canon(input.proveedor_esperado)!==canon(first.proveedor))result.errors.push("Proveedor incompatible con la clasificación independiente");
@@ -152,7 +169,7 @@ Deno.serve(async(req:Request)=>{
    const upload=await fetch(base+"/storage/v1/object/costes-auto/"+path,{method:"POST",headers:{apikey:srv,authorization:jwt,"Content-Type":"application/pdf","x-upsert":"false"},body:bin,signal:AbortSignal.timeout(20000)});
    if(!upload.ok)throw Error("Archivo privado no guardado: "+upload.status);
   }
-  const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:date,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina"}};
+  const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:date,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina",fuente_sha256:sha}};
   etapa="registrar_documento";
   const changed=old?{ia_estado:record.ia_estado,ia_datos:record.ia_datos}:record;
   const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(changed),signal:AbortSignal.timeout(15000)});
