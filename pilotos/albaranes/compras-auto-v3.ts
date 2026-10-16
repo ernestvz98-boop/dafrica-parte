@@ -124,7 +124,7 @@ Deno.serve(async(req:Request)=>{
       return reply({estado:"RETENIDO_SIN_PROCESAR",error:"Falta tabla geométrica completa; no se sustituirá por lectura de página entera",numero:input?.numero_esperado||""},422);
     const [head,checked]=await Promise.all([
       vision(key,pdf,Deno.env.get("OPENAI_VISION_MODEL")||"gpt-4o"),
-      auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_AUDIT_MODEL")||"gpt-4.1")
+      auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_GEOMETRIC_AUDIT_MODEL")||"gpt-4o")
     ]);
     first=head;second={...head,lineas:checked.lineas};
     result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||""},[checked],head,String(input?.numero_esperado||""));
