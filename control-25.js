@@ -223,7 +223,15 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    if(!has("costes.editar")||!consent.checked){status.textContent="Para reprocesar, autoriza el análisis documental y comprueba tus permisos.";return}
    retry.disabled=true;button.disabled=true;results.textContent="";
    try{
-    const docs=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,archivo_path,ia_estado,ia_datos&ia_estado=eq.RETENIDO_AUTOMATICAMENTE&order=created_at.desc&limit=10");
+    const pending=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,archivo_path,ia_estado,ia_datos&ia_estado=eq.RETENIDO_AUTOMATICAMENTE&order=created_at.desc&limit=100");
+    const unique=new Map();
+    for(const d of pending){
+      const key=String(d.numero_documento||d.id).toUpperCase().replace(/[^A-Z0-9]/g,"")+"|"+
+        String(d.proveedor_nombre||"").toUpperCase().replace(/[^A-Z0-9]/g,"")+"|"+
+        String(d.fecha_documento||"FECHA_NO_CONFIRMADA");
+      if(!unique.has(key))unique.set(key,d);
+    }
+    const docs=[...unique.values()].slice(0,20);
     if(!docs.length){status.textContent="No hay documentos retenidos pendientes de reprocesar.";return}
     const outcomes=[];
     for(const d of docs){
@@ -239,10 +247,13 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
        const doc={pdf_separado_b64:pdfb64,proveedor:d.proveedor_nombre||"",numero:d.numero_documento||"",tipo:"ALBARAN",lineas:Array.isArray(d.ia_datos?.materiales)?d.ia_datos.materiales:[]};
        let geo=null,rows=null,images=null,geoProject="",headerImage=null,profile="",allowNoRef=false;
        if(doc.lineas.length>=1&&doc.lineas.length<=5){
-        const parsed=String(doc.proveedor).toUpperCase().includes("SALTOKI")?(doc.lineas.length===1?await pcLeerSaltokiFilaUnica(doc):await pcLeerSaltokiFilas(doc)):await pcLeerTablaMixta(doc);
+        let parsed=null;
+        try{parsed=String(doc.proveedor).toUpperCase().includes("SALTOKI")?(doc.lineas.length===1?await pcLeerSaltokiFilaUnica(doc):await pcLeerSaltokiFilas(doc)):await pcLeerTablaMixta(doc)}catch(e){console.warn("Lectura física no concluyente",String(e).slice(0,110))}
+        if(parsed){
         if(parsed.lineas_validas===true&&parsed.numero_filas_geometricas===parsed.lineas?.length){
          geo=parsed.numero_filas_geometricas;rows=parsed.lineas;images=parsed.imagenes_zonas;headerImage=parsed.imagen_cabecera||null;profile=parsed.perfil_formato||"";allowNoRef=parsed.permite_sin_referencia===true;
          geoProject=parsed.codigo_pry_sin_conflictos?parsed.codigo_proyecto:"";
+        }
         }
        }
        const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"reproceso_"+String(doc.numero||"documento")+".pdf",data:"data:application/pdf;base64,"+pdfb64,lineas_geometricas:geo,geometria_filas:rows,geometria_imagenes:images,imagen_cabecera:headerImage,perfil_formato:profile,permite_sin_referencia:allowNoRef,geometria_proyecto:geoProject,pry_primera_lectura:String(d.ia_datos?.pry_ocr_candidato||""),numero_esperado:doc.numero,fecha_esperada:d.fecha_documento||null,proveedor_esperado:doc.proveedor,tipo_esperado:"ALBARAN",reprocesar:true})});
@@ -251,8 +262,12 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
        outcomes.push({numero:doc.numero,estado:value.estado,filas:value.lineas_detectadas??0,problemas:value.incidencias||[]});
       }catch(e){outcomes.push({numero:d.numero_documento,estado:"ERROR",filas:0,problemas:[e?.message||String(e)]})}
     }
-    const ok=outcomes.filter(x=>x.estado==="CONTRASTADO_SIN_IMPUTACION").length;
-    status.textContent="Reprocesados "+outcomes.length+" PDF archivados: "+ok+" contrastados; "+(outcomes.length-ok)+" continúan sin verificar. Sin correcciones manuales ni escrituras en STEL.";
+    const ok=outcomes.filter(x=>x.estado==="CONTRASTADO_SIN_IMPUTACION"||x.estado==="YA_PROCESADO").length;
+    const differ=outcomes.filter(x=>x.estado==="LECTURA_DIFIERE_DE_ARCHIVO").length;
+    const technical=outcomes.filter(x=>x.estado==="ERROR").length;
+    status.textContent="Comprobados "+outcomes.length+" albaranes retenidos distintos: "+
+      ok+" contrastados o ya archivados, "+differ+" con nueva lectura contradictoria, "+
+      (outcomes.length-ok-differ-technical)+" aún retenidos y "+technical+" errores técnicos. Sin modificar STEL.";
     results.innerHTML=outcomes.map(v=>'<div class="module-note sensitive-note"><b>'+esc(v.numero)+" · "+esc(v.estado)+'</b><p>'+esc(v.filas)+' líneas</p>'+v.problemas.slice(0,10).map(z=>'<p class="error">• '+esc(z)+'</p>').join("")+'</div>').join("");
     await renderHistory();
    }catch(e){status.textContent="No se completó el reproceso: "+(e?.message||String(e))}
