@@ -63,7 +63,7 @@ function decideGeo(geo:any,readings:any[],header:any,expected:string){
  if(!Array.isArray(readings[0]?.lineas)||readings[0].lineas.length!==n)notices.push("La primera auditoría omitió filas; se usarán los recortes geométricos como referencia");
  const approved:any[]=[],pending:number[]=[];
  const key=(v:any)=>v&&String(v.referencia||"").trim()&&typeof v.cantidad==="number"&&v.cantidad>0&&Number.isFinite(v.cantidad)&&canon(v.descripcion)?
-  JSON.stringify([String(v.referencia).trim(),v.cantidad,canon(v.descripcion),norm(v.unidad),v.precio_unitario??null]):"";
+  JSON.stringify([String(v.referencia).trim(),v.cantidad,canon(v.descripcion),v.precio_unitario??null]):"";
  for(let i=0;i<n;i++){
   const all=[original[i],...readings.map(r=>r.lineas?.[i])];
   const votes=new Map<string,{count:number,item:any}>();
