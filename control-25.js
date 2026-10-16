@@ -4,7 +4,7 @@
 renderComprasLotePilot = function renderComprasAutonomasV2(){
  const root=$("pcBatch");if(!root||!has("costes.ver"))return;
  root.innerHTML='<div class="card">'+
-  '<h3>Albaranes automáticos V2</h3>'+
+  '<h3>Albaranes automáticos V3 · OCR por filas</h3>'+
   '<p class="muted">Sube un PDF. DAFRICA separa los documentos, compara dos lecturas independientes y archiva cada resultado. Sin revisión de filas, sin casillas de confirmación y sin modificar STEL Order. Los documentos no verificables se retienen automáticamente sin contabilizar importes.</p>'+
   (!has("costes.editar")?'<p class="error">Esta cuenta no tiene permisos para archivar albaranes (costes.editar).</p>':'')+
   '<label for="pcAutoFile">PDF de albaranes (máximo 6 MB, 10 páginas por lote)</label>'+
@@ -48,7 +48,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
      if(!d.pdf_separado_b64){out[i]={estado:"RETENIDO",numero:d.numero,incidencias:["Documento sin PDF separable"]};continue}
      status.textContent="Procesando "+(i+1)+"/"+split.documentos.length+" · "+String(d.numero||"sin número");
      let geo=null,geometryWarning="",geometryRows=null,geometryImages=null,geometryProject="";
-     if(String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
+     if(String(d.proveedor||"").toUpperCase().includes("SALTOKI")&&(d.lineas||[]).length>=5){
       try{
        const parsed=await pcLeerSaltokiFilas(d);
        if(parsed.lineas_validas===true&&Number.isInteger(parsed.numero_filas_geometricas)&&parsed.lineas?.length===parsed.numero_filas_geometricas&&Array.isArray(parsed.imagenes_zonas)){
