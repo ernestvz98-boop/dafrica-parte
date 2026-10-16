@@ -108,6 +108,77 @@ Deno.serve(async(req:Request)=>{
   etapa="calcular_huella";
   const digest=await crypto.subtle.digest("SHA-256",bin);const sha=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,"0")).join("");
   const dbHead={apikey:srv,authorization:jwt,"Content-Type":"application/json"};
+
+  // Idempotency must be checked against the originating lot classification and
+  // physically detected rows BEFORE another free-form AI reading changes the date.
+  // Matching document number alone is NEVER sufficient: some suppliers reuse it annually.
+  etapa="comprobar_documento_ya_archivado";
+  const expectedNumber=String(input?.numero_esperado||"").trim();
+  const expectedDate=String(input?.fecha_esperada||"").trim();
+  const expectedSupplier=String(input?.proveedor_esperado||"").trim();
+  const expectedType=norm(input?.tipo_esperado||"");
+  const geoRows=Array.isArray(input?.geometria_filas)?input.geometria_filas:null;
+  const normalizedRow=(v:any)=>JSON.stringify([
+    String(v?.referencia??v?.codigo_articulo??"").trim(),
+    Number(v?.cantidad),canon(v?.descripcion)
+  ]);
+  const validPhysicalRows=geoRows&&geoRows.length>0&&geoRows.length<=50&&
+    geoRows.every((x:any)=>String(x?.referencia||"").trim()&&Number(x?.cantidad)>0&&canon(x?.descripcion));
+  if(expectedNumber&&goodDate(expectedDate)&&norm(expectedSupplier)&&expectedType==="ALBARAN"){
+    const endpoint=new URL(base+"/rest/v1/coste_documentos");
+    endpoint.searchParams.set("select","id,numero_documento,tipo,fecha_documento,proveedor_nombre,ia_estado,ia_datos,obra_id");
+    endpoint.searchParams.set("tipo","eq.ALBARAN");
+    endpoint.searchParams.set("numero_documento","eq."+expectedNumber);
+    endpoint.searchParams.set("limit","100");
+    const seen=await fetch(endpoint,{headers:dbHead,signal:AbortSignal.timeout(10000)});
+    if(!seen.ok)throw Error("No se pudo comprobar documento original HTTP "+seen.status);
+    const candidates=(await seen.json()).filter((x:any)=>canon(x.numero_documento)===canon(expectedNumber)&&
+      norm(x.proveedor_nombre)===norm(expectedSupplier)&&x.fecha_documento===expectedDate&&
+      x.ia_estado==="CONTRASTADO_SIN_IMPUTACION");
+    if(candidates.length===1){
+      const canonical=candidates[0];
+      const existing=Array.isArray(canonical.ia_datos?.materiales)?canonical.ia_datos.materiales:[];
+      const sameRows=!!validPhysicalRows&&geoRows.length===existing.length&&geoRows.every((v:any,i:number)=>
+        normalizedRow(v)===normalizedRow(existing[i]));
+      if(sameRows){
+        const linesURL=new URL(base+"/rest/v1/coste_lineas");
+        linesURL.searchParams.set("select","codigo_articulo,descripcion,cantidad");
+        linesURL.searchParams.set("documento_id","eq."+canonical.id);
+        linesURL.searchParams.set("limit","100");
+        const linesResponse=await fetch(linesURL,{headers:dbHead,signal:AbortSignal.timeout(10000)});
+        if(!linesResponse.ok)throw Error("No se pudieron verificar materiales ya guardados");
+        const stored=await linesResponse.json();
+        const storedMultiset=(array:any[])=>{
+          const map=new Map<string,number>();
+          for(const line of array){
+            const key=normalizedRow(line);
+            map.set(key,(map.get(key)||0)+1);
+          }
+          return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+        };
+        const sameStored=stored.length===geoRows.length&&
+          JSON.stringify(storedMultiset(stored))===JSON.stringify(storedMultiset(geoRows));
+        if(sameStored)return reply({
+          estado:"YA_PROCESADO",documento_id:canonical.id,numero:canonical.numero_documento,
+          ia_estado:canonical.ia_estado,lineas_detectadas:stored.length,
+          motivo:"Documento y materiales ya contrastados: se evita nueva lectura OCR y nuevos registros",
+          comprobacion:"numero_proveedor_fecha_y_filas_geometricas_con_lineas_guardadas",
+          escritura_stel:false
+        });
+      }
+      // An existing business document with different physical lines must not
+      // silently create a competing albaran or modify the original.
+      return reply({
+        estado:"CONFLICTO_DOCUMENTAL",documento_id:canonical.id,numero:canonical.numero_documento,
+        error:"Ya existe este número, proveedor y fecha, pero las filas físicas no se han podido corroborar. Se mantiene el archivo original sin cambios.",
+        escritura_stel:false
+      },409);
+    }
+    if(candidates.length>1)return reply({
+      estado:"CONFLICTO_DOCUMENTAL",error:"Existen varias fichas verificadas con la misma identidad documental",escritura_stel:false
+    },409);
+  }
+
   etapa="buscar_duplicado";
   const previous=await fetch(base+"/rest/v1/coste_documentos?hash_archivo=eq."+sha+"&select=id,ia_estado,numero_documento,ia_datos&limit=1",{headers:dbHead,signal:AbortSignal.timeout(10000)});
   if(!previous.ok)throw Error("Error consultando duplicados HTTP "+previous.status);
@@ -141,6 +212,9 @@ Deno.serve(async(req:Request)=>{
   const geo=hasSpatial?n:null;
   const allowed=["ALBARAN","FACTURA","ABONO"].includes(first.tipo)?first.tipo:"OTRO";
   const date=goodDate(first.fecha)&&first.fecha===second.fecha?first.fecha:null;
+  // A disputed year is not a valid accounting date. Do not save a new
+  // document using a year contradicted by the lot classifier.
+  const dateForRecord=goodDate(expectedDate)&&expectedDate!==date?null:date;
   // The PDF separator may reserialize an identical page with a different SHA-256.
   // Match the business document identity as well, before attempting to insert.
   if(!old&&allowed!=="OTRO"&&date&&norm(first.numero)&&norm(first.proveedor)){
@@ -162,6 +236,7 @@ Deno.serve(async(req:Request)=>{
   if(input?.tipo_esperado&&norm(input.tipo_esperado)!==norm(first.tipo))result.errors.push("Tipo incompatible con la clasificación independiente");
   if(input?.proveedor_esperado&&canon(input.proveedor_esperado)!==canon(first.proveedor))result.errors.push("Proveedor incompatible con la clasificación independiente");
   result.validated=result.validated&&result.errors.length===0;
+  if(dateForRecord===null)result.validated=false;
   const invoicesA=Array.isArray(first.albaranes_referenciados)?first.albaranes_referenciados.map((v:any)=>String(v).trim()).filter((v:string)=>/^[0-9A-Za-z./-]{3,50}$/.test(v)):[];
   const invoicesB=Array.isArray(second.albaranes_referenciados)?second.albaranes_referenciados.map((v:any)=>String(v).trim()).filter((v:string)=>/^[0-9A-Za-z./-]{3,50}$/.test(v)):[];
   const invoiceRefs=allowed==="FACTURA"&&JSON.stringify([...invoicesA].sort())===JSON.stringify([...invoicesB].sort())?[...new Set(invoicesA)]:[];
@@ -180,7 +255,7 @@ Deno.serve(async(req:Request)=>{
    const upload=await fetch(base+"/storage/v1/object/costes-auto/"+path,{method:"POST",headers:{apikey:srv,authorization:jwt,"Content-Type":"application/pdf","x-upsert":"false"},body:bin,signal:AbortSignal.timeout(20000)});
    if(!upload.ok)throw Error("Archivo privado no guardado: "+upload.status);
   }
-  const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:date,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina",fuente_sha256:sha,pry_ocr_candidato:candidate,pry_ocr_candidatos:allowed==="ALBARAN"?candidateList:[],pry_estado:allowed==="ALBARAN"?"CANDIDATO_SIN_CONFIRMAR":null,albaranes_referenciados:invoiceRefs,titulo_documento:String(first.numero||""),estado_precios:allowed==="ALBARAN"?"PENDIENTE_FACTURA":"FUENTE_FACTURA"}};
+  const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:dateForRecord,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina",fuente_sha256:sha,pry_ocr_candidato:candidate,pry_ocr_candidatos:allowed==="ALBARAN"?candidateList:[],pry_estado:allowed==="ALBARAN"?"CANDIDATO_SIN_CONFIRMAR":null,albaranes_referenciados:invoiceRefs,titulo_documento:String(first.numero||""),estado_precios:allowed==="ALBARAN"?"PENDIENTE_FACTURA":"FUENTE_FACTURA"}};
   etapa="registrar_documento";
   const changed=old?{ia_estado:record.ia_estado,ia_datos:{...old.ia_datos,...record.ia_datos,pry_codigo_confirmado:old.ia_datos?.pry_codigo_confirmado||null,pry_estado:old.ia_datos?.pry_codigo_confirmado?"CONFIRMADO_STEL":record.ia_datos.pry_estado}}:record;
   const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(changed),signal:AbortSignal.timeout(15000)});
