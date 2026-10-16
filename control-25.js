@@ -15,18 +15,57 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
   '<button class="btn" type="button" id="pcAutoStart">Procesar y archivar automáticamente</button>'+
   '<p id="pcAutoStatus" class="muted" role="status">Selecciona un archivo.</p>'+
   '<div id="pcAutoResults"></div>'+
-  '<h4>Últimos documentos procesados</h4><div id="pcAutoHistory" class="muted">Cargando…</div>'+
+  '<h4>Últimos documentos procesados</h4><button type="button" class="btn secondary" id="pcAutoRetry" style="margin-bottom:10px">Reprocesar retenidos (sin subir PDF)</button><div id="pcAutoHistory" class="muted">Cargando…</div>'+
   '</div>';
- const file=$("pcAutoFile"),consent=$("pcAutoConsent"),button=$("pcAutoStart"),status=$("pcAutoStatus"),results=$("pcAutoResults"),history=$("pcAutoHistory");
+ const file=$("pcAutoFile"),consent=$("pcAutoConsent"),button=$("pcAutoStart"),status=$("pcAutoStatus"),results=$("pcAutoResults"),history=$("pcAutoHistory"),retry=$("pcAutoRetry");
  const renderHistory=async()=>{
   try{
-   const rows=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,ia_estado,created_at&order=created_at.desc&limit=30");
+   const rows=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,archivo_path,ia_estado,ia_datos,created_at&order=created_at.desc&limit=30");
    history.innerHTML=rows.length?'<div class="table-wrap"><table><thead><tr><th>Albarán</th><th>Proveedor</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>'+
     rows.map(d=>'<tr><td>'+esc(d.numero_documento||"Sin número")+'</td><td>'+esc(d.proveedor_nombre||"—")+'</td><td>'+esc(d.fecha_documento||"—")+'</td><td>'+esc(d.ia_estado||"PENDIENTE")+'</td></tr>').join("")+'</tbody></table></div>':
     'Aún no hay documentos archivados.';
   }catch(e){history.textContent="No se pudo consultar el historial: "+(e?.message||e)}
  };
  renderHistory();
+ retry.addEventListener("click",async()=>{
+   if(!has("costes.editar")||!consent.checked){status.textContent="Para reprocesar, autoriza el análisis documental y comprueba tus permisos.";return}
+   retry.disabled=true;button.disabled=true;results.textContent="";
+   try{
+    const docs=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,archivo_path,ia_estado,ia_datos&ia_estado=eq.RETENIDO_AUTOMATICAMENTE&order=created_at.desc&limit=10");
+    if(!docs.length){status.textContent="No hay documentos retenidos pendientes de reprocesar.";return}
+    const outcomes=[];
+    for(const d of docs){
+      status.textContent="Reprocesando documento archivado "+String(d.numero_documento||d.id);
+      try{
+       if(!d.archivo_path||!/^[A-Za-z0-9._/-]+$/.test(d.archivo_path))throw Error("Ruta de PDF privado no válida");
+       const escaped=d.archivo_path.split("/").map(encodeURIComponent).join("/");
+       const r=await authFetch(SUPABASE_URL+"/storage/v1/object/authenticated/costes-auto/"+escaped);
+       if(!r.ok)throw Error("No se puede leer el PDF archivado (HTTP "+r.status+")");
+       const fileBuffer=new Uint8Array(await r.arrayBuffer());
+       let binary="";for(let n=0;n<fileBuffer.length;n+=8192)binary+=String.fromCharCode(...fileBuffer.subarray(n,n+8192));
+       const pdfb64=btoa(binary);
+       const doc={pdf_separado_b64:pdfb64,proveedor:d.proveedor_nombre||"",numero:d.numero_documento||"",tipo:"ALBARAN",lineas:Array.isArray(d.ia_datos?.materiales)?d.ia_datos.materiales:[]};
+       let geo=null,rows=null,images=null,geoProject="";
+       if(String(doc.proveedor).toUpperCase().includes("SALTOKI")&&doc.lineas.length>=5){
+        const parsed=await pcLeerSaltokiFilas(doc);
+        if(parsed.lineas_validas===true&&parsed.numero_filas_geometricas===parsed.lineas?.length){
+         geo=parsed.numero_filas_geometricas;rows=parsed.lineas;images=parsed.imagenes_zonas;
+         geoProject=parsed.codigo_pry_sin_conflictos?parsed.codigo_proyecto:"";
+        }
+       }
+       const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"reproceso_"+String(doc.numero||"documento")+".pdf",data:"data:application/pdf;base64,"+pdfb64,lineas_geometricas:geo,geometria_filas:rows,geometria_imagenes:images,geometria_proyecto:geoProject,numero_esperado:doc.numero,reprocesar:true})});
+       const value=await response.json().catch(()=>({error:"Respuesta inválida"}));
+       if(!response.ok)throw Error([value.error,value.etapa,value.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
+       outcomes.push({numero:doc.numero,estado:value.estado,filas:value.lineas_detectadas??0,problemas:value.incidencias||[]});
+      }catch(e){outcomes.push({numero:d.numero_documento,estado:"ERROR",filas:0,problemas:[e?.message||String(e)]})}
+    }
+    const ok=outcomes.filter(x=>x.estado==="CONTRASTADO_SIN_IMPUTACION").length;
+    status.textContent="Reprocesados "+outcomes.length+" PDF archivados: "+ok+" contrastados; "+(outcomes.length-ok)+" continúan sin verificar. Sin correcciones manuales ni escrituras en STEL.";
+    results.innerHTML=outcomes.map(v=>'<div class="module-note sensitive-note"><b>'+esc(v.numero)+" · "+esc(v.estado)+'</b><p>'+esc(v.filas)+' líneas</p>'+v.problemas.slice(0,10).map(z=>'<p class="error">• '+esc(z)+'</p>').join("")+'</div>').join("");
+    await renderHistory();
+   }catch(e){status.textContent="No se completó el reproceso: "+(e?.message||String(e))}
+   finally{retry.disabled=false;button.disabled=false}
+ });
  button.addEventListener("click",async()=>{
   if(!has("costes.editar")){status.textContent="Permiso costes.editar requerido";return}
   const doc=file.files?.[0];
