@@ -301,7 +301,8 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    const already=out.filter(x=>x.estado==="YA_PROCESADO"||x.estado==="DUPLICADO").length;
    const errors=out.filter(x=>x.estado==="ERROR"||x.estado==="LINEAS_PENDIENTES"||x.estado==="RETENIDO_SIN_PROCESAR").length;
    const archived=out.filter(x=>!!x.documento_id).length;
-   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos analizados.</b> '+esc(ok)+' nuevos contrastados, '+esc(held)+' retenidos, '+esc(already)+' ya archivados, <b>'+esc(errors)+' errores</b>.</p>'+
+   const accepted=ok+already,rate=split.documentos.length?Math.round(100*accepted/split.documentos.length):0;
+   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos analizados.</b> <b>'+esc(accepted)+' aceptados o ya archivados ('+esc(rate)+'%)</b>; <b>'+esc(held)+' retenidos por lectura no verificada</b>; '+esc(errors)+' errores técnicos. Los retenidos NO son documentos procesados correctamente.</p>'+
     out.map((x,i)=>'<div class="module-note sensitive-note"><b>'+esc(x.numero||split.documentos[i]?.numero||"Documento "+(i+1))+' · '+esc(x.estado||"ERROR")+'</b>'+
     '<p>'+esc(x.lineas_detectadas??"?")+' líneas; obra: '+esc(x.proyecto_candidato||"sin asociar")+'</p>'+
     (x.documento_id?'<p><a href="#pcAutoHistory"><b>Ver lectura completa y materiales guardados ↓</b></a></p>':'')+
