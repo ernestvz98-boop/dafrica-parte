@@ -225,8 +225,8 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
        const pdfb64=btoa(binary);
        const doc={pdf_separado_b64:pdfb64,proveedor:d.proveedor_nombre||"",numero:d.numero_documento||"",tipo:"ALBARAN",lineas:Array.isArray(d.ia_datos?.materiales)?d.ia_datos.materiales:[]};
        let geo=null,rows=null,images=null,geoProject="";
-       if(String(doc.proveedor).toUpperCase().includes("SALTOKI")&&doc.lineas.length>=1){
-        const parsed=doc.lineas.length===1?await pcLeerSaltokiFilaUnica(doc):await pcLeerSaltokiFilas(doc);
+       if(doc.lineas.length>=1&&doc.lineas.length<=5){
+        const parsed=String(doc.proveedor).toUpperCase().includes("SALTOKI")?(doc.lineas.length===1?await pcLeerSaltokiFilaUnica(doc):await pcLeerSaltokiFilas(doc)):await pcLeerTablaMixta(doc);
         if(parsed.lineas_validas===true&&parsed.numero_filas_geometricas===parsed.lineas?.length){
          geo=parsed.numero_filas_geometricas;rows=parsed.lineas;images=parsed.imagenes_zonas;
          geoProject=parsed.codigo_pry_sin_conflictos?parsed.codigo_proyecto:"";
@@ -266,9 +266,9 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
      if(!d.pdf_separado_b64){out[i]={estado:"RETENIDO",numero:d.numero,incidencias:["Documento sin PDF separable"]};continue}
      status.textContent="Procesando "+(i+1)+"/"+split.documentos.length+" · "+String(d.numero||"sin número");
      let geo=null,geometryWarning="",geometryRows=null,geometryImages=null,geometryProject="";
-     if(String(d.proveedor||"").toUpperCase().includes("SALTOKI")&&(d.lineas||[]).length>=1){
+     if((d.lineas||[]).length>=1&&(d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
       try{
-       const parsed=d.lineas.length===1?await pcLeerSaltokiFilaUnica(d):await pcLeerSaltokiFilas(d);
+       const parsed=String(d.proveedor||"").toUpperCase().includes("SALTOKI")?(d.lineas.length===1?await pcLeerSaltokiFilaUnica(d):await pcLeerSaltokiFilas(d)):await pcLeerTablaMixta(d);
        if(parsed.lineas_validas===true&&Number.isInteger(parsed.numero_filas_geometricas)&&parsed.lineas?.length===parsed.numero_filas_geometricas&&Array.isArray(parsed.imagenes_zonas)){
         geo=parsed.numero_filas_geometricas;geometryRows=parsed.lineas;geometryImages=parsed.imagenes_zonas;geometryProject=parsed.codigo_pry_sin_conflictos===true?parsed.codigo_proyecto:"";
        }else geometryWarning="Se identificaron filas pero faltan datos; la lectura queda retenida";
