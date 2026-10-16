@@ -61,8 +61,8 @@ async function pcLeerSaltokiFilaUnica(doc){
 renderComprasLotePilot = function renderComprasAutonomasV2(){
  const root=$("pcBatch");if(!root||!has("costes.ver"))return;
  root.innerHTML='<div class="card">'+
-  '<h3>Albaranes automáticos V3 · OCR por filas</h3>'+
-  '<p class="muted">Sube un PDF. DAFRICA separa los documentos, compara dos lecturas independientes y archiva cada resultado. Sin revisión de filas, sin casillas de confirmación y sin modificar STEL Order. Los documentos no verificables se retienen automáticamente sin contabilizar importes.</p>'+
+  '<h3>Albaranes automáticos V5 · Verificación de filas físicas</h3>'+
+  '<p class="muted">Sube un PDF. DAFRICA separa los documentos, detecta las filas físicas y exige dos lecturas independientes concordantes; una tercera verifica las divergencias. Los datos inciertos quedan retenidos. Sin revisión de filas, sin casillas de confirmación y sin modificar STEL Order. Los documentos no verificables se retienen automáticamente sin contabilizar importes.</p>'+
   (!has("costes.editar")?'<p class="error">Esta cuenta no tiene permisos para archivar albaranes (costes.editar).</p>':'')+
   '<label for="pcAutoFile">PDF de albaranes (máximo 6 MB, 10 páginas por lote)</label>'+
   '<input type="file" id="pcAutoFile" accept="application/pdf,.pdf">'+
