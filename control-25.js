@@ -1,4 +1,48 @@
 "use strict";
+// Single material Saltoki pages need a physical crop, not another full-page OCR.
+async function pcLeerSaltokiFilaUnica(doc){
+  if(!String(doc?.proveedor||"").toUpperCase().includes("SALTOKI")||doc?.lineas?.length!==1)
+    throw Error("Se requiere un albarán Saltoki con una sola fila");
+  const encoded=String(doc.pdf_separado_b64||"");
+  if(!encoded||encoded.length>9000000)throw Error("El PDF individual no está disponible");
+  const pdfjs=await pcLoadPdfJs(),raw=atob(encoded);
+  const bytes=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
+  const task=pdfjs.getDocument({data:bytes,verbosity:0,useSystemFonts:true});
+  let canvas=null;
+  try{
+    const pdf=await task.promise;
+    if(pdf.numPages!==1)throw Error("La página individual debe contener una sola hoja");
+    const page=await pdf.getPage(1);
+    const base=page.getViewport({scale:1});
+    const viewport=page.getViewport({scale:Math.min(5.2,2400/base.width)});
+    canvas=document.createElement("canvas");
+    canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+    const ctx=canvas.getContext("2d",{alpha:false});
+    if(!ctx)throw Error("No se puede dibujar el albarán");
+    ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
+    await page.render({canvasContext:ctx,viewport}).promise;
+    // Physical row region of the SALTOKI October-2026 template:
+    // reference + description + quantity, excluding the table header.
+    const x0=Math.floor(canvas.width*.077),x1=Math.ceil(canvas.width*.748);
+    const y0=Math.floor(canvas.height*.156),y1=Math.ceil(canvas.height*.186);
+    const out=document.createElement("canvas");out.width=1740;out.height=145;
+    const o=out.getContext("2d",{alpha:false});if(!o)throw Error("No se puede generar el recorte");
+    o.fillStyle="#fff";o.fillRect(0,0,out.width,out.height);
+    o.fillStyle="#171717";o.font="bold 18px sans-serif";o.fillText("F1 · REFERENCIA / CONCEPTO / CANTIDAD",15,23);
+    o.drawImage(canvas,x0,y0,x1-x0,y1-y0,80,31,out.width-100,105);
+    const crop=out.toDataURL("image/jpeg",.94);out.width=0;out.height=0;
+    const row=doc.lineas[0];
+    return {numero_filas_geometricas:1,lineas_validas:true,lineas:[{
+      referencia:String(row.referencia||""),descripcion:String(row.descripcion||""),
+      cantidad:row.cantidad===null?null:Number(row.cantidad),
+      unidad:String(row.unidad||""),precio_unitario:row.precio_unitario??null
+    }],imagenes_zonas:[crop],codigo_proyecto:"",codigo_pry_sin_conflictos:false};
+  }finally{
+    if(canvas){canvas.width=0;canvas.height=0}
+    await task.destroy().catch(()=>{});
+  }
+}
 // Ingesta automatica V2: una carga, documentos separados, archivados y contrastados.
 // No crea entregas ni imputaciones economicas a partir de OCR no verificado.
 renderComprasLotePilot = function renderComprasAutonomasV2(){
@@ -46,8 +90,8 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
        const pdfb64=btoa(binary);
        const doc={pdf_separado_b64:pdfb64,proveedor:d.proveedor_nombre||"",numero:d.numero_documento||"",tipo:"ALBARAN",lineas:Array.isArray(d.ia_datos?.materiales)?d.ia_datos.materiales:[]};
        let geo=null,rows=null,images=null,geoProject="";
-       if(String(doc.proveedor).toUpperCase().includes("SALTOKI")&&doc.lineas.length>=5){
-        const parsed=await pcLeerSaltokiFilas(doc);
+       if(String(doc.proveedor).toUpperCase().includes("SALTOKI")&&doc.lineas.length>=1){
+        const parsed=doc.lineas.length===1?await pcLeerSaltokiFilaUnica(doc):await pcLeerSaltokiFilas(doc);
         if(parsed.lineas_validas===true&&parsed.numero_filas_geometricas===parsed.lineas?.length){
          geo=parsed.numero_filas_geometricas;rows=parsed.lineas;images=parsed.imagenes_zonas;
          geoProject=parsed.codigo_pry_sin_conflictos?parsed.codigo_proyecto:"";
@@ -87,9 +131,9 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
      if(!d.pdf_separado_b64){out[i]={estado:"RETENIDO",numero:d.numero,incidencias:["Documento sin PDF separable"]};continue}
      status.textContent="Procesando "+(i+1)+"/"+split.documentos.length+" · "+String(d.numero||"sin número");
      let geo=null,geometryWarning="",geometryRows=null,geometryImages=null,geometryProject="";
-     if(String(d.proveedor||"").toUpperCase().includes("SALTOKI")&&(d.lineas||[]).length>=5){
+     if(String(d.proveedor||"").toUpperCase().includes("SALTOKI")&&(d.lineas||[]).length>=1){
       try{
-       const parsed=await pcLeerSaltokiFilas(d);
+       const parsed=d.lineas.length===1?await pcLeerSaltokiFilaUnica(d):await pcLeerSaltokiFilas(d);
        if(parsed.lineas_validas===true&&Number.isInteger(parsed.numero_filas_geometricas)&&parsed.lineas?.length===parsed.numero_filas_geometricas&&Array.isArray(parsed.imagenes_zonas)){
         geo=parsed.numero_filas_geometricas;geometryRows=parsed.lineas;geometryImages=parsed.imagenes_zonas;geometryProject=parsed.codigo_pry_sin_conflictos===true?parsed.codigo_proyecto:"";
        }else geometryWarning="Se identificaron filas pero faltan datos; la lectura queda retenida";
