@@ -81,7 +81,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
  };
  const renderHistory=async()=>{
   try{
-   const rows=await sb("/rest/v1/coste_documentos?select=id,tipo,numero_documento,proveedor_nombre,fecha_documento,archivo_path,obra_id,ia_estado,ia_datos,created_at&order=created_at.desc&limit=30");
+   const rows=await sb("/rest/v1/coste_documentos?select=id,tipo,numero_documento,proveedor_nombre,fecha_documento,archivo_path,obra_id,ia_estado,ia_datos,created_at&ia_estado=neq.VARIANTE_OCR_NO_CANONICA&order=created_at.desc&limit=30");
    loadedDocuments=new Map(rows.map(d=>[d.id,d]));
    const ids=rows.map(d=>String(d.id)).filter(id=>/^[0-9a-f-]{36}$/i.test(id));
    let stored=[],linesLoaded=true;
