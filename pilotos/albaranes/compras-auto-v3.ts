@@ -113,7 +113,7 @@ Deno.serve(async(req:Request)=>{
   if(!previous.ok)throw Error("Error consultando duplicados HTTP "+previous.status);
   const found=await previous.json();
   const old=found[0]||null;
-  if(old && !(input?.reprocesar===true && ["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado)))
+  if(old && !["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado))
     return reply({estado:"DUPLICADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado});
   etapa="lectura_estructurada";
   const n=Number(input?.lineas_geometricas),rows=input?.geometria_filas,bands=input?.geometria_imagenes;
