@@ -153,12 +153,24 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
            statusCell.textContent="Confirmado STEL: "+value.candidato_ocr+" · Asignación pendiente ("+(value.detalle_asignacion||"sin detalles")+")";
          }else{
            statusCell.textContent=value.candidato_ocr?"Candidato "+value.candidato_ocr+" sin confirmar en STEL":"PRY no legible";
-           if(value.fuente==="CATALOGO_NO_VERIFICADO_COMPLETO"||value.fuente==="STEL_ALBARAN_REFERENCIADO_MUESTRA")
-             statusCell.textContent+=" · Catálogo STEL no verificable completamente";
+           if(value.fuente==="CATALOGO_NO_VERIFICADO_COMPLETO"){
+             const diag=value.diagnostico||{};
+             if(diag.proyectos_http===404||diag.proyectos_http===405)
+               statusCell.textContent+=" · STEL no ofrece acceso al catálogo de proyectos mediante esta ruta";
+             else if(diag.proyectos_http===401||diag.proyectos_http===403)
+               statusCell.textContent+=" · La API STEL no autoriza consultar proyectos";
+             else if(diag.albaranes_filtrados_http!==200&&diag.albaranes_paginados_http!==200)
+               statusCell.textContent+=" · No se ha podido consultar el listado de albaranes de STEL";
+             else if(diag.albaranes_mismo_numero_y_proveedor===0)
+               statusCell.textContent+=" · No consta vinculación comprobada con un albarán de STEL";
+             else if(diag.proyecto_por_id_http===404)
+               statusCell.textContent+=" · STEL no permite verificar el proyecto por su identificador";
+             else statusCell.textContent+=" · No existe evidencia suficiente para asignar una obra";
+           }
          }
          if(value.similares?.length)statusCell.textContent+=" · Similares: "+value.similares.map(x=>x.code).join(", ");
          if(value.estado==="STEL_SIN_CLAVE")statusCell.textContent+=" · API no configurada";
-         if(value.fuente)statusCell.title="Comprobación: "+value.fuente+"; proyectos examinados: "+String(value.comprobados??0);
+         if(value.fuente)statusCell.title="Origen: "+value.fuente+"; proyectos examinados: "+String(value.comprobados??0)+"; HTTP proyectos: "+String(value.diagnostico?.proyectos_http??value.consulta_catalogo??"sin respuesta")+"; documentos STEL con referencia y proveedor coincidentes: "+String(value.diagnostico?.albaranes_mismo_numero_y_proveedor??"no determinado");
        }catch(e){statusCell.textContent=prior+" · Consulta STEL no disponible";}
      })).catch(()=>{});
    }
