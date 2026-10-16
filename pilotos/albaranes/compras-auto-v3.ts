@@ -156,7 +156,7 @@ Deno.serve(async(req:Request)=>{
   etapa="registrar_documento";
   const changed=old?{ia_estado:record.ia_estado,ia_datos:record.ia_datos}:record;
   const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(changed),signal:AbortSignal.timeout(15000)});
-  if(!saved.ok){if(saved.status===409)return reply({estado:"DUPLICADO",numero:first.numero});throw Error("No se pudo registrar el documento de control: "+saved.status)}
+  if(!saved.ok){const info=await saved.json().catch(()=>({}));throw Error("Fallo al guardar documento HTTP "+saved.status+" código "+String(info.code||"desconocido")+" - "+String(info.message||"sin detalles").slice(0,120))}
   const entries=await saved.json(),docId=entries?.[0]?.id||old?.id||null;
   let archiveStatus=verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",savedRows=0;
   if(verified&&docId){
