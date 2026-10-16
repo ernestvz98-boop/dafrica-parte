@@ -66,6 +66,20 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
  let firstHistory=true;
  let loadedDocuments=new Map();
  const pryChecked=new Set();
+ const stelExplanation=diag=>{
+   if(!diag)return "";
+   const projects=Number(diag.proyectos_http||0),filtered=Number(diag.albaranes_filtrados_http||0),paged=Number(diag.albaranes_paginados_http||0);
+   if([401,403].includes(projects))return "STEL no autoriza consultar proyectos con esta clave API";
+   if([404,405].includes(projects)&&[404,405].includes(filtered)&&[404,405].includes(paged))
+     return "La API de STEL no expone los proyectos ni los albaranes necesarios para este enlace";
+   if(Number(diag.albaranes_mismo_numero_y_proveedor)===0&&(filtered===200||paged===200))
+     return "STEL no devolvió un albarán del mismo proveedor y número con proyecto verificable";
+   if([404,405].includes(projects))return "El catálogo de proyectos no está disponible en esta ruta de STEL";
+   if([404,405].includes(Number(diag.proyecto_por_id_http)))
+     return "STEL no permite verificar el ID de proyecto por esta ruta";
+   if(!diag.catalogo_completo)return "El catálogo de STEL sigue sin poder comprobarse completo";
+   return "Sin coincidencia exacta y única demostrable en STEL";
+ };
  const safeQuantity=v=>v===null||v===undefined||v===""?"—":Number.isFinite(Number(v))?Number(v).toLocaleString("es-ES",{maximumFractionDigits:4}):String(v);
  const lineFingerprint=x=>[
   String(x.codigo_articulo??x.referencia??"").trim(),
@@ -120,13 +134,19 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    history.innerHTML=rows.length?info.map(({d,materials,displayLines,saved,matched,verified,warnings,errors,withPrice})=>{
      const statusLabel=verified?"Materiales contrastados":d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"?"Auditoría contrastada, comprobar archivo de líneas":d.ia_estado==="RETENIDO_AUTOMATICAMENTE"?"Retenido, sin aceptar materiales":d.ia_estado||"Pendiente";
      const opened=openOnLoad||oldOpen.has(d.id);
+     const savedStelDiagnosis=stelExplanation(d.ia_datos?.pry_diagnostico_api);
+     const pryText=d.ia_datos?.pry_codigo_confirmado?
+       "Confirmado STEL: "+d.ia_datos.pry_codigo_confirmado:
+       d.ia_datos?.pry_ocr_candidato?
+       "Candidato "+d.ia_datos.pry_ocr_candidato+" (sin confirmar)":
+       "Sin confirmar";
      const table=materials.length?'<div class="table-wrap" style="max-height:600px;overflow:auto"><table><thead><tr><th>Fila</th><th>Referencia</th><th>Descripción leída</th><th>Cantidad</th><th>Unidad</th><th>Precio unitario</th></tr></thead><tbody>'+
       displayLines.map((line,i)=>'<tr><td>'+esc(i+1)+'</td><td>'+esc(line.referencia||"Sin referencia")+'</td><td>'+esc(line.descripcion||"Sin descripción")+'</td><td>'+esc(safeQuantity(line.cantidad))+'</td><td>'+esc(line.unidad||"—")+'</td><td>'+esc(line.precio_unitario===null||line.precio_unitario===undefined?"No consta":safeQuantity(line.precio_unitario)+" €")+'</td></tr>').join("")+
       '</tbody></table></div>':'<p>La lectura no contiene materiales disponibles.</p>';
      return '<details data-doc-id="'+esc(d.id)+'" '+(opened?'open':'')+' style="border:1px solid #d6dee8;border-radius:10px;padding:12px;margin:9px 0">'+
       '<summary style="cursor:pointer"><b>'+esc(d.numero_documento||"sin número")+'</b> · '+esc(materials.length)+' fila(s) leída(s) · '+esc(saved.length)+' guardada(s) · '+esc(statusLabel)+'</summary>'+
       '<p><b>Proveedor:</b> '+esc(d.proveedor_nombre||"No reconocido")+' · <b>Fecha:</b> '+esc(d.fecha_documento||"No reconocida")+'</p>'+
-      '<p><b>Obra:</b> <span data-obra-doc="'+esc(d.id)+'">'+esc(d.obra_id?(d.ia_datos?.pry_stel_nombre||"Asignación registrada"):"Sin asignar")+'</span> · <b>PRY:</b> <span data-pry-doc="'+esc(d.id)+'">'+esc(d.ia_datos?.pry_codigo_confirmado?"Confirmado STEL: "+d.ia_datos.pry_codigo_confirmado:d.ia_datos?.pry_ocr_candidato?"Candidato OCR: "+d.ia_datos.pry_ocr_candidato+" (sin confirmar)":"Sin confirmar")+'</span> · <b>Precios:</b> '+esc(withPrice)+'/'+esc(materials.length)+' ('+esc(withPrice===materials.length?"Precios disponibles":d.tipo==="FACTURA"?"Factura sin todos los precios legibles":"Pendientes de factura vinculada")+')</p>'+
+      '<p><b>Obra:</b> <span data-obra-doc="'+esc(d.id)+'">'+esc(d.obra_id?(d.ia_datos?.pry_stel_nombre||"Asignación registrada"):"Sin asignar")+'</span> · <b>PRY:</b> <span data-pry-doc="'+esc(d.id)+'">'+esc(pryText+(savedStelDiagnosis?" · "+savedStelDiagnosis:""))+'</span> · <b>Precios:</b> '+esc(withPrice)+'/'+esc(materials.length)+' ('+esc(withPrice===materials.length?"Precios disponibles":d.tipo==="FACTURA"?"Factura sin todos los precios legibles":"Pendientes de factura vinculada")+')</p>'+
       '<p><b>Comprobación de guardado:</b> '+esc(matched?"Las referencias, conceptos y cantidades coinciden con las filas registradas":linesLoaded?"La lectura y los registros no coinciden o faltan líneas":"No se ha podido comprobar el registro completo")+'</p>'+
       (d.ia_datos?.factura_origen?'<p><b>Precio vinculado desde factura:</b> '+esc(d.ia_datos.factura_origen)+'</p>':'')+
       table+
