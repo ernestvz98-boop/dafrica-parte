@@ -144,8 +144,10 @@ Deno.serve(async(req:Request)=>{
   const verified=result.validated&&allowed!=="OTRO"&&!!date&&!!norm(first.numero);
   const path="ingesta/"+sha+".pdf";
   etapa="almacenar_pdf";
-  const upload=await fetch(base+"/storage/v1/object/costes-auto/"+path,{method:"POST",headers:{apikey:srv,authorization:jwt,"Content-Type":"application/pdf","x-upsert":"false"},body:bin,signal:AbortSignal.timeout(20000)});
-  if(!upload.ok&&upload.status!==409)throw Error("Archivo privado no guardado: "+upload.status);
+  if(!old){
+   const upload=await fetch(base+"/storage/v1/object/costes-auto/"+path,{method:"POST",headers:{apikey:srv,authorization:jwt,"Content-Type":"application/pdf","x-upsert":"false"},body:bin,signal:AbortSignal.timeout(20000)});
+   if(!upload.ok)throw Error("Archivo privado no guardado: "+upload.status);
+  }
   const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:date,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina"}};
   etapa="registrar_documento";
   const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(record),signal:AbortSignal.timeout(15000)});
