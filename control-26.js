@@ -4,7 +4,7 @@ async function pcLeerTablaMixta(doc){
  const encoded=String(doc?.pdf_separado_b64||"");
  if(lines.length<1||lines.length>5||encoded.length>9000000||!encoded)throw Error("Formato de tabla corta no aplicable");
  const number=String(doc.numero||"");
- const profile=/^26\\/0\\d{4}$/.test(number)?"MADERAS":/^0{2}\\d{4}$/.test(number)?"RODAVI":"GENERAL";
+ const profile=/^26[/]0[0-9]{4}$/.test(number)?"MADERAS":/^0{2}[0-9]{4}$/.test(number)?"RODAVI":"GENERAL";
  const pdfjs=await pcLoadPdfJs(),binary=atob(encoded),bytes=new Uint8Array(binary.length);
  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
  const task=pdfjs.getDocument({data:bytes,verbosity:0,useSystemFonts:true});
