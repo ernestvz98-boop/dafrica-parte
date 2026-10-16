@@ -159,12 +159,21 @@ Deno.serve(async(req:Request)=>{
   const expectedSupplier=String(input?.proveedor_esperado||"").trim();
   const expectedType=norm(input?.tipo_esperado||"");
   const geoRows=Array.isArray(input?.geometria_filas)?input.geometria_filas:null;
-  const normalizedRow=(v:any)=>JSON.stringify([
-    String(v?.referencia??v?.codigo_articulo??"").trim(),
-    Number(v?.cantidad)
-  ]);
+  // Some suppliers (e.g. carpentry) genuinely omit item codes.
+  // For uncoded lines, require the actual description AND quantity to
+  // match the already verified original; never fabricate a reference.
+  const normalizedRow=(v:any)=>{
+    const reference=String(v?.referencia??v?.codigo_articulo??"").trim();
+    const quantity=Number(v?.cantidad);
+    return JSON.stringify(reference
+      ? ["REFERENCIA",canon(reference),quantity]
+      : ["SIN_CODIGO",canon(v?.descripcion),quantity]);
+  };
   const validPhysicalRows=geoRows&&geoRows.length>0&&geoRows.length<=50&&
-    geoRows.every((x:any)=>String(x?.referencia||"").trim()&&Number(x?.cantidad)>0&&canon(x?.descripcion));
+    geoRows.every((x:any)=>
+      Number.isFinite(Number(x?.cantidad))&&Number(x.cantidad)>0&&
+      !!canon(x?.descripcion)&&
+      (!!String(x?.referencia||"").trim()||input?.permite_sin_referencia===true));
   if(expectedNumber&&goodDate(expectedDate)&&norm(expectedSupplier)&&expectedType==="ALBARAN"){
     const endpoint=new URL(base+"/rest/v1/coste_documentos");
     endpoint.searchParams.set("select","id,numero_documento,tipo,fecha_documento,proveedor_nombre,ia_estado,ia_datos,obra_id");
