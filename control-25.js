@@ -199,7 +199,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
          geoProject=parsed.codigo_pry_sin_conflictos?parsed.codigo_proyecto:"";
         }
        }
-       const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"reproceso_"+String(doc.numero||"documento")+".pdf",data:"data:application/pdf;base64,"+pdfb64,lineas_geometricas:geo,geometria_filas:rows,geometria_imagenes:images,geometria_proyecto:geoProject,numero_esperado:doc.numero,fecha_esperada:d.fecha_documento||null,proveedor_esperado:doc.proveedor,tipo_esperado:"ALBARAN",reprocesar:true})});
+       const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"reproceso_"+String(doc.numero||"documento")+".pdf",data:"data:application/pdf;base64,"+pdfb64,lineas_geometricas:geo,geometria_filas:rows,geometria_imagenes:images,geometria_proyecto:geoProject,pry_primera_lectura:String(d.ia_datos?.pry_ocr_candidato||""),numero_esperado:doc.numero,fecha_esperada:d.fecha_documento||null,proveedor_esperado:doc.proveedor,tipo_esperado:"ALBARAN",reprocesar:true})});
        const value=await response.json().catch(()=>({error:"Respuesta inválida"}));
        if(!response.ok)throw Error([value.error,value.etapa,value.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
        outcomes.push({numero:doc.numero,estado:value.estado,filas:value.lineas_detectadas??0,problemas:value.incidencias||[]});
@@ -242,7 +242,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
       }catch(err){geometryWarning="No se completó la geometría: "+(err?.message||err)}
      }
      try{
-      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo,geometria_filas:geometryRows,geometria_imagenes:geometryImages,geometria_proyecto:geometryProject,numero_esperado:String(d.numero||""),fecha_esperada:d.fecha||null,proveedor_esperado:d.proveedor||"",tipo_esperado:d.tipo||"",reprocesar:true})});
+      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v3",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo,geometria_filas:geometryRows,geometria_imagenes:geometryImages,geometria_proyecto:geometryProject,pry_primera_lectura:String(d.codigo_proyecto||""),numero_esperado:String(d.numero||""),fecha_esperada:d.fecha||null,proveedor_esperado:d.proveedor||"",tipo_esperado:d.tipo||"",reprocesar:true})});
       const result=await response.json().catch(()=>({error:"Respuesta del servidor no interpretable"}));
       if(!response.ok)throw Error([result.error,result.etapa?"Etapa: "+result.etapa:"",result.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
       out[i]={...result,geometryWarning};
