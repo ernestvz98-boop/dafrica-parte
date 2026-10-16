@@ -235,6 +235,11 @@ function renderComprasLotePilot(){
    const verificationLabel=result=>result?.proyecto_pendiente
      ? "Materiales coincidentes; código PRY pendiente de confirmar"
      : "Materiales y código de obra coincidentes";
+   const reviewRowsOf=result=>new Set(
+     (Array.isArray(result?.filas_revision)?result.filas_revision:[])
+      .filter(v=>Number.isInteger(v)&&v>0).map(v=>v-1)
+   );
+   const unionRows=(...sets)=>new Set(sets.flatMap(x=>[...x]));
    const cosmeticSummary=result=>{
      const diffs=Array.isArray(result?.avisos_descripcion)?result.avisos_descripcion:[];
      if(!diffs.length)return "";
@@ -270,10 +275,13 @@ function renderComprasLotePilot(){
          if((doc.__revision||0)!==revisionAtStart)throw Error("Los datos cambiaron mientras se verificaban; repite la auditoría.");
          if(auditedLines(third)){
            doc.__audit=third;
-           doc.__reviewRows=new Set();
+           doc.__reviewRows=unionRows(reviewRowsOf(second),reviewRowsOf(third));
+           doc.__totalLineasDudoso=!!(second.total_impreso_pendiente||third.total_impreso_pendiente);
            doc.__proyectoDudoso=!!(second.proyecto_pendiente||third.proyecto_pendiente||doc.__proyectoDudoso);
-           status.innerHTML='<b>'+esc(verificationLabel(third))+'. Tres lecturas confirman las '+esc(doc.lineas.length)+' líneas.</b>'+
+           status.innerHTML='<b>'+esc(verificationLabel(third))+': '+esc(doc.lineas.length)+' líneas contrastadas.</b>'+
              cosmeticSummary(second)+cosmeticSummary(third)+
+             (doc.__reviewRows.size?'<p><b>'+esc(doc.__reviewRows.size)+' fila(s) con descripciones diferentes:</b> comprueba únicamente esas filas con el PDF original y marca su casilla.</p>':'')+
+             (doc.__totalLineasDudoso?'<p><b>Total impreso dudoso:</b> una lectura OCR no coincide con el recuento geométrico; confirma las '+esc(doc.lineas.length)+' filas contra el papel antes de registrar.</p>':'')+
              (doc.__proyectoDudoso
                ? '<p>La lectura de materiales queda certificada por separado. El manuscrito PRY no coincide entre lectores: confirma su código con el pedido antes de registrar.</p>'
                : '<p>Confirma el documento antes de registrar; no es necesario marcar cada línea.</p>');
@@ -311,7 +319,8 @@ function renderComprasLotePilot(){
                x.cantidad!==y.cantidad||x.unidad!==y.unidad||
                x.precio_unitario!==y.precio_unitario?j:-1;
            }).filter(j=>j>=0);
-           doc.__reviewRows=new Set(correctedRowIndexes);
+           doc.__reviewRows=unionRows(new Set(correctedRowIndexes),reviewRowsOf(second),reviewRowsOf(third));
+           doc.__totalLineasDudoso=!!(second.total_impreso_pendiente||third.total_impreso_pendiente);
            const differences=first.lineas.reduce((n,x,j)=>{
              const y=secondAsFirst.lineas[j];
              return n+((x.referencia!==y.referencia||x.descripcion!==y.descripcion||
@@ -328,6 +337,7 @@ function renderComprasLotePilot(){
            status.innerHTML='<b>Materiales contrastados: '+esc(doc.lineas.length)+' líneas.</b>'+
              '<p>DAFRICA ha propuesto '+esc(differences)+' corrección(es) de línea.'+
              (doc.__proyectoDudoso?' El PRY manuscrito sigue pendiente de confirmación con el pedido.':' La obra coincide entre lecturas.')+
+             (doc.__totalLineasDudoso?' El total impreso presenta una discrepancia pendiente de confirmar.':'')+
              ' Comprueba solo las filas corregidas y confirma el documento antes de registrar.</p>'+
              cosmeticSummary(second)+cosmeticSummary(third)+
              auditReport(second,"Diferencias detectadas en lectura inicial");
