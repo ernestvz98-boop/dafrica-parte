@@ -307,7 +307,8 @@ Deno.serve(async(req:Request)=>{
    .map(x=>norm(x)).filter(x=>/^PRY[0-9]{5,8}$/.test(x));
   const candidateList=[...new Set(pryCandidates)];
   const candidate=allowed==="ALBARAN"&&candidateList.length===1?candidateList[0]:null;
-  const verified=result.validated&&allowed!=="OTRO"&&!!date&&!!norm(first.numero);
+  if(old&&[old.numero_documento,old.proveedor_nombre,old.fecha_documento].some((v,i)=>norm(v)!==norm([first.numero,first.proveedor,dateForRecord][i])))result.errors.push("La cabecera corregida no coincide con la ficha retenida; no se sobrescribe su identidad");
+  const verified=result.validated&&result.errors.length===0&&allowed!=="OTRO"&&!!date&&!!norm(first.numero);
   const path="ingesta/"+sha+".pdf";
   etapa="almacenar_pdf";
   if(!old){
