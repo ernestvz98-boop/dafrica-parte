@@ -86,6 +86,47 @@ function decideGeo(geo:any,readings:any[],header:any,expected:string){
  if(readings.some(r=>Array.isArray(r.dudas)&&r.dudas.length))notices.push("Una lectura comunicó dudas; los artículos solo se aceptan con consenso de filas");
  return {errors:problems,notices,project,items:approved,validated:problems.length===0,review_rows:pending,geometry:n,rows_vision:readings.map(r=>r.lineas?.length??0)};
 }
+
+const headSchema={type:"object",additionalProperties:false,properties:{
+ proveedor:{type:"string"},numero:{type:"string"},fecha:{type:"string"},dudas:{type:"array",items:{type:"string"}}
+},required:["proveedor","numero","fecha","dudas"]};
+async function auditHeader(key:string,img:string,model:string){
+ if(typeof img!=="string"||!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(img)||img.length>2600000)
+  throw Error("Recorte de cabecera inválido");
+ const r=await fetch("https://api.openai.com/v1/responses",{method:"POST",
+  headers:{Authorization:"Bearer "+key,"Content-Type":"application/json"},
+  body:JSON.stringify({model,store:false,input:[{role:"user",content:[
+   {type:"input_text",text:"Lee SOLO la cabecera del albarán de compra de la imagen. El PROVEEDOR es la empresa EMISORA en el encabezado/logo (izquierda), NO DAFRICA BIERZO que es el destinatario/cliente. Lee número IMPRESO del albarán, no número ABP manuscrito ni código de cliente. Fecha en formato AAAA-MM-DD solo si legible. No inventes. Responde estrictamente el JSON."},
+   {type:"input_image",image_url:img,detail:"high"}]}],
+   text:{format:{type:"json_schema",name:"cabecera_albaran_v4",schema:headSchema,strict:true}}}),
+  signal:AbortSignal.timeout(90000)});
+ if(!r.ok)throw Error("Cabecera OCR HTTP "+r.status);
+ const j=await r.json(),raw=j.output?.flatMap((x:any)=>x.content||[]).find((x:any)=>x.type==="output_text")?.text;
+ if(typeof raw!=="string")throw Error("Cabecera OCR incompleta");
+ return JSON.parse(raw);
+}
+const legal=(v:any)=>canon(v).replace(/(?:SOCIEDADLIMITADAUNIPERSONAL|SOCIEDADLIMITADA|SLU|SL)$/,"");
+function reconcileHeader(main:any,read:any,third:any|null){
+ const issue:string[]=[];
+ const chosen:any={...main};
+ for(const k of ["numero","fecha","proveedor"]){
+  const normal=(v:any)=>k==="proveedor"?legal(v):k==="numero"?canon(v):String(v??"").trim();
+  const values=[main?.[k],read?.[k],third?.[k]];
+  const votes=new Map<string,{score:number,value:string}>();
+  for(const v of values){
+   const value=normal(v);
+   if(!value)continue;
+   const entry=votes.get(value)||{score:0,value:String(v)};
+   entry.score++;votes.set(value,entry);
+  }
+  const ordered=[...votes.values()].sort((a,b)=>b.score-a.score);
+  if(!ordered.length||ordered[0].score<2)issue.push("Cabecera "+k+" sin dos lecturas coincidentes");
+  else chosen[k]=ordered[0].value;
+ }
+ if(!goodDate(chosen.fecha))issue.push("Fecha impresa no confirmada");
+ return {header:chosen,errors:issue};
+}
+
 Deno.serve(async(req:Request)=>{
  if(req.method==="OPTIONS")return new Response(null,{headers:cors});
  if(req.method!=="POST")return reply({error:"Método no permitido"},405);
@@ -191,7 +232,7 @@ Deno.serve(async(req:Request)=>{
   etapa="lectura_estructurada";
   const n=Number(input?.lineas_geometricas),rows=input?.geometria_filas,bands=input?.geometria_imagenes;
   const hasSpatial=Number.isInteger(n)&&n>=1&&n<=50;
-  let first:any,second:any,result:any;
+  let first:any,second:any,result:any,resultCabeceraErrors:string[]=[];
   if(hasSpatial){
     if(!Array.isArray(rows)||rows.length!==n||!Array.isArray(bands)||bands.length!==Math.ceil(n/5))
       return reply({estado:"RETENIDO_SIN_PROCESAR",error:"Falta tabla geométrica completa; no se sustituirá por lectura de página entera",numero:input?.numero_esperado||""},422);
@@ -200,6 +241,18 @@ Deno.serve(async(req:Request)=>{
       auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_GEOMETRIC_AUDIT_MODEL")||"gpt-4o")
     ]);
     first=head;second={...head,lineas:checked.lineas};
+    if(input?.imagen_cabecera){
+      etapa="verificar_cabecera_emisor";
+      const h1=await auditHeader(key,input.imagen_cabecera,"gpt-4.1");
+      let h2:any=null,consistent=reconcileHeader(head,h1,null);
+      if(consistent.errors.length){
+        h2=await auditHeader(key,input.imagen_cabecera,"gpt-4o");
+        consistent=reconcileHeader(head,h1,h2);
+      }
+      if(!consistent.errors.length)first={...head,...consistent.header};
+      else resultCabeceraErrors=consistent.errors;
+      second={...first,lineas:checked.lineas};
+    }
     result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked],head,String(input?.numero_esperado||""));
     if(result.review_rows.length){
       etapa="relectura_automatica_filas";
@@ -211,6 +264,7 @@ Deno.serve(async(req:Request)=>{
     first=pair[0];second=pair[1];result=compare(first,second,null);
     if(Array.isArray(first.lineas)&&first.lineas.length>=7)result.errors.push("Documento con tabla larga sin geometría: no publicar");
   }
+  if(resultCabeceraErrors.length){result.errors.push(...resultCabeceraErrors);result.validated=false;}
   const geo=hasSpatial?n:null;
   const allowed=["ALBARAN","FACTURA","ABONO"].includes(first.tipo)?first.tipo:"OTRO";
   const date=goodDate(first.fecha)&&first.fecha===second.fecha?first.fecha:null;
@@ -236,7 +290,7 @@ Deno.serve(async(req:Request)=>{
   }
   if(input?.fecha_esperada&&String(input.fecha_esperada)!==String(first.fecha))result.errors.push("Fecha incompatible con la clasificación del PDF original");
   if(input?.tipo_esperado&&norm(input.tipo_esperado)!==norm(first.tipo))result.errors.push("Tipo incompatible con la clasificación independiente");
-  if(input?.proveedor_esperado&&canon(input.proveedor_esperado)!==canon(first.proveedor))result.errors.push("Proveedor incompatible con la clasificación independiente");
+  if(input?.proveedor_esperado&&!/^DAFRICABIERZO/.test(canon(input.proveedor_esperado))&&legal(input.proveedor_esperado)!==legal(first.proveedor))result.errors.push("Proveedor incompatible con la clasificación independiente");
   result.validated=result.validated&&result.errors.length===0;
   if(dateForRecord===null)result.validated=false;
   const invoicesA=Array.isArray(first.albaranes_referenciados)?first.albaranes_referenciados.map((v:any)=>String(v).trim()).filter((v:string)=>/^[0-9A-Za-z./-]{3,50}$/.test(v)):[];
