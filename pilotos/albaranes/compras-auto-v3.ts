@@ -345,7 +345,7 @@ Deno.serve(async(req:Request)=>{
   const date=goodDate(first.fecha)&&first.fecha===second.fecha?first.fecha:null;
   // A disputed year is not a valid accounting date. Do not save a new
   // document using a year contradicted by the lot classifier.
-  const dateForRecord=goodDate(expectedDate)&&expectedDate!==date?null:date;
+  const dateForRecord=goodDate(expectedDate)&&expectedDate!==date&&!cabeceraConfirmada?null:date;
   // The PDF separator may reserialize an identical page with a different SHA-256.
   // Match the business document identity as well, before attempting to insert.
   if(!old&&allowed!=="OTRO"&&date&&norm(first.numero)&&norm(first.proveedor)){
@@ -363,7 +363,12 @@ Deno.serve(async(req:Request)=>{
     if(old&&!["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado))
       return reply({estado:"YA_PROCESADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado,motivo:"Identidad documental ya archivada; se evita crear duplicados",lineas_detectadas:old.ia_datos?.materiales?.length??null,proyecto_candidato:old.ia_datos?.proyecto_candidato??null,escritura_stel:false});
   }
-  if(input?.fecha_esperada&&String(input.fecha_esperada)!==String(first.fecha))result.errors.push("Fecha incompatible con la clasificación del PDF original");
+  if(input?.fecha_esperada&&String(input.fecha_esperada)!==String(first.fecha)){
+    if(cabeceraConfirmada)
+      result.notices.push("La fecha impresa se contrastó y corrigió la clasificación inicial: "+String(first.fecha));
+    else
+      result.errors.push("Fecha incompatible con la clasificación del PDF original");
+  }
   if(input?.tipo_esperado&&norm(input.tipo_esperado)!==norm(first.tipo))result.errors.push("Tipo incompatible con la clasificación independiente");
   if(input?.proveedor_esperado&&!/^DAFRICABIERZO/.test(canon(input.proveedor_esperado))&&legal(input.proveedor_esperado)!==legal(first.proveedor))result.errors.push("Proveedor incompatible con la clasificación independiente");
   result.validated=result.validated&&result.errors.length===0;
