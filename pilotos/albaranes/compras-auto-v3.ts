@@ -253,11 +253,11 @@ Deno.serve(async(req:Request)=>{
       else resultCabeceraErrors=consistent.errors;
       second={...first,lineas:checked.lineas};
     }
-    result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked],head,String(input?.numero_esperado||""));
+    result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked],first,String(input?.numero_esperado||""));
     if(result.review_rows.length){
       etapa="relectura_automatica_filas";
       const third=await auditBands(key,bands,n,Deno.env.get("OPENAI_VISION_REGION_MODEL")||"gpt-4o");
-      result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked,third],head,String(input?.numero_esperado||""));
+      result=decideGeo({numero_filas:n,lineas:rows,codigo_proyecto:input?.geometria_proyecto||"",sin_codigo_permitido:input?.permite_sin_referencia===true},[checked,third],first,String(input?.numero_esperado||""));
     }
   }else{
     const pair=await Promise.all([vision(key,pdf,Deno.env.get("OPENAI_VISION_MODEL")||"gpt-4o"),vision(key,pdf,Deno.env.get("OPENAI_VISION_AUDIT_MODEL")||"gpt-4.1")]);
