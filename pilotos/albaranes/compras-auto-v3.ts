@@ -141,6 +141,10 @@ Deno.serve(async(req:Request)=>{
   const geo=hasSpatial?n:null;
   const allowed=["ALBARAN","FACTURA","ABONO"].includes(first.tipo)?first.tipo:"OTRO";
   const date=goodDate(first.fecha)&&first.fecha===second.fecha?first.fecha:null;
+  if(input?.fecha_esperada&&String(input.fecha_esperada)!==String(first.fecha))result.errors.push("Fecha incompatible con la clasificación del PDF original");
+  if(input?.tipo_esperado&&norm(input.tipo_esperado)!==norm(first.tipo))result.errors.push("Tipo incompatible con la clasificación independiente");
+  if(input?.proveedor_esperado&&canon(input.proveedor_esperado)!==canon(first.proveedor))result.errors.push("Proveedor incompatible con la clasificación independiente");
+  result.validated=result.validated&&result.errors.length===0;
   const verified=result.validated&&allowed!=="OTRO"&&!!date&&!!norm(first.numero);
   const path="ingesta/"+sha+".pdf";
   etapa="almacenar_pdf";
