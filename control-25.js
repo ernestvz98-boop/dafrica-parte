@@ -56,7 +56,9 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
       }catch(err){geometryWarning="No se completó la geometría: "+(err?.message||err)}
      }
      try{
-      const result=await sb("/functions/v1/compras-auto-v2",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo})});
+      const response=await authFetch(SUPABASE_URL+"/functions/v1/compras-auto-v2",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo})});
+      const result=await response.json().catch(()=>({error:"Respuesta del servidor no interpretable"}));
+      if(!response.ok)throw Error([result.error,result.etapa?"Etapa: "+result.etapa:"",result.detalle].filter(Boolean).join(" · ")||"HTTP "+response.status);
       out[i]={...result,geometryWarning};
      }catch(err){out[i]={estado:"ERROR",numero:d.numero,incidencias:[err?.message||String(err)],geometryWarning}}
     }
@@ -65,14 +67,16 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    const ok=out.filter(x=>x.estado==="CONTRASTADO_SIN_IMPUTACION").length;
    const held=out.filter(x=>x.estado==="RETENIDO_AUTOMATICAMENTE"||x.estado==="RETENIDO").length;
    const duplicates=out.filter(x=>x.estado==="DUPLICADO").length;
-   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos procesados.</b> '+esc(ok)+' contrastados, '+esc(held)+' retenidos, '+esc(duplicates)+' duplicados.</p>'+
+   const errors=out.filter(x=>x.estado==="ERROR"||x.estado==="LINEAS_PENDIENTES").length;
+   const archived=out.filter(x=>!!x.documento_id).length;
+   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos analizados.</b> '+esc(ok)+' contrastados, '+esc(held)+' retenidos, '+esc(duplicates)+' duplicados, <b>'+esc(errors)+' errores</b>.</p>'+
     out.map((x,i)=>'<div class="module-note sensitive-note"><b>'+esc(x.numero||split.documentos[i]?.numero||"Documento "+(i+1))+' · '+esc(x.estado||"ERROR")+'</b>'+
     '<p>'+esc(x.lineas_detectadas??"?")+' líneas; obra: '+esc(x.proyecto_candidato||"sin asociar")+'</p>'+
     (x.geometryWarning?'<p class="muted">'+esc(x.geometryWarning)+'</p>':'')+
     (x.incidencias||[]).map(z=>'<p class="error">• '+esc(z)+'</p>').join("")+
     (x.avisos||[]).map(z=>'<p class="muted">• '+esc(z)+'</p>').join("")+'</div>').join("")+
     '<p class="muted">Registro documental automático. No se contabilizan costes sin importes fiables ni asignación de obra comprobada. STEL no se modifica.</p>';
-   status.textContent="Procesamiento terminado. Resultados guardados en Supabase.";
+   status.textContent=errors?"Proceso incompleto: "+errors+" documento(s) con error; "+archived+" archivo(s) registrados. Consulta los detalles.": "Proceso terminado: "+archived+" archivo(s) registrados y "+duplicates+" duplicado(s) detectados.";
    await renderHistory();
   }catch(e){status.textContent="Lote retenido sin registrar: "+(e?.message||String(e))}
   finally{button.disabled=false}
