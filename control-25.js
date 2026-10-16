@@ -1,0 +1,80 @@
+"use strict";
+// Ingesta automatica V2: una carga, documentos separados, archivados y contrastados.
+// No crea entregas ni imputaciones economicas a partir de OCR no verificado.
+renderComprasLotePilot = function renderComprasAutonomasV2(){
+ const root=$("pcBatch");if(!root||!has("costes.ver"))return;
+ root.innerHTML='<div class="card">'+
+  '<h3>Albaranes automáticos V2</h3>'+
+  '<p class="muted">Sube un PDF. DAFRICA separa los documentos, compara dos lecturas independientes y archiva cada resultado. Sin revisión de filas, sin casillas de confirmación y sin modificar STEL Order. Los documentos no verificables se retienen automáticamente sin contabilizar importes.</p>'+
+  (!has("costes.editar")?'<p class="error">Esta cuenta no tiene permisos para archivar albaranes (costes.editar).</p>':'')+
+  '<label for="pcAutoFile">PDF de albaranes (máximo 6 MB, 10 páginas por lote)</label>'+
+  '<input type="file" id="pcAutoFile" accept="application/pdf,.pdf">'+
+  '<label style="display:flex;align-items:center;gap:8px;margin:12px 0">'+
+    '<input type="checkbox" id="pcAutoConsent" style="width:auto">'+
+    '<span>Autorizo el procesamiento y análisis documental mediante IA externa y su archivo privado en DAFRICA.</span></label>'+
+  '<button class="btn" type="button" id="pcAutoStart">Procesar y archivar automáticamente</button>'+
+  '<p id="pcAutoStatus" class="muted" role="status">Selecciona un archivo.</p>'+
+  '<div id="pcAutoResults"></div>'+
+  '<h4>Últimos documentos procesados</h4><div id="pcAutoHistory" class="muted">Cargando…</div>'+
+  '</div>';
+ const file=$("pcAutoFile"),consent=$("pcAutoConsent"),button=$("pcAutoStart"),status=$("pcAutoStatus"),results=$("pcAutoResults"),history=$("pcAutoHistory");
+ const renderHistory=async()=>{
+  try{
+   const rows=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,ia_estado,created_at&order=created_at.desc&limit=30");
+   history.innerHTML=rows.length?'<div class="table-wrap"><table><thead><tr><th>Albarán</th><th>Proveedor</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>'+
+    rows.map(d=>'<tr><td>'+esc(d.numero_documento||"Sin número")+'</td><td>'+esc(d.proveedor_nombre||"—")+'</td><td>'+esc(d.fecha_documento||"—")+'</td><td>'+esc(d.ia_estado||"PENDIENTE")+'</td></tr>').join("")+'</tbody></table></div>':
+    'Aún no hay documentos archivados.';
+  }catch(e){history.textContent="No se pudo consultar el historial: "+(e?.message||e)}
+ };
+ renderHistory();
+ button.addEventListener("click",async()=>{
+  if(!has("costes.editar")){status.textContent="Permiso costes.editar requerido";return}
+  const doc=file.files?.[0];
+  if(!doc||!consent.checked){status.textContent="Selecciona el PDF y autoriza el procesamiento.";return}
+  if(!/\.pdf$/i.test(doc.name)||doc.size>6_000_000||doc.size<100){status.textContent="PDF no válido o superior a 6 MB.";return}
+  button.disabled=true;results.textContent="";status.textContent="Separando documentos del lote…";
+  try{
+   const data=await new Promise((resolve,reject)=>{
+    const rd=new FileReader();rd.onload=()=>resolve(String(rd.result));rd.onerror=()=>reject(Error("No se pudo abrir el PDF"));rd.readAsDataURL(doc);
+   });
+   const split=await sb("/functions/v1/compras-lote-piloto",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mime:"application/pdf",name:doc.name,data})});
+   if(!Array.isArray(split.documentos)||!split.documentos.length)throw Error("No se pudieron separar los documentos");
+   const pages=split.documentos.flatMap(x=>x.paginas||[]),uniquePages=new Set(pages);
+   if(pages.length!==uniquePages.size||uniquePages.size!==split.paginas_pdf)throw Error("La división de páginas no es inequívoca: se ha bloqueado el lote");
+   const work=split.documentos.map((d,i)=>({d,i})),out=[];
+   async function consume(){
+    while(work.length){
+     const {d,i}=work.shift();
+     if(!d.pdf_separado_b64){out[i]={estado:"RETENIDO",numero:d.numero,incidencias:["Documento sin PDF separable"]};continue}
+     status.textContent="Procesando "+(i+1)+"/"+split.documentos.length+" · "+String(d.numero||"sin número");
+     let geo=null,geometryWarning="";
+     if(String(d.proveedor||"").toUpperCase().includes("SALTOKI")&&(d.lineas||[]).length>=7){
+      try{
+       const parsed=await pcLeerSaltokiFilas(d);
+       if(parsed.lineas_validas===true&&Number.isInteger(parsed.numero_filas_geometricas))geo=parsed.numero_filas_geometricas;
+       else geometryWarning="Geometría detectada, pero existen filas ilegibles";
+      }catch(err){geometryWarning="No se completó la geometría: "+(err?.message||err)}
+     }
+     try{
+      const result=await sb("/functions/v1/compras-auto-v2",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:d.tipo+"_"+(d.numero||"sin_numero")+".pdf",data:"data:application/pdf;base64,"+d.pdf_separado_b64,lineas_geometricas:geo})});
+      out[i]={...result,geometryWarning};
+     }catch(err){out[i]={estado:"ERROR",numero:d.numero,incidencias:[err?.message||String(err)],geometryWarning}}
+    }
+   }
+   await Promise.all(Array.from({length:Math.min(2,work.length)},()=>consume()));
+   const ok=out.filter(x=>x.estado==="CONTRASTADO_SIN_IMPUTACION").length;
+   const held=out.filter(x=>x.estado==="RETENIDO_AUTOMATICAMENTE"||x.estado==="RETENIDO").length;
+   const duplicates=out.filter(x=>x.estado==="DUPLICADO").length;
+   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos procesados.</b> '+esc(ok)+' contrastados, '+esc(held)+' retenidos, '+esc(duplicates)+' duplicados.</p>'+
+    out.map((x,i)=>'<div class="module-note sensitive-note"><b>'+esc(x.numero||split.documentos[i]?.numero||"Documento "+(i+1))+' · '+esc(x.estado||"ERROR")+'</b>'+
+    '<p>'+esc(x.lineas_detectadas??"?")+' líneas; obra: '+esc(x.proyecto_candidato||"sin asociar")+'</p>'+
+    (x.geometryWarning?'<p class="muted">'+esc(x.geometryWarning)+'</p>':'')+
+    (x.incidencias||[]).map(z=>'<p class="error">• '+esc(z)+'</p>').join("")+
+    (x.avisos||[]).map(z=>'<p class="muted">• '+esc(z)+'</p>').join("")+'</div>').join("")+
+    '<p class="muted">Registro documental automático. No se contabilizan costes sin importes fiables ni asignación de obra comprobada. STEL no se modifica.</p>';
+   status.textContent="Procesamiento terminado. Resultados guardados en Supabase.";
+   await renderHistory();
+  }catch(e){status.textContent="Lote retenido sin registrar: "+(e?.message||String(e))}
+  finally{button.disabled=false}
+ });
+};
