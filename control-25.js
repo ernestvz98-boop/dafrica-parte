@@ -32,12 +32,25 @@ async function pcLeerSaltokiFilaUnica(doc){
     o.fillStyle="#171717";o.font="bold 18px sans-serif";o.fillText("F1 · REFERENCIA / CONCEPTO / CANTIDAD",15,23);
     o.drawImage(canvas,x0,y0,x1-x0,y1-y0,80,31,out.width-100,105);
     const crop=out.toDataURL("image/jpeg",.94);out.width=0;out.height=0;
+    // Saltoki places its PRINTED albaran number near the bottom of the page,
+    // whereas the handwritten ABP marker is near the top. Show both header and
+    // printed number to the independent header-verification model.
+    const hdr=document.createElement("canvas");
+    hdr.width=1600;hdr.height=680;
+    const h=hdr.getContext("2d",{alpha:false});h.fillStyle="white";h.fillRect(0,0,1600,680);
+    h.fillStyle="#111";h.font="bold 18px sans-serif";
+    h.fillText("EMISOR IMPRESO (superior) Y Nº ALBARÁN IMPRESO (inferior)",12,24);
+    h.drawImage(canvas,Math.floor(canvas.width*.025),Math.floor(canvas.height*.012),
+      Math.floor(canvas.width*.95),Math.floor(canvas.height*.13),5,37,1590,350);
+    h.drawImage(canvas,Math.floor(canvas.width*.04),Math.floor(canvas.height*.690),
+      Math.floor(canvas.width*.73),Math.floor(canvas.height*.096),5,405,1590,265);
+    const headerJpeg=hdr.toDataURL("image/jpeg",.94);hdr.width=0;hdr.height=0;
     const row=doc.lineas[0];
     return {numero_filas_geometricas:1,lineas_validas:true,lineas:[{
       referencia:String(row.referencia||""),descripcion:String(row.descripcion||""),
       cantidad:row.cantidad===null?null:Number(row.cantidad),
       unidad:String(row.unidad||""),precio_unitario:row.precio_unitario??null
-    }],imagenes_zonas:[crop],codigo_proyecto:"",codigo_pry_sin_conflictos:false};
+    }],imagenes_zonas:[crop],imagen_cabecera:headerJpeg,codigo_proyecto:"",codigo_pry_sin_conflictos:false};
   }finally{
     if(canvas){canvas.width=0;canvas.height=0}
     await task.destroy().catch(()=>{});
