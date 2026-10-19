@@ -438,13 +438,16 @@ Deno.serve(async(req:Request)=>{
    const printed=headerAlternatives.length>=2?compareHead(headerAlternatives).cabecera:null;
    const headers=compareHead(baseHead.length?baseHead:headerAlternatives);
    const header={...headers.cabecera};
-   const headerDiffs=[...headers.campos_diferentes];
+   let headerDiffs=[...headers.campos_diferentes];
    if(printed){
      for(const key of ["numero","proveedor","fecha"]){
        if(printed[key]&&equalCell(key,headerAlternatives[0][key],headerAlternatives[1][key])){
          header[key]=printed[key];
+         // Two independent enlarged HEAD readings outweigh inconsistent
+         // global page guesses. Do not count a resolved mismatch twice.
+         headerDiffs=headerDiffs.filter(f=>f!==key);
          if(baseHead.length&&baseHead.some(x=>x[key]&&!equalCell(key,x[key],printed[key])))
-           notes.push("Cabecera "+key+": lectura de cabecera distinta de lectura de página; se muestra la cabecera impresa");
+           notes.push("Cabecera "+key+": se corrigió la lectura general usando dos lecturas de la cabecera ampliada");
        }else headerDiffs.push(key);
      }
    }
@@ -454,17 +457,42 @@ Deno.serve(async(req:Request)=>{
    let materials=previewLines(readViews,maxRows,hasGeometry);
    if(hasGeometry&&["MADERAS","RODAVI"].includes(String(input?.perfil_formato||"").toUpperCase()))
      materials=mergeLiteralRows(materials,literals,n);
+   // Supplier collection notes can contain a quantity without constituting
+   // an article. Exclude only when BOTH readers explicitly report the pickup
+   // note and neither one reads a unit price.
+   const format=String(input?.perfil_formato||"").toUpperCase();
+   const excludedAnnotations:number[]=[];
+   if(format==="RODAVI"&&literals.length===2){
+     materials=materials.filter((row:any)=>{
+       const observations=row.lecturas_literales||[];
+       const note=observations.length===2&&observations.every((v:any)=>
+         /^(RETIRADO\s+POR|RECOGIDO\s+POR|PEDIDO\s+POR)/i.test(
+           String(v.referencia||"")+" "+String(v.descripcion||"").trim()) &&
+         v.precio_unitario===null);
+       if(note)excludedAnnotations.push(row.fila);
+       return !note;
+     }).map((row:any,i:number)=>({...row,fila:i+1}));
+   }
+   if(excludedAnnotations.length)
+     notes.push("Anotaciones ajenas a los artículos retiradas del recuento: "+excludedAnnotations.join(", "));
    // These three provider templates DO NOT print a physical unit column.
    // Drop model-invented units, but retain alternative raw reads for diagnostics.
    const supplierName=norm(input?.proveedor_esperado||whole[0]?.proveedor||"");
-   if(["RODAVI","MADERAS"].includes(String(input?.perfil_formato||"").toUpperCase())||supplierName.includes("SALTOKI"))
+   if(["RODAVI","MADERAS"].includes(format)||["SALTOKI","RODAVI","MADERAS PEREIRA"].some(x=>supplierName.includes(x)))
      materials=materials.map((row:any)=>({...row,unidad:""}));
+   if(!hasGeometry)materials=materials.map((x:any)=>({
+     ...x,estado_lectura:"SIN_GEOMETRIA",
+     campos_diferentes:[...new Set([...(x.campos_diferentes||[]),"recuento_fisico"])]
+   }));
    const disagreement=materials.filter(x=>!["COINCIDE","COINCIDENCIA_PRINCIPAL"].includes(x.estado_lectura)).length;
+   const rowsVerified=materials.filter(x=>
+     hasGeometry&&(["RODAVI","MADERAS"].includes(format)?x.comprobacion_literal===true:
+       ["COINCIDE","COINCIDENCIA_PRINCIPAL"].includes(x.estado_lectura))).length;
    const numberExpected=String(input?.numero_esperado||"");
    if(numberExpected&&header.numero&&canon(numberExpected)!==canon(header.numero))
      notes.push("Número impreso diferente de la clasificación inicial: "+numberExpected);
    const complete=!!header.numero&&!!header.proveedor&&goodDate(header.fecha)&&hasGeometry&&
-     bandsRead.length>=2&&materials.length===n&&!disagreement&&
+     bandsRead.length>=2&&materials.length+excludedAnnotations.length===n&&!disagreement&&
      (!["MADERAS","RODAVI"].includes(String(input?.perfil_formato||"").toUpperCase())||
       (literals.length===2&&materials.every(x=>x.comprobacion_literal===true)))&&
      !["numero","proveedor","fecha"].some(k=>headerDiffs.includes(k));
@@ -479,7 +507,8 @@ Deno.serve(async(req:Request)=>{
      anotacion_manual:/^PRY[0-9]{5,8}$/i.test(String(header.pry_literal||"").trim())?"":String(header.pry_literal||""),cabecera:header,
      cabeceras_leidas:[...baseHead,...headRead],
      campos_cabecera_diferentes:[...new Set(headerDiffs)],
-     filas_fisicas:hasGeometry?n:null,lineas_detectadas:materials.length,
+     filas_fisicas:hasGeometry?n:null,filas_anotaciones_excluidas:excludedAnnotations,
+     lineas_detectadas:materials.length,filas_principales_comprobadas:rowsVerified,
      lineas:materials,filas_discrepantes:disagreement,
      avisos:[...notes,...whole.flatMap((v:any)=>Array.isArray(v.dudas)?v.dudas:[]),
         ...bandsRead.flatMap((v:any)=>Array.isArray(v.dudas)?v.dudas:[])].slice(0,35),
