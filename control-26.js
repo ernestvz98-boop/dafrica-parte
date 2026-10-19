@@ -28,7 +28,12 @@ async function pcLeerTablaMixta(doc){
    await page.render({canvasContext:context,viewport:view}).promise;
    const w=fullCanvas.width,h=fullCanvas.height,top=Math.floor(h*(profile==="RODAVI"?.342:.332)),bottom=Math.floor(h*.451);
    const pixels=context.getImageData(0,top,w,bottom-top).data;
-   const cols=[[.06,.23],[.65,.76]].map(([a,b])=>[Math.floor(w*a),Math.floor(w*b)]);
+   const cols=(profile==="RODAVI"
+     // RODAVI includes a nonmaterial 'RETIRADO POR' row with quantity but NO
+     // unit price. Require reference ink + independently printed unit-price
+     // ink, not just reference + quantity, to find actual article rows.
+     ?[[.06,.23],[.59,.71]]
+     :[[.06,.23],[.65,.76]]).map(([a,b])=>[Math.floor(w*a),Math.floor(w*b)]);
    const mask=[];
    for(let y=0;y<bottom-top;y++){
      const percentages=cols.map(([x0,x1])=>{
@@ -87,10 +92,12 @@ async function pcLeerTablaMixta(doc){
    const hc=cropHints.getContext("2d",{alpha:false});
    hc.fillStyle="#fff";hc.fillRect(0,0,cropHints.width,cropHints.height);
    hc.fillStyle="#172033";hc.font="bold 20px sans-serif";
-   hc.fillText("COLUMNAS AISLADAS DEL ORIGINAL: CODIGO / CANTIDAD / PRECIO / DTO / IMPORTE",12,24);
+   hc.fillText("EVIDENCIA FISICA: CODIGO (IZQ) | CANTIDAD | PRECIO UNITARIO | DTO | IMPORTE FINAL",12,24);
+   // Calibrated to actual scanned source coordinates. The MADERAS amount
+   // begins at x=.865; a prior x=.902 crop dropped leading amount digits.
    const colRanges=profile==="MADERAS"
-      ?[[.032,.180],[.625,.728],[.726,.823],[.811,.903],[.902,.985]]
-      :[[.028,.155],[.510,.620],[.615,.732],[.805,.895],[.900,.985]];
+      ?[[.035,.168],[.627,.714],[.720,.797],[.808,.865],[.865,.968]]
+      :[[.029,.154],[.508,.580],[.592,.702],[.806,.896],[.913,.993]];
    const xStarts=[20,390,695,1000,1305], widths=[355,290,290,290,540];
    for(let j=0;j<detected.length;j++){
      const [a,b]=detected[j],middle=(a+b)/2;
