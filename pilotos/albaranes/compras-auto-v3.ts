@@ -337,7 +337,7 @@ Deno.serve(async(req:Request)=>{
     // Full-page agreement is not independent physical evidence on a scan:
     // unverified RODAVI/MADERAS rows remain held instead of false positives.
     const vendor=norm(input?.proveedor_esperado||first.proveedor);
-    if(first.tipo==="ALBARAN"&&(vendor.includes("RODAVI")||vendor.includes("MADERAS PEREIRA")))
+    if(first.tipo==="ALBARAN")
       result.errors.push("Faltan bandas físicas contrastadas para este formato; no aceptar lectura global");
     if(Array.isArray(first.lineas)&&first.lineas.length>=7)
       result.errors.push("Documento con tabla larga sin geometría: no publicar");
