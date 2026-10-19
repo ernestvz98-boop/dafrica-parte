@@ -72,7 +72,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
   '<button class="btn" type="button" id="pcAutoStart">Procesar y archivar automáticamente</button>'+
   '<p id="pcAutoStatus" class="muted" role="status">Selecciona un archivo.</p>'+
   '<div id="pcAutoResults"></div>'+
-  '<h4>Lecturas de albaranes y materiales guardados</h4><div id="pcAutoOverview"></div><button type="button" class="btn secondary" id="pcAutoRetry" style="margin-bottom:10px">Reprocesar retenidos (sin subir PDF)</button><div id="pcAutoHistory" class="muted">Cargando…</div>'+
+  '<h4>Lecturas de albaranes y materiales guardados</h4><div id="pcAutoOverview"></div><button type="button" class="btn secondary" id="pcAutoRetry" style="margin-bottom:10px">Reprocesar pendientes (sin subir PDF)</button><div id="pcAutoHistory" class="muted">Cargando…</div>'+
   '</div>';
  const file=$("pcAutoFile"),consent=$("pcAutoConsent"),button=$("pcAutoStart"),status=$("pcAutoStatus"),results=$("pcAutoResults"),history=$("pcAutoHistory"),retry=$("pcAutoRetry");
  const overview=$("pcAutoOverview");
@@ -147,7 +147,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    overview.innerHTML='<p><b>Lecturas almacenadas:</b> '+esc(rows.length)+' registros de lectura en el historial (incluye intentos retenidos) · '+esc(verifiedDocs.length)+' con materiales contrastados y comprobados en la base de datos · '+esc(verifiedRows)+' líneas comprobadas.</p>'+
     '<p class="muted">«Contrastado sin imputación» significa que se archivaron las referencias y cantidades, NO que existan precios o una obra asignada. La información puede consultarse sin volver a ejecutar IA.</p>';
    history.innerHTML=rows.length?info.map(({d,materials,displayLines,saved,matched,verified,warnings,errors,withPrice})=>{
-     const statusLabel=verified?"Materiales contrastados":d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"?"Auditoría contrastada, comprobar archivo de líneas":d.ia_estado==="RETENIDO_AUTOMATICAMENTE"?"Retenido, sin aceptar materiales":d.ia_estado||"Pendiente";
+     const statusLabel=verified?"Materiales contrastados":d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"?"Auditoría contrastada, comprobar archivo de líneas":d.ia_estado==="RETENIDO_AUTOMATICAMENTE"?"Retenido, sin aceptar materiales":d.ia_estado==="LINEAS_PENDIENTES"?"Archivo pendiente de verificar líneas":d.ia_estado||"Pendiente";
      const opened=openOnLoad||oldOpen.has(d.id);
      const savedStelDiagnosis=stelExplanation(d.ia_datos?.pry_diagnostico_api);
      const pryText=d.ia_datos?.pry_codigo_confirmado?
@@ -223,7 +223,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    if(!has("costes.editar")||!consent.checked){status.textContent="Para reprocesar, autoriza el análisis documental y comprueba tus permisos.";return}
    retry.disabled=true;button.disabled=true;results.textContent="";
    try{
-    const pending=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,archivo_path,ia_estado,ia_datos&ia_estado=eq.RETENIDO_AUTOMATICAMENTE&order=created_at.desc&limit=100");
+    const pending=await sb("/rest/v1/coste_documentos?select=id,numero_documento,proveedor_nombre,fecha_documento,archivo_path,ia_estado,ia_datos&ia_estado=in.(RETENIDO_AUTOMATICAMENTE,LINEAS_PENDIENTES)&order=created_at.desc&limit=100");
     const unique=new Map();
     for(const d of pending){
       const key=String(d.numero_documento||d.id).toUpperCase().replace(/[^A-Z0-9]/g,"")+"|"+
