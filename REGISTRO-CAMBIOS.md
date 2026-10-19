@@ -3,6 +3,16 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-19 · Diagnóstico de lectura de la API de STEL
+
+**Producción:** sin escrituras en STEL ni en la base de datos.
+- `claude-prueba-permisos` se redesplegó (v2) como diagnóstico temporal de solo lectura:
+  `GET ?limit=1` y `OPTIONS` sobre rutas fijas, salida limitada a códigos HTTP y nombres
+  de campos, caducidad automática. Se ejecutó una vez.
+- Resultado: autenticación con `STEL_API_KEY` correcta. Detalle en `docs/stel-api.md`.
+- Después se redesplegó (v3) como función desactivada (siempre HTTP 410, sin acceso a
+  secretos). **Pendiente:** borrarla desde el panel de Supabase.
+
 ## 2026-10-19 · Prueba de permisos de escritura en Supabase (producción)
 
 **Producción:** queda una tabla de prueba vacía de datos reales, pendiente de borrar.
