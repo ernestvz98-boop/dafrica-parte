@@ -3,6 +3,20 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-19 · Regla de precios pendientes y diseño de creación de albaranes en STEL
+
+**Producción:** sin escrituras en STEL ni en la base de datos.
+- `albaranes/precios.js` (+ `pruebas/precios.test.js`): líneas `precio_pendiente`,
+  resolución por prioridad pedido → artículo STEL → factura recibida → revisión, sin
+  estimar nunca; trazabilidad `precio_original`, `precio_utilizado`, `fuente_precio`,
+  `fecha_resolucion_precio`; validación de importes antes de facturar.
+- `docs/stel-creacion-albaranes.md`: estados `pendiente_creacion_stel` → `creado_stel` →
+  `pendiente_vincular_obra` → `obra_vinculada` / `error`; campos que exige un
+  `purchaseDeliveryNote` (deducidos de 500 albaranes reales); mapeo de proveedores y artículos.
+- `supabase/propuestas/20261019_albaranes_stel.sql`: modelo de datos propuesto, **no aplicado**.
+- Análisis de solo lectura: `claude-prueba-permisos` v4 (agregados, sin importes ni textos)
+  ejecutada una vez; v5 la deja de nuevo desactivada (HTTP 410). **Pendiente:** borrarla.
+
 ## 2026-10-19 · Diagnóstico de lectura de la API de STEL
 
 **Producción:** sin escrituras en STEL ni en la base de datos.
