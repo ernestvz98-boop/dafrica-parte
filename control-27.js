@@ -30,7 +30,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
   return '<div class="table-wrap" style="overflow:auto;max-height:700px"><table>'+
    '<thead><tr><th>Fila</th><th>Referencia</th><th>Descripción interpretada</th><th>Cantidad</th><th>Unidad</th><th>Precio unitario</th><th>Dto. %</th><th>Importe final</th><th>Lecturas</th></tr></thead><tbody>'+
    rows.map(r=>{
-    const statusText=r.estado_lectura==="COINCIDE"?"Coinciden":r.estado_lectura==="COINCIDENCIA_PRINCIPAL"?"Referencia, descripción y cantidad coinciden; datos económicos incompletos":r.estado_lectura==="PARCIAL"?"Código y cantidad coinciden; descripción pendiente":r.estado_lectura==="DIFERENTE"?"Difieren":"Lectura incompleta";
+    const statusText=r.estado_lectura==="COINCIDE"?"Coinciden":r.estado_lectura==="COINCIDENCIA_PRINCIPAL"?"Referencia, descripción y cantidad verificadas; importe incompleto":r.estado_lectura==="PARCIAL"?"Referencia y cantidad verificadas; descripción pendiente":r.estado_lectura==="SIN_GEOMETRIA"?"Solo lectura global; filas físicas sin verificar":r.estado_lectura==="DIFERENTE"?"Lecturas discrepantes":"Lectura incompleta";
     const value=Array.isArray(r.lecturas)?r.lecturas:[];
     const literal=Array.isArray(r.lecturas_literales)?r.lecturas_literales:[];
     const extra=literal.length?'<p><b>Columnas transcritas literalmente:</b></p>'+literal.map((x,i)=>
@@ -38,37 +38,44 @@ renderComprasLotePilot=function renderComprasTemporal(){
       ' · cantidad «'+esc(x.cantidad_impresa||"ilegible")+'» · precio «'+esc(x.precio_impreso||"en blanco")+
       '» · descuento «'+esc(x.descuento_impreso||"en blanco")+'» · importe «'+
       esc(x.importe_impreso||"en blanco")+'»</p>').join(""):"";
+    const codeWarning=r.codigo_formato_no_confirmado?
+      '<p><b>Atención:</b> «'+esc(r.referencia_candidata||"")+
+      '» apareció como referencia candidata, pero su formato no coincide con la columna de código del proveedor; no se considera verificada.</p>':"";
     const evidence=value.length||literal.length?'<details><summary>'+esc(statusText)+(r.campos_diferentes?.length?' ('+esc(r.campos_diferentes.join(", "))+')':'')+'</summary>'+
        value.map((x,i)=>'<p><b>Lectura '+(i+1)+'</b>: '+esc(x.referencia||"sin referencia")+' | '+esc(x.descripcion||"sin descripción")+
        ' | Cant. '+esc(x.cantidad??"no legible")+' | '+esc(x.unidad||"sin unidad")+
-       ' | Precio '+esc(x.precio_unitario??"no consta")+'</p>').join("")+extra+'</details>':'No disponible';
+       ' | Precio '+esc(x.precio_unitario??"no consta")+'</p>').join("")+extra+codeWarning+'</details>':'No disponible';
     return '<tr><td>'+esc(r.fila)+'</td><td>'+esc(r.referencia||"—")+'</td>'+
       '<td>'+esc(r.descripcion||"No legible")+'</td><td>'+esc(r.cantidad_impresa||((r.cantidad??"—")) )+'</td>'+
-      '<td>'+esc(r.unidad||"—")+'</td><td>'+esc(r.precio_impreso||(r.precio_unitario??"No consta"))+'</td>'+ 
+      '<td>'+esc(!r.unidad||/^(n\/a|none|null)$/i.test(r.unidad)?"—":r.unidad)+'</td><td>'+esc(r.precio_impreso||(r.precio_unitario??"No consta"))+'</td>'+ 
       '<td>'+esc(r.descuento_impreso||(r.descuento??"—"))+'</td><td>'+esc(r.importe_impreso||(r.importe??"—"))+'</td><td>'+evidence+'</td></tr>';
    }).join("")+'</tbody></table></div>';
  };
  const renderResult=(r,source,index)=>{
   const number=String(r.numero||source?.numero||"Sin número impreso");
-  const problems=Array.isArray(r.avisos)?r.avisos:[];
+  const problems=Array.isArray(r.avisos)?[...new Set(r.avisos.map(x=>String(x).trim()).filter(Boolean))]:[];
   const verified=r.lectura_completa===true;
+  const count=Number(r.lineas_detectadas||0);
+  const checked=Number(r.filas_principales_comprobadas||0);
+  const coverage=count>0?checked+"/"+count+" filas con referencia, descripción y cantidad contrastadas":"sin filas verificadas";
   const title='<summary style="cursor:pointer;font-weight:bold">'+esc(number)+
     ' · '+esc(r.proveedor||source?.proveedor||"Proveedor no identificado")+
-    ' · '+esc(r.lineas_detectadas??0)+' líneas'+
-    ' · '+(verified?'Campos principales concordantes':'Campos pendientes de contrastar')+'</summary>';
+    ' · '+esc(count)+' líneas · '+esc(coverage)+
+    (verified?' · cabecera y líneas verificadas':' · interpretación parcial')+'</summary>';
   const c=r.cabecera||{};
   const header='<p><b>Número impreso:</b> '+esc(number)+' · <b>Fecha:</b> '+esc(r.fecha||"No comprobada")+
     ' · <b>Proveedor:</b> '+esc(r.proveedor||"No identificado")+'</p>'+
     '<p><b>Obra impresa:</b> '+esc(r.obra_impresa||"No consta")+
     ' · <b>PRY manuscrito (no confirmado en STEL):</b> '+esc(r.pry_codigo||"No identificado")+
     (r.anotacion_manual?'<br><b>Otras anotaciones:</b> '+esc(r.anotacion_manual):"")+
-    ' · <b>Estado:</b> '+(verified?'Referencias, cantidades y descripciones concordantes':'Hay campos o filas por corroborar')+'</p>';
+    ' · <b>Filas:</b> '+esc(coverage)+
+    ' · <b>Cabecera:</b> '+(verified?'Contrastada':'No completamente contrastada')+'</p>';
   const alt=Array.isArray(r.cabeceras_leidas)&&r.cabeceras_leidas.length?
     '<details><summary>Ver las lecturas de la cabecera</summary>'+
       r.cabeceras_leidas.map((h,i)=>'<p>Lectura '+(i+1)+': '+esc(join([h.numero,h.proveedor,h.fecha], " / "))+'</p>').join("")+'</details>':"";
   return '<details open style="border:1px solid #d6dee8;border-radius:8px;padding:12px;margin:9px 0">'+
     title+header+alt+lineTable(r)+
-    (problems.length?'<details><summary>'+esc(problems.length)+' advertencias de interpretación</summary>'+
+    (problems.length?'<details><summary>'+esc(problems.length)+' observaciones OCR (no son necesariamente errores)</summary>'+
       problems.map(x=>'<p class="muted">• '+esc(x)+'</p>').join("")+'</details>':'')+
     '<p class="muted">Lectura temporal n.º '+esc(index+1)+'. No se ha guardado ni enviado a STEL.</p>'+
    '</details>';
@@ -136,9 +143,12 @@ renderComprasLotePilot=function renderComprasTemporal(){
    const full=interpreted.filter(x=>x.lectura_completa).length;
    const incomplete=interpreted.length-full;
    const failed=out.length-interpreted.length;
+   const verifiedLines=interpreted.reduce((n,d)=>n+Number(d.filas_principales_comprobadas||0),0);
+   const totalLines=interpreted.reduce((n,d)=>n+Number(d.lineas_detectadas||0),0);
    results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos separados.</b> '+esc(interpreted.length)+
-     ' interpretados, '+esc(full)+' con los campos principales concordantes, '+esc(incomplete)+
-     ' con campos por comprobar, '+esc(failed)+' sin interpretación. <b>0 documentos archivados.</b></p>'+
+     ' interpretados, <b>'+esc(verifiedLines)+' de '+esc(totalLines)+' filas principales contrastadas físicamente</b>, '+
+     esc(full)+' documentos con cabecera y líneas verificadas, '+esc(incomplete)+
+     ' con datos pendientes, '+esc(failed)+' sin interpretación. <b>0 documentos archivados.</b></p>'+
      out.map((r,i)=>r?.error?
        '<div class="module-note sensitive-note"><b>'+esc(split.documentos[i]?.numero||"Documento "+(i+1))+
        ' · Sin interpretación</b><p>'+esc(r.error)+'</p></div>':renderResult(r,split.documentos[i],i)).join("")+
