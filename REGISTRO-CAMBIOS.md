@@ -3,6 +3,22 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-19 · Prueba de permisos de escritura en Supabase (producción)
+
+**Producción:** queda una tabla de prueba vacía de datos reales, pendiente de borrar.
+- Conector nuevo `Dafrica_Supabase`: usuario `postgres`, sin solo lectura.
+- Escritura SQL: correcta (tabla temporal; sin efecto persistente).
+- Crear y modificar tablas: correcto. Se creó `public._claude_prueba_permisos`
+  (1 fila de prueba). El `DROP` posterior no se ejecutó: las sentencias destructivas
+  esperan una confirmación que no llegó (tiempo agotado a los 60 s).
+  Mitigación aplicada: RLS activado y permisos revocados a `anon` y `authenticated`.
+  **Pendiente:** `drop table public._claude_prueba_permisos;`
+- `apply_migration`: dos intentos agotaron el tiempo (incluían `DROP`); no se
+  registró ninguna migración (siguen 57) ni quedó ningún objeto.
+- Despliegue de funciones Edge: bloqueado por los permisos de la sesión de Claude Code.
+  No se desplegó nada; las 17 funciones siguen sin cambios.
+- Storage: lectura de buckets y configuración correcta; no se modificó nada.
+
 ## 2026-10-19 · Lector determinista de albaranes (P0) · rama `claude/gifted-mendel-1hrahr`
 
 **Producción:** sin cambios (nada fusionado en `main`, nada desplegado en Supabase).
