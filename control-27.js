@@ -52,6 +52,11 @@ renderComprasLotePilot=function renderComprasTemporal(){
    }).join("")+'</tbody></table></div>';
  };
  const renderResult=(r,source,index)=>{
+  if(r.estado==="DETERMINISTA")return '<details open style="border:1px solid #d6dee8;border-radius:8px;padding:12px;margin:9px 0">'+
+    '<summary style="cursor:pointer;font-weight:bold">'+esc(r.determinista.numero?.valor||source?.numero||"Sin número")+' · '+
+    esc(r.determinista.proveedor?.nombre||"")+' · '+esc(r.determinista.lineas.length)+' líneas · verificado sin IA</summary>'+
+    pcRenderDeterminista(r.determinista)+'<p class="muted">Lectura temporal n.º '+esc(index+1)+'. No se ha guardado ni enviado a STEL.</p></details>';
+  r={...r,proveedor:pcProveedorMostrable(r.proveedor)};
   const number=String(r.numero||source?.numero||"Sin número impreso");
   const problems=Array.isArray(r.avisos)?[...new Set(r.avisos.map(x=>String(x).trim()).filter(Boolean))]:[];
   const verified=r.lectura_completa===true;
@@ -59,7 +64,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
   const checked=Number(r.filas_principales_comprobadas||0);
   const coverage=count>0?checked+"/"+count+" filas con referencia, descripción y cantidad contrastadas":"sin filas verificadas";
   const title='<summary style="cursor:pointer;font-weight:bold">'+esc(number)+
-    ' · '+esc(r.proveedor||source?.proveedor||"Proveedor no identificado")+
+    ' · '+esc(r.proveedor||pcProveedorMostrable(source?.proveedor)||"Proveedor no identificado")+
     ' · '+esc(count)+' líneas · '+esc(coverage)+
     (verified?' · cabecera y líneas verificadas':' · interpretación parcial')+'</summary>';
   const c=r.cabecera||{};
@@ -73,8 +78,10 @@ renderComprasLotePilot=function renderComprasTemporal(){
   const alt=Array.isArray(r.cabeceras_leidas)&&r.cabeceras_leidas.length?
     '<details><summary>Ver las lecturas de la cabecera</summary>'+
       r.cabeceras_leidas.map((h,i)=>'<p>Lectura '+(i+1)+': '+esc(join([h.numero,h.proveedor,h.fecha], " / "))+'</p>').join("")+'</details>':"";
+  const deterministic=r.determinista&&r.determinista.tipo_pdf!=="ESCANEADO"?
+    '<details><summary>Ver lectura determinista del PDF digital (sin IA)</summary>'+pcRenderDeterminista(r.determinista)+'</details>':"";
   return '<details open style="border:1px solid #d6dee8;border-radius:8px;padding:12px;margin:9px 0">'+
-    title+header+alt+lineTable(r)+
+    title+header+alt+lineTable(r)+deterministic+
     (problems.length?'<details><summary>'+esc(problems.length)+' observaciones OCR (no son necesariamente errores)</summary>'+
       problems.map(x=>'<p class="muted">• '+esc(x)+'</p>').join("")+'</details>':'')+
     '<p class="muted">Lectura temporal n.º '+esc(index+1)+'. No se ha guardado ni enviado a STEL.</p>'+
@@ -107,6 +114,10 @@ renderComprasLotePilot=function renderComprasTemporal(){
      status.textContent="Interpretando "+(index+1)+" de "+split.documentos.length+
        " · "+String(d.numero||"documento sin identificar");
      if(!d.pdf_separado_b64){out[index]={error:"No se pudo separar el PDF de este documento"};continue}
+     // PDF digital: lectura exacta del texto. Si todo cuadra no se usa la IA.
+     let det=null;
+     try{det=await pcLecturaDeterminista(d)}catch(e){console.warn("Lectura determinista no disponible",String(e).slice(0,120))}
+     if(det?.estado==="AUTO_OK"){out[index]={estado:"DETERMINISTA",determinista:det};continue}
      let n=null,rows=null,bands=null,columnHints=null,header=null,profile="",noRef=false,warning="";
      if((d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
        try{
@@ -132,9 +143,9 @@ renderComprasLotePilot=function renderComprasTemporal(){
          })
        });
        const value=await res.json().catch(()=>({error:"El servidor no devolvió una respuesta válida"}));
-       if(!res.ok)out[index]={error:value.error||"La interpretación no está disponible",etapa:value.etapa,warning};
-       else out[index]={...value,warning};
-     }catch(e){out[index]={error:String(e?.message||e),warning}}
+       if(!res.ok)out[index]={error:value.error||"La interpretación no está disponible",etapa:value.etapa,warning,determinista:det};
+       else out[index]={...value,warning,determinista:det};
+     }catch(e){out[index]={error:String(e?.message||e),warning,determinista:det}}
     }
    };
    await Promise.all(Array.from({length:Math.min(2,tasks.length)},()=>worker()));
@@ -142,16 +153,18 @@ renderComprasLotePilot=function renderComprasTemporal(){
    const interpreted=out.filter(x=>x&&x.estado==="INTERPRETADO_SIN_GUARDAR");
    const full=interpreted.filter(x=>x.lectura_completa).length;
    const incomplete=interpreted.length-full;
-   const failed=out.length-interpreted.length;
+   const deterministic=out.filter(x=>x&&x.estado==="DETERMINISTA").length;
+   const failed=out.length-interpreted.length-deterministic;
    const verifiedLines=interpreted.reduce((n,d)=>n+Number(d.filas_principales_comprobadas||0),0);
    const totalLines=interpreted.reduce((n,d)=>n+Number(d.lineas_detectadas||0),0);
-   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos separados.</b> '+esc(interpreted.length)+
-     ' interpretados, <b>'+esc(verifiedLines)+' de '+esc(totalLines)+' filas principales contrastadas físicamente</b>, '+
+   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos separados.</b> <b>'+esc(deterministic)+
+     ' verificados desde el PDF digital sin IA</b>, '+esc(interpreted.length)+
+     ' interpretados con IA, <b>'+esc(verifiedLines)+' de '+esc(totalLines)+' filas principales contrastadas físicamente</b>, '+
      esc(full)+' documentos con cabecera y líneas verificadas, '+esc(incomplete)+
      ' con datos pendientes, '+esc(failed)+' sin interpretación. <b>0 documentos archivados.</b></p>'+
      out.map((r,i)=>r?.error?
        '<div class="module-note sensitive-note"><b>'+esc(split.documentos[i]?.numero||"Documento "+(i+1))+
-       ' · Sin interpretación</b><p>'+esc(r.error)+'</p></div>':renderResult(r,split.documentos[i],i)).join("")+
+       ' · Sin interpretación</b><p>'+esc(r.error)+'</p>'+(r.determinista?pcRenderDeterminista(r.determinista):"")+'</div>':renderResult(r,split.documentos[i],i)).join("")+
     '<p class="muted"><b>Próxima etapa (no activada):</b> contrastar lectura con STEL, crear albarán autorizado y enlazarlo a una obra verificada.</p>';
    status.textContent="Interpretación temporal finalizada. No se han guardado archivos ni materiales en DAFRICA ni se ha modificado STEL.";
   }catch(e){status.textContent="No se pudo interpretar el lote: "+String(e?.message||e)}

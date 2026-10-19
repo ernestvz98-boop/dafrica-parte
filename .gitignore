@@ -1,0 +1,4 @@
+node_modules/
+# Documentos reales y sus resultados: NUNCA en el repositorio (es público).
+pruebas/corpus-real/
+pruebas/informes-reales/

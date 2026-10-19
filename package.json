@@ -1,0 +1,14 @@
+{
+  "name": "dafrica-control",
+  "private": true,
+  "description": "Pruebas automatizadas del lector determinista de albaranes de DAFRICA Control",
+  "scripts": {
+    "test": "node --test \"pruebas/*.test.js\"",
+    "evaluar": "node pruebas/evaluar.js",
+    "plantilla": "node pruebas/generar-plantilla.js"
+  },
+  "devDependencies": {
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "4.10.38"
+  }
+}
