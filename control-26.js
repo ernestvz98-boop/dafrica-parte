@@ -94,18 +94,24 @@ async function pcLeerTablaMixta(doc){
    c.drawImage(fullCanvas,Math.round(w*.02),Math.round(h*.243),Math.round(w*.96),Math.round(h*.097),8,535,1824,300);
    const headerImage=head.toDataURL("image/jpeg",.93);head.width=0;head.height=0;
    const physicalCountMatches=detected.length===lines.length;
-   return {
-    numero_filas_geometricas:detected.length,lineas_validas:physicalCountMatches,
-    lineas:physicalCountMatches?lines.map(x=>({
+   // The first model is a candidate, NOT the authority for how many physical
+   // rows exist. If it missed/duplicated rows, send blank placeholders:
+   // backend then requires three independent vision reads to accept them.
+   const candidates=physicalCountMatches?lines.map(x=>({
       referencia:String(x.referencia||""),descripcion:String(x.descripcion||""),
       cantidad:x.cantidad===null?null:Number(x.cantidad),unidad:String(x.unidad||""),
-      precio_unitario:x.precio_unitario??null
-    })):[],
+      precio_unitario:null
+    })):detected.map(()=>({
+      referencia:"",descripcion:"",cantidad:null,unidad:"",precio_unitario:null
+    }));
+   return {
+    numero_filas_geometricas:detected.length,lineas_validas:true,
+    lineas:candidates,
     imagenes_zonas:[rowImage],imagen_cabecera:headerImage,
     perfil_formato:profile,permite_sin_referencia:profile==="MADERAS",
     codigo_proyecto:String(doc.codigo_proyecto||""),
     bandas_fisicas:detected.map(([a,b],i)=>({fila:i+1,y_inicio:Math.round(10000*a/h)/10000,y_fin:Math.round(10000*b/h)/10000})),
-    geometria_razon:physicalCountMatches?"Recuento corroborado por imagen":"Recuento IA y recuento físico no coinciden"
+    geometria_razon:physicalCountMatches?"Recuento físico concordante":"Recuento inicial incorrecto: requiere tres lecturas independientes",clasificador_coincide_filas:physicalCountMatches
    };
  }finally{
    if(fullCanvas){fullCanvas.width=0;fullCanvas.height=0}
