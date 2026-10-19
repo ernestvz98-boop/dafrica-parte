@@ -144,7 +144,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
    });
    const verifiedDocs=info.filter(x=>x.verified);
    const verifiedRows=verifiedDocs.reduce((n,x)=>n+x.saved.length,0);
-   overview.innerHTML='<p><b>Lecturas almacenadas:</b> '+esc(rows.length)+' documento(s) en el historial · '+esc(verifiedDocs.length)+' con materiales contrastados y comprobados en la base de datos · '+esc(verifiedRows)+' líneas comprobadas.</p>'+
+   overview.innerHTML='<p><b>Lecturas almacenadas:</b> '+esc(rows.length)+' registros de lectura en el historial (incluye intentos retenidos) · '+esc(verifiedDocs.length)+' con materiales contrastados y comprobados en la base de datos · '+esc(verifiedRows)+' líneas comprobadas.</p>'+
     '<p class="muted">«Contrastado sin imputación» significa que se archivaron las referencias y cantidades, NO que existan precios o una obra asignada. La información puede consultarse sin volver a ejecutar IA.</p>';
    history.innerHTML=rows.length?info.map(({d,materials,displayLines,saved,matched,verified,warnings,errors,withPrice})=>{
      const statusLabel=verified?"Materiales contrastados":d.ia_estado==="CONTRASTADO_SIN_IMPUTACION"?"Auditoría contrastada, comprobar archivo de líneas":d.ia_estado==="RETENIDO_AUTOMATICAMENTE"?"Retenido, sin aceptar materiales":d.ia_estado||"Pendiente";
@@ -246,7 +246,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
        const pdfb64=btoa(binary);
        const doc={pdf_separado_b64:pdfb64,proveedor:d.proveedor_nombre||"",numero:d.numero_documento||"",tipo:"ALBARAN",lineas:Array.isArray(d.ia_datos?.materiales)?d.ia_datos.materiales:[]};
        let geo=null,rows=null,images=null,geoProject="",headerImage=null,profile="",allowNoRef=false;
-       if(doc.lineas.length>=1&&doc.lineas.length<=5){
+       if(doc.lineas.length<=5){
         let parsed=null;
         try{parsed=String(doc.proveedor).toUpperCase().includes("SALTOKI")?(doc.lineas.length===1?await pcLeerSaltokiFilaUnica(doc):await pcLeerSaltokiFilas(doc)):await pcLeerTablaMixta(doc)}catch(e){console.warn("Lectura física no concluyente",String(e).slice(0,110))}
         if(parsed){
@@ -294,7 +294,7 @@ renderComprasLotePilot = function renderComprasAutonomasV2(){
      if(!d.pdf_separado_b64){out[i]={estado:"RETENIDO",numero:d.numero,incidencias:["Documento sin PDF separable"]};continue}
      status.textContent="Procesando "+(i+1)+"/"+split.documentos.length+" · "+String(d.numero||"sin número");
      let geo=null,geometryWarning="",geometryRows=null,geometryImages=null,geometryProject="",headerImage=null,profile="",allowNoRef=false;
-     if((d.lineas||[]).length>=1&&(d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
+     if((d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
       try{
        const parsed=String(d.proveedor||"").toUpperCase().includes("SALTOKI")?(d.lineas.length===1?await pcLeerSaltokiFilaUnica(d):await pcLeerSaltokiFilas(d)):await pcLeerTablaMixta(d);
        if(parsed.lineas_validas===true&&Number.isInteger(parsed.numero_filas_geometricas)&&parsed.lineas?.length===parsed.numero_filas_geometricas&&Array.isArray(parsed.imagenes_zonas)){
