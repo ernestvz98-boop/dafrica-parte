@@ -454,6 +454,11 @@ Deno.serve(async(req:Request)=>{
    let materials=previewLines(readViews,maxRows,hasGeometry);
    if(hasGeometry&&["MADERAS","RODAVI"].includes(String(input?.perfil_formato||"").toUpperCase()))
      materials=mergeLiteralRows(materials,literals,n);
+   // These three provider templates DO NOT print a physical unit column.
+   // Drop model-invented units, but retain alternative raw reads for diagnostics.
+   const supplierName=norm(input?.proveedor_esperado||whole[0]?.proveedor||"");
+   if(["RODAVI","MADERAS"].includes(String(input?.perfil_formato||"").toUpperCase())||supplierName.includes("SALTOKI"))
+     materials=materials.map((row:any)=>({...row,unidad:""}));
    const disagreement=materials.filter(x=>!["COINCIDE","COINCIDENCIA_PRINCIPAL"].includes(x.estado_lectura)).length;
    const numberExpected=String(input?.numero_esperado||"");
    if(numberExpected&&header.numero&&canon(numberExpected)!==canon(header.numero))
