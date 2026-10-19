@@ -269,7 +269,15 @@ function mergeLiteralRows(lines:any[],fromLiteral:any[],n:number){
     if(!one||!two||!equal)diff.push(key);
   }
   if(!one||!two||one.cantidad===null||two.cantidad===null)diff.push("cantidad_impresa");
-  const okay=!!one&&!!two&&one.cantidad!==null&&
+  const amountConsistent=(r:any)=>{
+    if(!r||r.cantidad===null||r.precio_unitario===null||r.importe===null)return true;
+    const discount=r.descuento??0;
+    if(discount<0||discount>100)return false;
+    const expected=r.cantidad*r.precio_unitario*(1-discount/100);
+    return Math.abs(expected-r.importe)<=Math.max(0.025,Math.abs(expected)*0.0005);
+  };
+  if(!amountConsistent(one)||!amountConsistent(two))diff.push("cuadre_cantidad_precio_importe");
+  const okay=!!one&&!!two&&amountConsistent(one)&&amountConsistent(two)&&one.cantidad!==null&&
     one.cantidad===two.cantidad&&benignText(one.descripcion)&&
     benignText(one.descripcion)===benignText(two.descripcion)&&
     benignText(one.referencia)===benignText(two.referencia);
