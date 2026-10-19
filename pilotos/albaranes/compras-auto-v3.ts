@@ -481,7 +481,7 @@ Deno.serve(async(req:Request)=>{
    const upload=await fetch(base+"/storage/v1/object/costes-auto/"+path,{method:"POST",headers:{apikey:srv,authorization:jwt,"Content-Type":"application/pdf","x-upsert":"false"},body:bin,signal:AbortSignal.timeout(20000)});
    if(!upload.ok)throw Error("Archivo privado no guardado: "+upload.status);
   }
-  const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:dateForRecord,estado:"PENDIENTE",ia_estado:verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina",fuente_sha256:sha,cabecera_impresa_verificada:cabeceraConfirmada?{numero:first.numero,proveedor:first.proveedor,fecha:first.fecha}:null,pry_ocr_candidato:candidate,pry_ocr_candidatos:allowed==="ALBARAN"?candidateList:[],pry_estado:allowed==="ALBARAN"?"CANDIDATO_SIN_CONFIRMAR":null,albaranes_referenciados:invoiceRefs,titulo_documento:String(first.numero||""),estado_precios:allowed==="ALBARAN"?"PENDIENTE_FACTURA":"FUENTE_FACTURA"}};
+  const record={origen:"UPLOAD",tipo:allowed,numero_documento:first.numero||null,proveedor_nombre:first.proveedor||null,fecha_documento:dateForRecord,estado:"PENDIENTE",ia_estado:verified?"LINEAS_PENDIENTES":"RETENIDO_AUTOMATICAMENTE",hash_archivo:sha,archivo_nombre:String(input?.name||"documento.pdf").slice(0,150),archivo_path:path,created_by:user.id,ia_datos:{version:"compras-auto-v3",verificado:verified,proyecto_candidato:result.project,materiales:result.items,errores:result.errors,avisos:result.notices,geom_count:geo,primera_filas:geo??first.lineas.length,segunda_filas:second.lineas.length,filas_pendientes:result.review_rows||[],recuento_fuente:geo?"geometria":"doble_pagina",fuente_sha256:sha,cabecera_impresa_verificada:cabeceraConfirmada?{numero:first.numero,proveedor:first.proveedor,fecha:first.fecha}:null,pry_ocr_candidato:candidate,pry_ocr_candidatos:allowed==="ALBARAN"?candidateList:[],pry_estado:allowed==="ALBARAN"?"CANDIDATO_SIN_CONFIRMAR":null,albaranes_referenciados:invoiceRefs,titulo_documento:String(first.numero||""),estado_precios:allowed==="ALBARAN"?"PENDIENTE_FACTURA":"FUENTE_FACTURA"}};
   etapa="registrar_documento";
   const repaired=old&&verified?{
     ...(recipientCorrection?{proveedor_nombre:record.proveedor_nombre}:{}),
@@ -498,21 +498,52 @@ Deno.serve(async(req:Request)=>{
   const saved=await fetch(base+"/rest/v1/coste_documentos"+(old?"?id=eq."+old.id+"&select=id,ia_estado":"?select=id,ia_estado"),{method:old?"PATCH":"POST",headers:{...dbHead,Prefer:"return=representation"},body:JSON.stringify(changed),signal:AbortSignal.timeout(15000)});
   if(!saved.ok){const info=await saved.json().catch(()=>({}));throw Error("Fallo al guardar documento HTTP "+saved.status+" código "+String(info.code||"desconocido")+" - "+String(info.message||"sin detalles").slice(0,120))}
   const entries=await saved.json(),docId=entries?.[0]?.id||old?.id||null;
-  let archiveStatus=verified?"CONTRASTADO_SIN_IMPUTACION":"RETENIDO_AUTOMATICAMENTE",savedRows=0;
+  // Two-phase commit. Never claim a document is verified before every
+  // independently accepted line is persisted and read back.
+  let archiveStatus=verified?"LINEAS_PENDIENTES":"RETENIDO_AUTOMATICAMENTE",savedRows=0;
   if(verified&&docId){
-    etapa="archivar_lineas_materiales";
-    const existing=await fetch(base+"/rest/v1/coste_lineas?documento_id=eq."+docId+"&select=id&limit=1",{headers:dbHead,signal:AbortSignal.timeout(10000)});
-    if(!existing.ok)throw Error("No se pudieron consultar líneas previas");
-    const prevRows=await existing.json();
-    if(!prevRows.length){
-      const newRows=result.items.map((v:any)=>({documento_id:docId,codigo_articulo:v.referencia,descripcion:v.descripcion,cantidad:v.cantidad,unidad:v.unidad||null,precio_unitario:v.precio_unitario,obra_id:null}));
-      const created=await fetch(base+"/rest/v1/coste_lineas",{method:"POST",headers:{...dbHead,Prefer:"return=minimal"},body:JSON.stringify(newRows),signal:AbortSignal.timeout(20000)});
-      if(created.ok)savedRows=newRows.length;
-      else archiveStatus="LINEAS_PENDIENTES";
-    }else savedRows=result.items.length;
-    if(archiveStatus!==record.ia_estado){
-      await fetch(base+"/rest/v1/coste_documentos?id=eq."+docId,{method:"PATCH",headers:{...dbHead,Prefer:"return=minimal"},body:JSON.stringify({ia_estado:archiveStatus}),signal:AbortSignal.timeout(10000)});
+    etapa="archivar_y_comprobar_lineas_materiales";
+    const rowsURL=base+"/rest/v1/coste_lineas?documento_id=eq."+docId+
+      "&select=codigo_articulo,descripcion,cantidad,unidad&limit=1000";
+    const list=await fetch(rowsURL,{headers:dbHead,signal:AbortSignal.timeout(10000)});
+    if(!list.ok)throw Error("No se pudieron comprobar las líneas guardadas");
+    let existing=await list.json();
+    // Compare the complete multiset; checking a single existing row or a
+    // total count would falsely approve partially saved or inconsistent data.
+    const fingerprint=(rows:any[])=>{
+      const counts=new Map<string,number>();
+      for(const x of rows){const k=normalizedRow(x);counts.set(k,(counts.get(k)||0)+1);}
+      return JSON.stringify([...counts].sort((a,b)=>a[0].localeCompare(b[0])));
+    };
+    if(!existing.length){
+      const newRows=result.items.map((v:any)=>({
+        documento_id:docId,codigo_articulo:v.referencia,descripcion:v.descripcion,
+        cantidad:v.cantidad,unidad:v.unidad||null,precio_unitario:null,obra_id:null
+      }));
+      const created=await fetch(base+"/rest/v1/coste_lineas",{
+        method:"POST",headers:{...dbHead,Prefer:"return=minimal"},
+        body:JSON.stringify(newRows),signal:AbortSignal.timeout(20000)
+      });
+      if(!created.ok){
+        result.errors.push("No se pudieron guardar las líneas completas en Supabase");
+      }else{
+        const reread=await fetch(rowsURL,{headers:dbHead,signal:AbortSignal.timeout(10000)});
+        if(!reread.ok)throw Error("No se pudieron comprobar las líneas recién guardadas");
+        existing=await reread.json();
+      }
     }
+    savedRows=existing.length;
+    const identical=existing.length===result.items.length&&
+      fingerprint(existing)===fingerprint(result.items);
+    archiveStatus=identical?"CONTRASTADO_SIN_IMPUTACION":"LINEAS_PENDIENTES";
+    if(!identical)result.errors.push("Las líneas archivadas no coinciden totalmente con la lectura validada");
+    etapa="confirmar_estado_materiales";
+    const update=await fetch(base+"/rest/v1/coste_documentos?id=eq."+docId,{
+      method:"PATCH",headers:{...dbHead,Prefer:"return=minimal"},
+      body:JSON.stringify({ia_estado:archiveStatus}),
+      signal:AbortSignal.timeout(10000)
+    });
+    if(!update.ok)throw Error("No se pudo confirmar el estado del albarán tras comprobar las líneas");
   }
   return reply({estado:archiveStatus,documento_id:docId,numero:first.numero,tipo:allowed,proveedor:first.proveedor,lineas_detectadas:result.items.length,lineas_archivadas:savedRows,proyecto_candidato:result.project,incidencias:result.errors,avisos:result.notices,filas_por_geometria:geo,filas_pendientes:result.review_rows||[],escritura_stel:false,importes_contabilizados:false});
  }catch(e){
