@@ -348,20 +348,25 @@ Deno.serve(async(req:Request)=>{
   const dateForRecord=goodDate(expectedDate)&&expectedDate!==date&&!cabeceraConfirmada?null:date;
   // The PDF separator may reserialize an identical page with a different SHA-256.
   // Match the business document identity as well, before attempting to insert.
-  if(!old&&allowed!=="OTRO"&&date&&norm(first.numero)&&norm(first.proveedor)){
+  let previouslyVerified:any=null;
+  if(!old&&allowed!=="OTRO"&&dateForRecord&&norm(first.numero)&&norm(first.proveedor)){
     etapa="buscar_identidad_documental";
     const query=new URL(base+"/rest/v1/coste_documentos");
     query.searchParams.set("select","id,ia_estado,numero_documento,proveedor_nombre,fecha_documento,tipo,hash_archivo,ia_datos");
     query.searchParams.set("tipo","eq."+allowed);
-    query.searchParams.set("fecha_documento","eq."+date);
+    query.searchParams.set("fecha_documento","eq."+dateForRecord);
     query.searchParams.set("numero_documento","eq."+String(first.numero).trim());
     query.searchParams.set("limit","100");
     const lookup=await fetch(query,{headers:dbHead,signal:AbortSignal.timeout(10000)});
     if(!lookup.ok)throw Error("No se pudo comprobar identidad documental HTTP "+lookup.status);
-    const candidates=await lookup.json();
-    old=candidates.find((d:any)=>norm(d.proveedor_nombre)===norm(first.proveedor)&&norm(d.numero_documento)===norm(first.numero))||null;
-    if(old&&!["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(old.ia_estado))
-      return reply({estado:"YA_PROCESADO",documento_id:old.id,numero:old.numero_documento,ia_estado:old.ia_estado,motivo:"Identidad documental ya archivada; se evita crear duplicados",lineas_detectadas:old.ia_datos?.materiales?.length??null,proyecto_candidato:old.ia_datos?.proyecto_candidato??null,escritura_stel:false});
+    const candidates=(await lookup.json()).filter((d:any)=>
+      legal(d.proveedor_nombre)===legal(first.proveedor)&&canon(d.numero_documento)===canon(first.numero));
+    const verifiedCandidates=candidates.filter((d:any)=>d.ia_estado==="CONTRASTADO_SIN_IMPUTACION");
+    if(verifiedCandidates.length>1)return reply({estado:"LECTURA_DIFIERE_DE_ARCHIVO",numero:first.numero,
+      incidencias:["Hay varias fichas contrastadas con idéntico proveedor, número y fecha; no se modifica ninguna"],escritura_stel:false});
+    previouslyVerified=verifiedCandidates[0]||null;
+    if(!previouslyVerified)
+      old=candidates.find((d:any)=>["RETENIDO_AUTOMATICAMENTE","LINEAS_PENDIENTES"].includes(d.ia_estado))||null;
   }
   if(input?.fecha_esperada&&String(input.fecha_esperada)!==String(first.fecha)){
     if(cabeceraConfirmada)
@@ -394,6 +399,37 @@ Deno.serve(async(req:Request)=>{
   if(old&&(oldNumberDiff||(oldSupplierDiff&&!recipientCorrection)||oldDateDiff||missingDateWithoutProof))
     result.errors.push("La identidad de la ficha retenida no pudo verificarse: no se sustituye el original");
   const verified=result.validated&&result.errors.length===0&&allowed!=="OTRO"&&!!date&&!!norm(first.numero);
+  if(previouslyVerified){
+    // A matching business key alone does not prove this scan has the same
+    // physical materials. Never overwrite the archived, verified document.
+    const originalRows=await fetch(base+"/rest/v1/coste_lineas?documento_id=eq."+
+      previouslyVerified.id+"&select=codigo_articulo,descripcion,cantidad&limit=100",{
+      headers:dbHead,signal:AbortSignal.timeout(10000)});
+    if(!originalRows.ok)throw Error("No se pudieron consultar las líneas originales antes de deduplicar");
+    const stored=await originalRows.json();
+    const sorted=(items:any[])=>{
+      const result=new Map<string,number>();
+      for(const x of items){const key=normalizedRow(x);result.set(key,(result.get(key)||0)+1);}
+      return JSON.stringify([...result].sort((a,b)=>a[0].localeCompare(b[0])));
+    };
+    const storedInPdf=Array.isArray(previouslyVerified.ia_datos?.materiales)?
+      previouslyVerified.ia_datos.materiales:[];
+    const persistedConsistent=stored.length>0&&stored.length===storedInPdf.length&&
+      sorted(stored)===sorted(storedInPdf);
+    const same=verified&&persistedConsistent&&stored.length===result.items.length&&
+      sorted(stored)===sorted(result.items);
+    return reply({
+      estado:same?"YA_PROCESADO":"LECTURA_DIFIERE_DE_ARCHIVO",
+      numero:previouslyVerified.numero_documento,documento_id:previouslyVerified.id,
+      ia_estado:previouslyVerified.ia_estado,
+      lineas_detectadas:result.items.length,lineas_archivadas:stored.length,
+      comparacion_valida:same,
+      incidencias:same?[]:[persistedConsistent?
+        "La nueva lectura no confirma todas las referencias y cantidades archivadas":
+        "Las líneas guardadas del archivo original requieren comprobación interna"],
+      escritura_stel:false,importes_contabilizados:false
+    });
+  }
   if(old&&verified){
     // Compare repaired identity against previously VERIFIED business documents.
     // The same scan may have been retained under multiple historical SHA hashes.
