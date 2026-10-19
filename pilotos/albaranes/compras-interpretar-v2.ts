@@ -256,57 +256,70 @@ const cleanUnit=(v:any)=>{
 };
 const benignText=(v:any)=>norm(v).replace(/[^A-Z0-9]/g,"");
 function mergeLiteralRows(lines:any[],fromLiteral:any[],n:number){
- const results:any[]=[];
+ const rows:any[]=[];
+ const equalRef=(a:any,b:any)=>benignText(a)===benignText(b);
+ const amountValid=(r:any)=>{
+  if(!r)return false;
+  if(r.cantidad===null||r.precio_unitario===null||r.importe===null)return null;
+  if(r.descuento!==null&&(r.descuento<0||r.descuento>100))return false;
+  const discount=r.descuento??0;
+  const calculated=r.cantidad*r.precio_unitario*(1-discount/100);
+  // Rounding and supplier-specific 4 decimal line totals
+  return Math.abs(calculated-r.importe)<=Math.max(.025,Math.abs(calculated)*.0005);
+ };
  for(let i=0;i<n;i++){
-  const one=normalizedLiteralLine(fromLiteral[0]?.lineas?.find((x:any)=>Number(x.indice)===i+1),i);
-  const two=normalizedLiteralLine(fromLiteral[1]?.lineas?.find((x:any)=>Number(x.indice)===i+1),i);
-  const old=lines[i]||{};
-  const fieldKeys=["referencia","descripcion","cantidad","precio_unitario","descuento","importe"];
-  const diff:string[]=[];
-  for(const key of fieldKeys){
-    const v1=one?.[key],v2=two?.[key];
-    const equal=key==="descripcion"?benignText(v1)===benignText(v2):
-      key==="referencia"?benignText(v1)===benignText(v2):v1===v2;
-    if(!one||!two||!equal)diff.push(key);
-  }
-  if(!one||!two||one.cantidad===null||two.cantidad===null)diff.push("cantidad_impresa");
-  const amountConsistent=(r:any)=>{
-    if(!r||r.cantidad===null||r.precio_unitario===null||r.importe===null)return true;
-    const discount=r.descuento??0;
-    if(discount<0||discount>100)return false;
-    const expected=r.cantidad*r.precio_unitario*(1-discount/100);
-    return Math.abs(expected-r.importe)<=Math.max(0.025,Math.abs(expected)*0.0005);
-  };
-  if(!amountConsistent(one)||!amountConsistent(two))diff.push("cuadre_cantidad_precio_importe");
-  const okay=!!one&&!!two&&amountConsistent(one)&&amountConsistent(two)&&one.cantidad!==null&&
-    one.cantidad===two.cantidad&&benignText(one.descripcion)&&
-    benignText(one.descripcion)===benignText(two.descripcion)&&
-    benignText(one.referencia)===benignText(two.referencia);
-  const prefer=one||two||null;
-  const clean=prefer&&okay?{
-    ...old,referencia:prefer.referencia,descripcion:prefer.descripcion,
-    cantidad:prefer.cantidad,
-    // Printed unit prices are descriptive only, never booked to costs.
-    precio_unitario:prefer.precio_unitario!==null&&one.precio_unitario===two.precio_unitario?
-      prefer.precio_unitario:null,
-    cantidad_impresa:prefer.cantidad_impresa,precio_impreso:prefer.precio_impreso,
-    descuento_impreso:prefer.descuento_impreso,importe_impreso:prefer.importe_impreso,
-    descuento:one.descuento===two.descuento?prefer.descuento:null,
-    importe:one.importe===two.importe?prefer.importe:null,
-    unidad:prefer.unidad||"", // No unit column on many source layouts; never infer one.
-    estado_lectura:diff.length?"COINCIDENCIA_PRINCIPAL":"COINCIDE",
-    campos_diferentes:diff,
-    comprobacion_literal:true
-  }:{
-    ...old,cantidad:null,precio_unitario:null,unidad:"",estado_lectura:"DIFERENTE",campos_diferentes:[...new Set([...(old.campos_diferentes||[]),...diff])],
-    comprobacion_literal:false
-  };
-  clean.lecturas_literales=[one,two].filter(Boolean);
-  clean.lecturas=old.lecturas||[];
-  clean.inconsistencia_numerica=!okay&&!!one&&!!two;
-  results.push(clean);
+  const a=normalizedLiteralLine(fromLiteral[0]?.lineas?.find((r:any)=>Number(r.indice)===i+1),i);
+  const b=normalizedLiteralLine(fromLiteral[1]?.lineas?.find((r:any)=>Number(r.indice)===i+1),i);
+  const old=lines[i]||{},diff:string[]=[];
+  // Independently confirm EACH FIELD. A description discrepancy must not
+  // suppress a correctly verified quantity or printed reference.
+  const codeOK=!!a&&!!b&&equalRef(a.referencia,b.referencia);
+  const quantityOK=!!a&&!!b&&a.cantidad!==null&&a.cantidad>0&&a.cantidad===b.cantidad;
+  const descriptionOK=!!a&&!!b&&!!benignText(a.descripcion)&&
+     benignText(a.descripcion)===benignText(b.descripcion);
+  const amountA=amountValid(a),amountB=amountValid(b);
+  const arithOK=amountA!==false&&amountB!==false;
+  const priceOK=!!a&&!!b&&a.precio_unitario!==null&&a.precio_unitario===b.precio_unitario&&arithOK;
+  const discountOK=!!a&&!!b&&a.descuento!==null&&a.descuento===b.descuento;
+  const totalOK=!!a&&!!b&&a.importe!==null&&a.importe===b.importe&&arithOK;
+  if(!codeOK)diff.push("referencia");
+  if(!quantityOK)diff.push("cantidad");
+  if(!descriptionOK)diff.push("descripcion");
+  if(!priceOK&&((a?.precio_impreso||"")||(b?.precio_impreso||"")))diff.push("precio_unitario");
+  if(!discountOK&&((a?.descuento_impreso||"")||(b?.descuento_impreso||"")))diff.push("descuento");
+  if(!totalOK&&((a?.importe_impreso||"")||(b?.importe_impreso||"")))diff.push("importe");
+  if(!arithOK)diff.push("cuadre_cantidad_precio_importe");
+  const critical=codeOK&&quantityOK&&descriptionOK;
+  const partial=codeOK&&quantityOK;
+  const status=critical?(diff.length?"COINCIDENCIA_PRINCIPAL":"COINCIDE"):
+    partial?"PARCIAL":"DIFERENTE";
+  const present=a||b;
+  const code=codeOK?(a?.referencia||""):"";
+  const quantity=quantityOK?a.cantidad:null;
+  const price=priceOK?a.precio_unitario:null;
+  const discount=discountOK?a.descuento:null;
+  const amount=totalOK?a.importe:null;
+  rows.push({
+   ...old,fila:i+1,
+   referencia:code,descripcion:descriptionOK?a.descripcion:(a?.descripcion||b?.descripcion||""),
+   cantidad:quantity,cantidad_impresa:quantityOK?a.cantidad_impresa:"",
+   // None of the RODAVI/MADERAS specimen layouts has a physical 'unidad' column.
+   unidad:"",precio_unitario:price,precio_impreso:priceOK?a.precio_impreso:"",
+   descuento:discount,descuento_impreso:discountOK?a.descuento_impreso:"",
+   importe:amount,importe_impreso:totalOK?a.importe_impreso:"",
+   estado_lectura:status,campos_diferentes:diff,
+   comprobacion_literal:critical,
+   campos_comprobados:{
+     referencia:codeOK,cantidad:quantityOK,descripcion:descriptionOK,
+     precio:priceOK,descuento:discountOK,importe:totalOK,
+     cuadre_matematico:arithOK
+   },
+   lecturas_literales:[a,b].filter(Boolean),
+   lecturas:old.lecturas||[],
+   inconsistencia_numerica:!arithOK
+  });
  }
- return results;
+ return rows;
 }
 
 function copyLine(x:any,i:number){
