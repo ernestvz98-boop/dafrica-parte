@@ -2,25 +2,25 @@
 
 - Corpus: **sintético**
 - Versión del extractor: `determinista-p0-1`
-- Documentos evaluados: **12**
-- Documentos aceptados automáticamente (AUTO_OK): **5** · AUTO_OK con algún error: **0**
-- Estado de documento igual al esperado: **12/12**
-- Campos evaluados: **210** · correctos y aceptados: **196** (93.3 %)
+- Documentos evaluados: **14**
+- Documentos aceptados automáticamente (AUTO_OK): **7** · AUTO_OK con algún error: **0**
+- Estado de documento igual al esperado: **14/14**
+- Campos evaluados: **240** · correctos y aceptados: **226** (94.2 %)
 - **Fallos críticos (valor erróneo aceptado como bueno): 0**
 
 ## Precisión por campo
 
 | Campo | Total | Correcto automático | Marcado (esperado) | Correcto a revisar | Sin valor, marcado | Erróneo, marcado | **Erróneo aceptado** | % automático correcto |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| cabecera.proveedor_nif | 12 | 10 | 2 | 0 | 0 | 0 | **0** | 83.3 % |
-| cabecera.numero | 12 | 11 | 1 | 0 | 0 | 0 | **0** | 91.7 % |
-| cabecera.fecha | 12 | 9 | 3 | 0 | 0 | 0 | **0** | 75.0 % |
-| lineas.*.referencia | 29 | 29 | 0 | 0 | 0 | 0 | **0** | 100.0 % |
-| lineas.*.descripcion | 29 | 29 | 0 | 0 | 0 | 0 | **0** | 100.0 % |
-| lineas.*.cantidad | 29 | 25 | 4 | 0 | 0 | 0 | **0** | 86.2 % |
-| lineas.*.precio | 29 | 27 | 2 | 0 | 0 | 0 | **0** | 93.1 % |
-| lineas.*.descuento | 29 | 29 | 0 | 0 | 0 | 0 | **0** | 100.0 % |
-| lineas.*.importe | 29 | 27 | 2 | 0 | 0 | 0 | **0** | 93.1 % |
+| cabecera.proveedor_nif | 14 | 12 | 2 | 0 | 0 | 0 | **0** | 85.7 % |
+| cabecera.numero | 14 | 13 | 1 | 0 | 0 | 0 | **0** | 92.9 % |
+| cabecera.fecha | 14 | 11 | 3 | 0 | 0 | 0 | **0** | 78.6 % |
+| lineas.*.referencia | 33 | 33 | 0 | 0 | 0 | 0 | **0** | 100.0 % |
+| lineas.*.descripcion | 33 | 33 | 0 | 0 | 0 | 0 | **0** | 100.0 % |
+| lineas.*.cantidad | 33 | 29 | 4 | 0 | 0 | 0 | **0** | 87.9 % |
+| lineas.*.precio | 33 | 31 | 2 | 0 | 0 | 0 | **0** | 93.9 % |
+| lineas.*.descuento | 33 | 33 | 0 | 0 | 0 | 0 | **0** | 100.0 % |
+| lineas.*.importe | 33 | 31 | 2 | 0 | 0 | 0 | **0** | 93.9 % |
 
 ## Detalle por documento
 
@@ -161,6 +161,26 @@ Un artículo aparece muy separado del resto sin rótulo de pie: no puede perders
 - Validación fin_de_tabla: FALLO · Posibles artículos después del final detectado de la tabla: «0000000303 ARTÍCULO C 3,00 5,00 15,00»
 - Incidencia: Validación fin_de_tabla: Posibles artículos después del final detectado de la tabla: «0000000303 ARTÍCULO C 3,00 5,00 15,00»
   - LINEA_PERDIDA_BLOQUEADA {"fila_esperada":3,"categoria":"LINEA_PERDIDA_BLOQUEADA"}
+
+### S13-dos-descuentos-columnas-ajenas
+Columnas Dto 1 y Dto 2 (cascada), columnas Lote y % IVA no usadas, unidad impresa junto a la cantidad, etiqueta «Número:»
+
+- Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **AUTO_OK**
+- Proveedor: SUMINISTROS NORTE FICTICIOS, S.L. · NIF B24123457 (OK) · NIF de DAFRICA descartado como emisor: B24000002
+- Número «2026-A-0099» (OK) · Fecha «08/10/2026» → 2026-10-08 (OK)
+- Líneas: 2
+- Validación tabla: OK · Columnas: referencia, descripcion, otra, cantidad, precio, descuento, descuento, otra, importe
+- Validación lineas: OK · 2 líneas de artículo
+
+### S14-erp-texto-monoespaciado
+El ERP escribe la cabecera y cada fila como un único texto con espacios (fuente Courier): las columnas se reparten por posición
+
+- Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **AUTO_OK**
+- Proveedor: SUMINISTROS NORTE FICTICIOS, S.L. · NIF B24123457 (OK) · NIF de DAFRICA descartado como emisor: B24000002
+- Número «7700123» (OK) · Fecha «07/10/2026» → 2026-10-07 (OK)
+- Líneas: 2
+- Validación tabla: OK · Columnas: referencia, descripcion, cantidad, precio, importe
+- Validación lineas: OK · 2 líneas de artículo
 
 ### S08-escaneado
 Página que solo contiene una imagen (escaneo): no debe extraerse ningún dato

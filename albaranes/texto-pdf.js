@@ -50,6 +50,7 @@ function celdasDeLinea(fragmentos){
   const umbral=0.55*Math.min(f.alto,ultima?ultima.alto:f.alto);
   if(ultima&&hueco<umbral){
    ultima.texto+=(hueco>0.12*f.alto?" ":"")+f.texto;
+   ultima.crudo=null; // tras unir fragmentos ya no hay posición por carácter
    ultima.x1=Math.max(ultima.x1,f.x1);
    ultima.alto=Math.max(ultima.alto,f.alto);
   }else celdas.push({...f});
@@ -85,7 +86,8 @@ async function leerPagina(pdfjs,page,numero){
   const escala=Math.hypot(t[0],t[1])/(Math.hypot(item.transform[0],item.transform[1])||1);
   if(Math.abs(t[1])>0.01*alto||Math.abs(t[2])>0.01*alto){rotado++;continue;}
   const x0=t[4],ancho=(Number(item.width)||0)*escala;
-  fragmentos.push({texto:texto.trim(),x0,x1:x0+ancho,y:t[5],alto});
+  // crudo: texto original con sus espacios, que ocupa exactamente [x0,x1].
+  fragmentos.push({texto:texto.trim(),crudo:String(item.str),x0,x1:x0+ancho,y:t[5],alto});
  }
  const caracteres=fragmentos.reduce((n,f)=>n+f.texto.replace(/\s/g,"").length,0);
  const imagen=await fraccionImagen(pdfjs,page,vista.width,vista.height);

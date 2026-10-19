@@ -344,6 +344,51 @@ const DOCUMENTOS=[
    perdidas_permitidas:[3],marcados:[]}
  },
  {
+  id:"S13-dos-descuentos-columnas-ajenas",
+  descripcion:"Columnas Dto 1 y Dto 2 (cascada), columnas Lote y % IVA no usadas, unidad impresa junto a la cantidad, etiqueta «Número:»",
+  async construir(){
+   const ctx=await nuevo(),pg=pagina(ctx);
+   cabeceraProveedor(pg,"SUMINISTROS NORTE FICTICIOS, S.L.",NIF.A);recuadroCliente(pg);
+   pg.t("ALBARÁN",40,110,{negrita:true,size:12});
+   pg.t("Número:",40,128,{negrita:true});pg.t("2026-A-0099",85,128);pg.t("Fecha: 08/10/2026",250,128);
+   tabla(pg,[{titulo:"CÓDIGO",x:40},{titulo:"DESCRIPCIÓN",x:95},{titulo:"LOTE",x:255},{titulo:"CANTIDAD",x:340,derecha:true},
+    {titulo:"PRECIO",x:390,derecha:true},{titulo:"DTO 1",x:425,derecha:true},{titulo:"DTO 2",x:460,derecha:true},
+    {titulo:"% IVA",x:495,derecha:true},{titulo:"IMPORTE",x:555,derecha:true}],[
+    ["AB-100","BLOQUE HORMIGÓN 40X20X20","L2610","8,00 UD","1,2000","10","5","21","8,21"],
+    ["AB-200","MORTERO M-7,5 SACO 25KG","","20,00 SAC","3,1000","10","","21","55,80"]
+   ],170);
+   return ctx.pdf.save();
+  },
+  esperado:{estado_documento:"AUTO_OK",tipo_pdf:"DIGITAL",proveedor_nif:NIF.A,numero:"2026-A-0099",fecha:"2026-10-08",
+   lineas:[
+    {referencia:"AB-100",descripcion:"BLOQUE HORMIGÓN 40X20X20",cantidad:8,precio:1.2,descuento:[10,5],importe:8.21},
+    {referencia:"AB-200",descripcion:"MORTERO M-7,5 SACO 25KG",cantidad:20,precio:3.1,descuento:[10],importe:55.8}
+   ],marcados:[]}
+ },
+ {
+  id:"S14-erp-texto-monoespaciado",
+  descripcion:"El ERP escribe la cabecera y cada fila como un único texto con espacios (fuente Courier): las columnas se reparten por posición",
+  async construir(){
+   const pdf=await PDFDocument.create();
+   const mono=await pdf.embedFont(StandardFonts.Courier),p=pdf.addPage([595,842]);
+   const t=(s,x,y,size=9)=>p.drawText(s,{x,y:842-y,size,font:mono});
+   // [texto, columna de inicio (izq) o de fin (der), alineación]
+   const fila=celdas=>{const c=new Array(70).fill(" ");for(const [s,pos,al] of celdas){const ini=al==="R"?pos-s.length:pos;for(let i=0;i<s.length;i++)c[ini+i]=s[i];}return c.join("").replace(/\s+$/,"");};
+   t("SUMINISTROS NORTE FICTICIOS, S.L.",40,50,11);t("CIF: "+NIF.A,40,64);
+   t("CLIENTE",330,50);t("DAFRICA BIERZO, S.L.",330,64);t("NIF: "+NIF.PROPIO,330,76);
+   t("ALBARAN N. 7700123",40,120);t("FECHA 07/10/2026",330,120);
+   t(fila([["CODIGO",0,"L"],["DESCRIPCION",10,"L"],["CANT.",46,"R"],["PRECIO",56,"R"],["IMPORTE",68,"R"]]),40,160);
+   t(fila([["X-1",0,"L"],["CINTA AISLANTE 19MM",10,"L"],["10",46,"R"],["0,8500",56,"R"],["8,50",68,"R"]]),40,176);
+   t(fila([["X-22",0,"L"],["BRIDA NYLON 200X4,8 (BOLSA 100)",10,"L"],["3",46,"R"],["4,1000",56,"R"],["12,30",68,"R"]]),40,192);
+   return pdf.save();
+  },
+  esperado:{estado_documento:"AUTO_OK",tipo_pdf:"DIGITAL",proveedor_nif:NIF.A,numero:"7700123",fecha:"2026-10-07",
+   lineas:[
+    {referencia:"X-1",descripcion:"CINTA AISLANTE 19MM",cantidad:10,precio:0.85,descuento:null,importe:8.5},
+    {referencia:"X-22",descripcion:"BRIDA NYLON 200X4,8 (BOLSA 100)",cantidad:3,precio:4.1,descuento:null,importe:12.3}
+   ],marcados:[]}
+ },
+ {
   id:"S08-escaneado",
   descripcion:"Página que solo contiene una imagen (escaneo): no debe extraerse ningún dato",
   async construir(){

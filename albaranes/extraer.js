@@ -40,7 +40,7 @@ const COLUMNAS=[
  ["unidad",/^(UD|U M|UM|UNIDAD|MEDIDA)$/],
  ["precio",/^(PRECIO|PRECIO UNIDAD|PRECIO UNITARIO|PRECIO UNIT|P UNIT|P UNITARIO|PVP|PRECIO UD|PRECIO NETO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000)$/],
  ["subtotal",/^(SUBTOTAL|BRUTO|IMPORTE BRUTO)$/],
- ["descuento",/^(DTO|DTOS|DESC|DESCUENTO|DTO %|% DTO|%DTO|DTO%|% DESC|DESC %)$/],
+ ["descuento",/^(DTO|DTOS|DESC|DESCUENTO|DTO %|% DTO|%DTO|DTO%|% DESC|DESC %|DTO ?[123]|DESC ?[123]|% ?DTO ?[123]|DTO ?[123] ?%)$/],
  ["importe",/^(IMPORTE|IMPORTE NETO|TOTAL|NETO|TOTAL LINEA|IMPORTE TOTAL|IMPORTE EUR)$/]
 ];
 function campoDe(texto){
@@ -48,32 +48,50 @@ function campoDe(texto){
  for(const [campo,re] of COLUMNAS)if(re.test(k))return {campo,clave:k};
  return null;
 }
-/* Una celda de cabecera puede contener varios títulos («CANTIDAD PRECIO DTO»). */
+/*
+ * Palabras de una celda con su posición estimada. Con el texto original
+ * (espacios incluidos) la estimación es exacta en fuentes monoespaciadas;
+ * en las proporcionales es aproximada y se trata como tal.
+ */
+function palabrasConPosicion(celda){
+ const base=celda.crudo&&celda.crudo.trim()?celda.crudo:celda.texto,total=base.length||1,ancho=celda.x1-celda.x0;
+ return [...base.matchAll(/\S+/g)].map(m=>({texto:m[0],x0:celda.x0+ancho*m.index/total,x1:celda.x0+ancho*(m.index+m[0].length)/total,alto:celda.alto}));
+}
+/* Una celda de cabecera puede contener varios títulos («CANTIDAD PRECIO DTO»).
+   Los títulos desconocidos (Lote, % IVA…) se conservan como columnas «otra». */
 function camposDeCelda(celda){
  const directo=campoDe(celda.texto);
  if(directo)return [{...directo,x0:celda.x0,x1:celda.x1}];
- const palabras=clave(celda.texto).split(" ");
- const total=clave(celda.texto).length||1,ancho=celda.x1-celda.x0,salida=[];
- let i=0,pos=0;
+ const palabras=palabrasConPosicion(celda),salida=[];
+ let i=0;
  while(i<palabras.length){
   let hallado=null;
   for(let j=palabras.length;j>i;j--){
-   const r=campoDe(palabras.slice(i,j).join(" "));
+   const r=campoDe(palabras.slice(i,j).map(p=>p.texto).join(" "));
    if(r){hallado={...r,fin:j};break;}
   }
-  if(!hallado)return null;
-  const largo=palabras.slice(i,hallado.fin).join(" ").length;
-  salida.push({campo:hallado.campo,clave:hallado.clave,x0:celda.x0+ancho*pos/total,x1:celda.x0+ancho*(pos+largo)/total});
-  pos+=largo+1;i=hallado.fin;
+  if(hallado){
+   salida.push({campo:hallado.campo,clave:hallado.clave,x0:palabras[i].x0,x1:palabras[hallado.fin-1].x1});
+   i=hallado.fin;
+  }else{
+   const previa=salida[salida.length-1];
+   if(previa&&previa.campo==="otra"){previa.x1=palabras[i].x1;previa.clave+=" "+clave(palabras[i].texto);}
+   else salida.push({campo:"otra",clave:clave(palabras[i].texto),x0:palabras[i].x0,x1:palabras[i].x1});
+   i++;
+  }
  }
  return salida;
 }
 function evaluarCabecera(celdas){
- const columnas=[];let ajenas=0;
- for(const c of celdas){
+ // Una celda que mezcla títulos con palabras ajenas («ARTÍCULO SIN CANTIDAD»)
+ // es texto, no cabecera; salvo que sea toda la línea (cabecera en un solo texto).
+ const todas=celdas.flatMap(c=>{
   const r=camposDeCelda(c);
-  if(r)columnas.push(...r);else ajenas++;
- }
+  const mezcla=r.some(x=>x.campo==="otra")&&r.some(x=>x.campo!=="otra");
+  return mezcla&&celdas.length>1?[{campo:"otra",clave:clave(c.texto),x0:c.x0,x1:c.x1}]:r;
+ });
+ const ajenas=todas.filter(c=>c.campo==="otra").length;
+ const columnas=todas;
  const campos=new Set(columnas.map(c=>c.campo));
  if(campos.has("referencia")&&!campos.has("descripcion")){
   // «ARTÍCULO» sin columna de descripción es la descripción.
@@ -81,8 +99,8 @@ function evaluarCabecera(celdas){
   if(art&&columnas.filter(c=>c.campo==="referencia").length>1){art.campo="descripcion";}
   else if(art&&!columnas.some(c=>c.campo==="referencia"&&c!==art)){art.campo="descripcion";}
  }
- const finales=new Set(columnas.map(c=>c.campo));
- const valida=finales.has("cantidad")&&(finales.has("descripcion")||finales.has("referencia"))&&finales.size>=3&&ajenas<=1;
+ const finales=new Set(columnas.map(c=>c.campo).filter(c=>c!=="otra"));
+ const valida=finales.has("cantidad")&&(finales.has("descripcion")||finales.has("referencia"))&&finales.size>=3&&ajenas<=3;
  return {valida,columnas:columnas.sort((a,b)=>a.x0-b.x0),ajenas};
 }
 function buscarCabeceraTabla(lineas,desde=0){
@@ -113,12 +131,15 @@ function intervalos(columnas){
  return orden.map((c,i)=>{
   const ini=i===0?-Infinity:(orden[i-1].x1+c.x0)/2;
   const fin=i===orden.length-1?Infinity:(c.x1+orden[i+1].x0)/2;
-  // Columnas repetidas: la primera conserva el nombre; las demás se ignoran.
-  const repetida=usados.has(c.campo);usados.set(c.campo,true);
-  return {campo:repetida?"otra":c.campo,clave:c.clave,ini,fin};
+  // Columnas repetidas: una segunda de descuento se suma en cascada; las demás se ignoran.
+  const veces=usados.get(c.campo)||0;usados.set(c.campo,veces+1);
+  const campo=!veces||c.campo==="otra"?c.campo:c.campo==="descuento"&&veces===1?"descuento2":"otra";
+  return {campo,clave:c.clave,ini,fin};
  });
 }
-const pareceNumero=t=>/^[-−+(]?\s*[\d.,]+\s*(\+\s*[\d.,]+\s*)*[)%−-]?\s*%?$/.test(String(t).trim());
+// «(4,00)» es un número negativo; «100)» suelto es texto (p. ej. «(BOLSA 100)»).
+const RE_CANTIDAD_UNIDAD=/^([-−]?[\d.,]+)\s*([A-Za-zÁÉÍÓÚáéíóú]{1,4}[23]?\.?)$/;
+const pareceNumero=t=>/^(\(\s*[\d.,]+\s*\)|[-−+]?\s*[\d.,]+\s*(\+\s*[\d.,]+\s*)*[−-]?\s*%?)$/.test(String(t).trim());
 function columnaDe(celda,cols){
  const x=pareceNumero(celda.texto)?(celda.x0+celda.x1)/2:celda.x0+0.01;
  return cols.find(c=>x>=c.ini&&x<c.fin)||null;
@@ -130,7 +151,7 @@ const EXCLUIR_NUMERO=/CLIENTE|PEDIDO|PROVEEDOR|TELEF|FAX|PAGINA|OBRA|CIF|NIF|FAC
 const RE_FECHA=/^(FECHA(\s(ALBARAN|DOCUMENTO|EMISION|DE\sEMISION|EXPEDICION|DEL\sALBARAN))?|F\sEMISION)(\b|$)/;
 const EXCLUIR_FECHA=/ENTREGA|VENCIMIENTO|PEDIDO|NACIMIENTO|CADUCIDAD|PREVISTA|SERVICIO|PAGO/;
 // Quita separadores y restos de etiqueta («º 77812», «Nº: 123», «nº. 45»).
-const limpiarValor=v=>String(v||"").replace(/^[\s:#\-–.º°]+/,"").replace(/^N[ºo°O]\.?(?=[\s:.]|$)/i,"").replace(/^[\s:#\-–.º°]+/,"").trim();
+const limpiarValor=v=>String(v||"").replace(/^[\s:#\-–.º°]+/,"").replace(/^N[ºo°O]?\.?(?=[\s:.]|$)/i,"").replace(/^[\s:#\-–.º°]+/,"").trim();
 
 function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar){
  const hallados=[];
@@ -141,7 +162,8 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar){
   const candidatos=[];
   const resto=limpiarValor(celda.texto.slice(Math.min(celda.texto.length,m[0].length)));
   if(resto)candidatos.push({texto:resto,celda});
-  const derecha=linea.celdas.slice(ci+1).find(c=>c.x0>=celda.x1-1);
+  // A la derecha, saltando restos de la etiqueta («N.», «Nº», «:»).
+  const derecha=linea.celdas.slice(ci+1).filter(c=>c.x0>=celda.x1-1).find(c=>limpiarValor(c.texto));
   if(derecha)candidatos.push({texto:limpiarValor(derecha.texto),celda:derecha});
   for(const abajo of lineas.slice(li+1,li+3)){
    if(abajo.y-linea.y>2.6*linea.alto)break;
@@ -154,10 +176,17 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar){
  return hallados;
 }
 
+// Etiqueta genérica («Nº:», «Número:») solo si no hay ninguna que diga «albarán».
+const RE_NUMERO_GENERICO=/^(N[ºO°]|NUM|NUMERO)(\b|$)/;
+const EXCLUIR_GENERICO=/CLIENTE|PEDIDO|PROVEEDOR|TELEF|TLF|FAX|PAGINA|PAG|OBRA|CIF|NIF|FACTURA|PRESUPUESTO|CUENTA|IBAN|SERIE|LOTE|BULTOS|MATRICULA|REGISTRO|TOMO|FOLIO|HOJA|INSCRIPCION/;
 function leerNumero(lineas){
- const r={literal:"",valor:null,estado:"VACIO",motivos:[],caja:null};
- const hallados=valoresEtiquetados(lineas,RE_NUMERO,EXCLUIR_NUMERO,
-  t=>/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i.test(t)&&/\d/.test(t)&&N().fecha(t).estado!=="OK");
+ const r={literal:"",valor:null,estado:"VACIO",motivos:[],notas:[],caja:null};
+ const aceptar=t=>/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i.test(t)&&/\d/.test(t)&&N().fecha(t).estado!=="OK";
+ let hallados=valoresEtiquetados(lineas,RE_NUMERO,EXCLUIR_NUMERO,aceptar);
+ if(!hallados.length){
+  hallados=valoresEtiquetados(lineas,RE_NUMERO_GENERICO,EXCLUIR_GENERICO,aceptar);
+  if(hallados.length)r.notas.push("Número tomado de una etiqueta genérica («Nº»/«Número»)");
+ }
  const distintos=[...new Map(hallados.map(h=>[N().canon(h.texto),h])).values()];
  if(!distintos.length){r.motivos.push("No se encontró el número de albarán junto a su etiqueta");return r;}
  if(distintos.length>1){
@@ -266,17 +295,39 @@ function leerTablaPagina(pagina){
  if(!cab)return null;
  const cols=intervalos(cab.columnas);
  const filas=[],ignoradas=[],pie=[],dudosasTrasFin=[];
+ const NUMERICAS=new Set(["cantidad","precio","descuento","descuento2","subtotal","importe"]);
+ // Una celda que cruza columnas (ERP que escribe la fila como un solo texto)
+ // se reparte por la posición estimada de cada palabra. Un texto no numérico
+ // nunca se coloca en una columna numérica.
+ const partir=c=>{
+  if(!/\s/.test(c.texto))return [c];
+  const grupos=[];
+  for(const p of palabrasConPosicion(c)){
+   let campo=columnaDe(p,cols)?.campo||"otra";
+   const ultimo=grupos[grupos.length-1];
+   if(NUMERICAS.has(campo)&&!pareceNumero(p.texto)&&ultimo)campo=ultimo.campo;
+   if(ultimo&&ultimo.campo===campo){ultimo.texto+=" "+p.texto;ultimo.x1=p.x1;}
+   else grupos.push({campo,texto:p.texto,x0:p.x0,x1:p.x1,alto:c.alto,y:c.y});
+  }
+  if(grupos.length<2)return [c];
+  return grupos.map(g=>({texto:g.texto,x0:g.x0,x1:g.x1,alto:g.alto,y:g.y,partida:true,campoPartida:g.campo}));
+ };
  const asignar=linea=>{
-  const celdas={},conflictos=[];
-  for(const c of linea.celdas){
-   const col=columnaDe(c,cols);
-   const campo=col?col.campo:"otra";
+  const celdas={},conflictos=[];let partida=false;
+  let ultimoTexto=null;
+  for(const c of linea.celdas.flatMap(partir)){
+   if(c.partida)partida=true;
+   let campo=c.campoPartida||columnaDe(c,cols)?.campo||"otra";
+   // Un texto no numérico no pertenece a una columna numérica: es la
+   // continuación de la columna de texto anterior («… (BOLSA 100)»).
+   if(NUMERICAS.has(campo)&&!pareceNumero(c.texto)&&!RE_CANTIDAD_UNIDAD.test(c.texto.trim())&&ultimoTexto)campo=ultimoTexto;
+   if(!NUMERICAS.has(campo))ultimoTexto=campo;
    if(celdas[campo]){
     if(["referencia","descripcion","unidad","otra"].includes(campo)){celdas[campo].texto+=" "+c.texto;celdas[campo].x1=c.x1;}
     else conflictos.push(campo);
    }else celdas[campo]={...c};
   }
-  return {celdas,conflictos};
+  return {celdas,conflictos,partida};
  };
  const altoFila=pagina.lineas[cab.indice].alto;
  let actual=null,fin=false,yAnterior=pagina.lineas[cab.hasta].y;
@@ -299,14 +350,17 @@ function leerTablaPagina(pagina){
    }
    continue;
   }
-  if(evaluarCabecera(linea.celdas).valida){yAnterior=linea.y;continue;} // cabecera repetida
-  const {celdas,conflictos}=asignar(linea);
+  if(evaluarCabecera(linea.celdas).valida){ // cabecera repetida: se registra, nunca se pierde en silencio
+   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Cabecera de tabla repetida"});
+   yAnterior=linea.y;continue;
+  }
+  const {celdas,conflictos,partida}=asignar(linea);
   const tieneCantidad=!!celdas.cantidad,tieneRef=!!celdas.referencia;
   const tieneImportes=!!(celdas.precio||celdas.importe);
   // Toda línea con referencia, cantidad o importe es una fila: si falta un dato
   // queda en REVISAR, nunca se descarta en silencio.
   if(tieneCantidad||tieneRef||tieneImportes){
-   actual={pagina:pagina.numero,celdas,conflictos,continuaciones:[],y:linea.y};
+   actual={pagina:pagina.numero,celdas,conflictos,partida,continuaciones:[],y:linea.y};
    filas.push(actual);
   }else{
    const soloTexto=Object.keys(celdas).every(k=>["descripcion","referencia","otra","unidad"].includes(k));
@@ -385,11 +439,22 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   cantidad:campoNumero(c.cantidad,opcionesNumero),
   unidad:campoTexto(c.unidad),
   precio:{...campoNumero(c.precio,opcionesNumero),por:precioPor},
-  descuento:campoDescuento(c.descuento,opcionesNumero),
+  descuento:campoDescuento(c.descuento2?{...c.descuento2,...(c.descuento||{}),
+   texto:[c.descuento?.texto,c.descuento2.texto].map(t=>String(t||"").trim()).filter(Boolean).join("+")}:c.descuento,opcionesNumero),
   subtotal:campoNumero(c.subtotal,opcionesNumero),
   importe:campoNumero(c.importe,opcionesNumero),
   motivos:[],notas:[]
  };
+ // Cantidad con la unidad pegada («8,00 UD», «20 SAC», «3,5 M2»).
+ if(f.cantidad.estado==="INVALIDO"){
+  const m=f.cantidad.literal.match(RE_CANTIDAD_UNIDAD);
+  if(m){
+   const n=N().numero(m[1],opcionesNumero);
+   f.cantidad={...n,literal:f.cantidad.literal,caja:f.cantidad.caja,notas:[...n.notas,"Unidad impresa junto a la cantidad: "+m[2]]};
+   if(f.unidad.estado==="VACIO")f.unidad={...f.unidad,literal:m[2],valor:m[2],estado:"OK"};
+  }
+ }
+ if(c.descuento2)f.notas.push("Dos columnas de descuento aplicadas en cascada");
  if(cruda.continuaciones.length){
   f.descripcion.literal=[f.descripcion.literal,...cruda.continuaciones].filter(Boolean).join(" ");
   f.descripcion.valor=f.descripcion.literal||null;f.descripcion.estado=f.descripcion.literal?"OK":"VACIO";
@@ -411,6 +476,11 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   f.motivos.push("Cuadre incompleto: "+f.cuadre.detalle);
  }
  if(f.referencia.estado==="VACIO"&&!perfil?.permite_sin_referencia)f.motivos.push("Línea sin referencia");
+ if(cruda.partida&&f.cuadre.estado!=="VERIFICADO"){
+  f.motivos.push("Columnas separadas por posición estimada y sin cuadre que lo confirme");
+  for(const k of ["referencia","descripcion","cantidad","unidad","precio","descuento","importe"])
+   if(f[k].estado==="OK")f[k]={...f[k],estado:"REVISAR",motivos:[...(f[k].motivos||[]),"Posición de columna estimada"]};
+ }
  if(f.cantidad.valor===0)f.motivos.push("Cantidad 0 (posible pendiente de servir)");
  if(["AMBIGUO","INVALIDO","VACIO"].includes(f.cantidad.estado))
   f.motivos.push("Cantidad: "+(f.cantidad.motivos[0]||"celda vacía"));
