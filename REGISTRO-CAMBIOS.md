@@ -18,6 +18,9 @@ Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabas
 - Despliegue de funciones Edge: bloqueado por los permisos de la sesión de Claude Code.
   No se desplegó nada; las 17 funciones siguen sin cambios.
 - Storage: lectura de buckets y configuración correcta; no se modificó nada.
+- (Revisión posterior) Red abierta a Supabase y STEL. Desplegada la función de prueba
+  `claude-prueba-permisos` (solo responde `{ok:true}`, exige JWT; no accede a datos):
+  responde HTTP 200. **Pendiente:** borrarla desde el panel (Edge Functions) cuando se desee.
 
 ## 2026-10-19 · Lector determinista de albaranes (P0) · rama `claude/gifted-mendel-1hrahr`
 
