@@ -173,6 +173,12 @@ function reconcileHeader(main:any,read:any,third:any|null){
 Deno.serve(async(req:Request)=>{
  if(req.method==="OPTIONS")return new Response(null,{headers:cors});
  if(req.method!=="POST")return reply({error:"Método no permitido"},405);
+ // ARCHIVO TEMPORALMENTE DESACTIVADO (octubre 2026).
+ // El usuario autorizó solo interpretar PDFs, sin almacenar documentos
+ // ni líneas ni crear albaranes en STEL hasta una fase posterior.
+ return reply({estado:"ARCHIVO_DESACTIVADO_TEMPORALMENTE",
+   error:"El guardado de albaranes está desactivado. Usa la pantalla Interpretar PDF (sin guardar).",
+   persistido:false,escritura_stel:false},423);
  let etapa="inicio";
  try{
   etapa="validar_sesion";
