@@ -29,7 +29,7 @@ const TEXTO=()=>mod("textoPdf","./texto-pdf.js");
 const PROV=()=>mod("proveedores","./proveedores.js");
 
 // «P.V.P.» → «PVP», «Cant.» → «CANT», «P. Unit» → «P UNIT».
-const clave=t=>N().sinAcentos(t).replace(/\.(?=[A-Z0-9])/g,"").replace(/[.:€()\/_]/g," ").replace(/\s+/g," ").trim();
+const clave=t=>N().sinAcentos(t).replace(/\.(?=[A-Z0-9])/g,"").replace(/[.:€()\/_|¦\[\]]/g," ").replace(/\s+/g," ").trim();
 const caja=c=>c?[Math.round(c.x0*10)/10,Math.round(c.y*10)/10,Math.round(c.x1*10)/10,Math.round(c.alto*10)/10]:null;
 
 /* ---------------------------- Cabecera de tabla ---------------------------- */
@@ -38,14 +38,24 @@ const COLUMNAS=[
  ["descripcion",/^(DESCRIPCION|CONCEPTO|DENOMINACION|DESIGNACION|DETALLE|PRODUCTO|DESCRIPCION ARTICULO)$/],
  ["cantidad",/^(CANTIDAD|CANT|UDS|UNIDADES|UNDS|CTDAD|CANT SERVIDA|CANTIDAD SERVIDA)$/],
  ["unidad",/^(UD|U M|UM|UNIDAD|MEDIDA)$/],
- ["precio",/^(PRECIO|PRECIO UNIDAD|PRECIO UNITARIO|PRECIO UNIT|P UNIT|P UNITARIO|PVP|PRECIO UD|PRECIO NETO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000)$/],
+ ["precio",/^(PRECIO|PRECIO ?UNIDAD|PRECIO ?UNITARIO|PRECIO ?UNIT|P UNIT|P UNITARIO|PVP|PRECIO ?UD|PRECIO NETO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000)$/],
  ["subtotal",/^(SUBTOTAL|BRUTO|IMPORTE BRUTO)$/],
  ["descuento",/^(DTO|DTOS|DESC|DESCUENTO|DTO %|% DTO|%DTO|DTO%|% DESC|DESC %|DTO ?[123]|DESC ?[123]|% ?DTO ?[123]|DTO ?[123] ?%)$/],
  ["importe",/^(IMPORTE|IMPORTE NETO|TOTAL|NETO|TOTAL LINEA|IMPORTE TOTAL|IMPORTE EUR)$/]
 ];
+// Títulos de una palabra que el OCR puede leer con una letra cambiada («Descrinción»).
+const TITULOS_OCR={DESCRIPCION:"descripcion",CONCEPTO:"descripcion",DENOMINACION:"descripcion",CANTIDAD:"cantidad",
+ REFERENCIA:"referencia",ARTICULO:"referencia",CODIGO:"referencia",IMPORTE:"importe",PRECIO:"precio",DESCUENTO:"descuento"};
+function distancia1(a,b){
+ if(a===b)return 0;if(Math.abs(a.length-b.length)>1)return 2;
+ let i=0;while(i<a.length&&a[i]===b[i])i++;
+ const r=(x,y)=>x===y;
+ return r(a.slice(i+1),b.slice(i+1))||r(a.slice(i+1),b.slice(i))||r(a.slice(i),b.slice(i+1))?1:2;
+}
 function campoDe(texto){
  const k=clave(texto);
  for(const [campo,re] of COLUMNAS)if(re.test(k))return {campo,clave:k};
+ if(/^[A-Z]{7,}$/.test(k))for(const [t,campo] of Object.entries(TITULOS_OCR))if(distancia1(k,t)===1)return {campo,clave:t};
  return null;
 }
 /*
@@ -54,6 +64,7 @@ function campoDe(texto){
  * en las proporcionales es aproximada y se trata como tal.
  */
 function palabrasConPosicion(celda){
+ if(celda.palabras?.length>1)return celda.palabras.map(p=>({...p,alto:celda.alto}));
  const base=celda.crudo&&celda.crudo.trim()?celda.crudo:celda.texto,total=base.length||1,ancho=celda.x1-celda.x0;
  return [...base.matchAll(/\S+/g)].map(m=>({texto:m[0],x0:celda.x0+ancho*m.index/total,x1:celda.x0+ancho*(m.index+m[0].length)/total,alto:celda.alto}));
 }
@@ -85,6 +96,8 @@ function camposDeCelda(celda){
 function evaluarCabecera(celdas){
  // Una celda que mezcla títulos con palabras ajenas («ARTÍCULO SIN CANTIDAD»)
  // es texto, no cabecera; salvo que sea toda la línea (cabecera en un solo texto).
+ // Motas del OCR sobre la banda de títulos («ÉS», «ó»): no son columnas.
+ celdas=celdas.filter(c=>clave(c.texto).replace(/[^A-Z0-9%]/g,"").length>2||campoDe(c.texto));
  const todas=celdas.flatMap(c=>{
   const r=camposDeCelda(c);
   const mezcla=r.some(x=>x.campo==="otra")&&r.some(x=>x.campo!=="otra");
@@ -119,7 +132,8 @@ function buscarCabeceraTabla(lineas,desde=0){
   }
   // Títulos en dos renglones («PRECIO» / «UNIDAD»).
   const sig=lineas[i+1];
-  if(sig&&sig.y-lineas[i].y<2.2*lineas[i].alto){
+  // Si el renglón siguiente ya es una cabecera por sí solo, el actual es un título ajeno («ALBARÁN»).
+  if(sig&&sig.y-lineas[i].y<2.2*lineas[i].alto&&!evaluarCabecera(sig.celdas).valida){
    r=evaluarCabecera(fusionarTitulos(lineas[i].celdas,sig.celdas));
    if(r.valida)return {indice:i,hasta:i+1,...r};
   }
@@ -144,12 +158,25 @@ function intervalos(columnas){
   // Columnas repetidas: una segunda de descuento se suma en cascada; las demás se ignoran.
   const veces=usados.get(c.campo)||0;usados.set(c.campo,veces+1);
   const campo=!veces||c.campo==="otra"?c.campo:c.campo==="descuento"&&veces===1?"descuento2":"otra";
-  return {campo,clave:c.clave,ini,fin};
+  return {campo,clave:c.clave,ini,fin,x0:c.x0,x1:c.x1};
  });
 }
 // «(4,00)» es un número negativo; «100)» suelto es texto (p. ej. «(BOLSA 100)»).
-const RE_CANTIDAD_UNIDAD=/^([-−]?[\d.,]+)\s*([A-Za-zÁÉÍÓÚáéíóú]{1,4}[23]?\.?)$/;
+// Solo unidades conocidas: «2op» (manuscrito leído por el OCR) no es «2 op».
+const UNIDADES="UD|UDS|UN|UNI|UND|UNDS|U|M|ML|MT|MTS|M2|M3|KG|KGS|G|GR|L|LT|LTS|SAC|SACO|SACOS|PZ|PZA|PZAS|PAQ|CJ|CAJ|CAJA|ROL|RL|BOL|BL|H|HR|HRS|TN|T|PAR|JGO|JG|BID|PAL|PLT|BAR|ENV|MIL|CT|CTO";
+const RE_CANTIDAD_UNIDAD=new RegExp("^([-−]?[\\d.,]+)\\s*(("+UNIDADES+")\\.?)$","i");
 const pareceNumero=t=>/^(\(\s*[\d.,]+\s*\)|[-−+]?\s*[\d.,]+\s*(\+\s*[\d.,]+\s*)*[−-]?\s*%?)$/.test(String(t).trim());
+// Solo para OCR (celdas con confianza): menos del 40 % de los caracteres con confianza ≥ 70.
+function esManuscrita(linea){
+ const celdas=linea.celdas.filter(c=>c.conf!=null);
+ if(!celdas.length||celdas.length<linea.celdas.length)return false;
+ // Una cifra bien formada no se descarta nunca: la línea sigue y, si es dudosa, queda en revisión.
+ if(celdas.some(c=>/\d,\d/.test(c.texto)&&c.conf>=40))return false;
+ const largo=c=>String(c.texto).replace(/\s/g,"").length;
+ const total=celdas.reduce((n,c)=>n+largo(c),0);
+ const buenos=celdas.filter(c=>c.conf>=70).reduce((n,c)=>n+largo(c),0);
+ return total>=3?buenos/total<0.4:celdas.every(c=>c.conf<60);
+}
 function columnaDe(celda,cols){
  const x=pareceNumero(celda.texto)?(celda.x0+celda.x1)/2:celda.x0+0.01;
  return cols.find(c=>x>=c.ini&&x<c.fin)||null;
@@ -175,14 +202,17 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar){
   // A la derecha, saltando restos de la etiqueta («N.», «Nº», «:»).
   const derecha=linea.celdas.slice(ci+1).filter(c=>c.x0>=celda.x1-1).find(c=>limpiarValor(c.texto));
   if(derecha)candidatos.push({texto:limpiarValor(derecha.texto),celda:derecha});
-  for(const abajo of lineas.slice(li+1,li+3)){
-   if(abajo.y-linea.y>2.6*linea.alto)break;
+  // El OCR puede partir la fila de valores en varias líneas (bases distintas): se miran hasta
+  // tres líneas y se sigue bajando si la celda hallada no tiene forma de valor válido.
+  for(const abajo of lineas.slice(li+1,li+4)){
+   if(abajo.y-linea.y>3.2*linea.alto)break;
    // El valor de la casilla: la celda inferior más próxima en horizontal (puede estar
    // centrada, alineada a la izquierda o a la derecha de su etiqueta).
    const centro=(celda.x0+celda.x1)/2,anchoEt=celda.x1-celda.x0;
-   const c=[...abajo.celdas].map(c=>({c,d:Math.min(c.x1,celda.x1)-Math.max(c.x0,celda.x0)>0?0:Math.abs((c.x0+c.x1)/2-centro)}))
-    .filter(x=>x.d<=Math.max(1.5*anchoEt,3*celda.alto)).sort((a,b)=>a.d-b.d)[0]?.c;
-   if(c){candidatos.push({texto:limpiarValor(c.texto),celda:c});break;}
+   // Distancia: hueco horizontal entre ambas cajas (0 si se solapan); a igualdad, la más centrada.
+   const c=[...abajo.celdas].map(c=>({c,d:Math.max(0,c.x0-celda.x1,celda.x0-c.x1),dc:Math.abs((c.x0+c.x1)/2-centro)}))
+    .filter(x=>x.d<=Math.max(anchoEt,2*celda.alto)).sort((a,b)=>a.d-b.d||a.dc-b.dc)[0]?.c;
+   if(c){candidatos.push({texto:limpiarValor(c.texto),celda:c});if(aceptar(limpiarValor(c.texto)))break;}
   }
   const valido=candidatos.find(c=>aceptar(c.texto));
   if(valido)hallados.push({...valido,etiqueta:celda.texto});
@@ -343,20 +373,31 @@ function leerTablaPagina(pagina){
    else grupos.push({campo,texto:p.texto,x0:p.x0,x1:p.x1,alto:c.alto,y:c.y});
   }
   if(grupos.length<2)return [c];
-  return grupos.map(g=>({texto:g.texto,x0:g.x0,x1:g.x1,alto:g.alto,y:g.y,partida:true,campoPartida:g.campo}));
+  // Con las cajas reales de las palabras (OCR) el reparto no es una estimación.
+  const exacto=c.palabras?.length>1;
+  return grupos.map(g=>({texto:g.texto,x0:g.x0,x1:g.x1,alto:g.alto,y:g.y,conf:c.conf,partida:!exacto,repartida:true,campoPartida:g.campo}));
  };
  const asignar=linea=>{
-  const celdas={},conflictos=[];let partida=false;
+  const celdas={},conflictos=[];let partida=false,textoEstimado=false;
   let ultimoTexto=null;
   for(const c of linea.celdas.filter(c=>c.x1>=xMinTabla).flatMap(partir)){
    if(c.partida)partida=true;
+   if(c.partida&&["referencia","descripcion"].includes(c.campoPartida))textoEstimado=true;
    let campo=c.campoPartida||columnaDe(c,cols)?.campo||"otra";
    // Un texto no numérico no pertenece a una columna numérica: es la
    // continuación de la columna de texto anterior («… (BOLSA 100)»).
    if(NUMERICAS.has(campo)&&!pareceNumero(c.texto)&&!RE_CANTIDAD_UNIDAD.test(c.texto.trim())&&ultimoTexto)campo=ultimoTexto;
+   // Una cifra que termina muy a la izquierda de su título no es de esa columna: forma parte
+   // del texto anterior («Aglomerado 2,44 x 1,22 x 19 mm»).
+   const col=cols.find(x=>x.campo===campo);
+   if(NUMERICAS.has(campo)&&col?.x0!=null&&c.x1<col.x0-2*(c.alto||altoFila)&&ultimoTexto)campo=ultimoTexto;
    if(!NUMERICAS.has(campo))ultimoTexto=campo;
    if(celdas[campo]){
-    if(["referencia","descripcion","unidad","otra"].includes(campo)){celdas[campo].texto+=" "+c.texto;celdas[campo].x1=c.x1;}
+    // Código separado de la descripción por un hueco amplio (título de descripción centrado
+    // que deja el inicio del texto dentro del intervalo de la referencia).
+    if(campo==="referencia"&&!celdas.descripcion&&cols.some(x=>x.campo==="descripcion")&&c.x0-celdas.referencia.x1>2.5*(c.alto||altoFila))
+     celdas.descripcion={...c};
+    else if(["referencia","descripcion","unidad","otra"].includes(campo)){celdas[campo].texto+=" "+c.texto;celdas[campo].x1=c.x1;}
     // Varias cifras en la columna de descuento («60» «5») = descuentos en cascada.
     else if(/^descuento2?$/.test(campo)&&pareceNumero(c.texto)&&pareceNumero(celdas[campo].texto)){
      celdas[campo].texto+=" "+c.texto;celdas[campo].x1=c.x1;
@@ -365,17 +406,17 @@ function leerTablaPagina(pagina){
     else conflictos.push(campo);
    }else celdas[campo]={...c};
   }
-  return {celdas,conflictos,partida};
+  return {celdas,conflictos,partida,textoEstimado};
  };
  const altoFila=pagina.lineas[cab.indice].alto;
  // Lo que queda claramente a la izquierda de la primera columna no pertenece a la tabla.
  const xMinTabla=Math.min(...cab.columnas.map(c=>c.x0))-3*altoFila;
- let actual=null,fin=false,yAnterior=pagina.lineas[cab.hasta].y;
+ let actual=null,fin=false,anotacion=false,yAnterior=pagina.lineas[cab.hasta].y;
  for(const linea of pagina.lineas.slice(cab.hasta+1)){
   if(fin){
    // Red de seguridad: algo con forma de artículo después del final de la tabla.
    const {celdas}=asignar(linea);
-   if(celdas.cantidad&&pareceNumero(celdas.cantidad.texto)&&(celdas.referencia||celdas.precio||celdas.importe)&&
+   if(!esManuscrita(linea)&&celdas.cantidad&&pareceNumero(celdas.cantidad.texto)&&(celdas.referencia||celdas.precio||celdas.importe)&&
      !RE_PIE.test(clave(linea.celdas[0]?.texto||"")))dudosasTrasFin.push(linea.texto);
    pie.push(linea);continue;
   }
@@ -386,7 +427,7 @@ function leerTablaPagina(pagina){
    fin=true;pie.push(linea);
    if(!RE_PIE.test(primera)){
     const {celdas}=asignar(linea);
-    if(celdas.cantidad&&pareceNumero(celdas.cantidad.texto)&&(celdas.referencia||celdas.precio||celdas.importe))dudosasTrasFin.push(linea.texto);
+    if(!esManuscrita(linea)&&celdas.cantidad&&pareceNumero(celdas.cantidad.texto)&&(celdas.referencia||celdas.precio||celdas.importe))dudosasTrasFin.push(linea.texto);
    }
    continue;
   }
@@ -394,15 +435,31 @@ function leerTablaPagina(pagina){
    ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Cabecera de tabla repetida"});
    yAnterior=linea.y;continue;
   }
-  const {celdas,conflictos,partida}=asignar(linea);
+  // Manuscritos sobre el escaneo: el OCR los lee como palabras de confianza muy baja.
+  // Una línea compuesta casi solo de ese texto no es un artículo impreso.
+  if(esManuscrita(linea)){
+   // Renglón de texto débil (tachado, rodeado a bolígrafo) justo bajo una línea y dentro de la
+   // columna de descripción: puede ser su continuación. Se añade, pero la descripción queda en revisión.
+   const desc=cols.find(x=>x.campo==="descripcion");
+   if(actual&&desc&&linea.celdas.every(c=>c.x0>=desc.ini&&c.x1<=desc.fin)&&linea.y-yAnterior<=2*Math.max(linea.alto,altoFila)){
+    actual.continuacionesDudosas=[...(actual.continuacionesDudosas||[]),linea.texto];
+    yAnterior=linea.y;continue;
+   }
+   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Texto de baja confianza OCR (posible manuscrito o sello)"});
+   continue;
+  }
+  const {celdas,conflictos,partida,textoEstimado}=asignar(linea);
   const tieneCantidad=!!celdas.cantidad,tieneRef=!!celdas.referencia;
   const tieneImportes=!!(celdas.precio||celdas.importe);
   // Anotaciones del proveedor dentro de la tabla («Entrega en:», «Contacto:», «OBRA: …»,
   // «Retirado por: …»): sin cantidad no son artículos ni continúan la descripción.
   const textoLinea=clave(Object.values(celdas).map(c=>c.texto).join(" "));
-  if(!tieneCantidad&&(RE_ANOTACION.test(textoLinea)||/:$/.test(String(celdas.referencia?.texto||"").trim()))){
+  // Un código terminado en «:» («Entrega en:») nunca es un artículo, aunque la dirección
+  // deje una cifra en la columna de cantidad («18 SECTOR 1»); sí lo sería si tuviera precio o importe.
+  const refRotulo=/:$/.test(String(celdas.referencia?.texto||"").trim());
+  if((!tieneCantidad&&RE_ANOTACION.test(textoLinea))||(refRotulo&&!tieneImportes)){
    ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Anotación del proveedor, no es un artículo"});
-   yAnterior=linea.y;continue;
+   yAnterior=linea.y;anotacion=true;continue;
   }
   // Toda línea con referencia, cantidad o importe es una fila: si falta un dato
   // queda en REVISAR, nunca se descarta en silencio.
@@ -413,15 +470,38 @@ function leerTablaPagina(pagina){
    ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Texto sin artículo ni cifras válidas (posible manuscrito o marca)"});
    continue;
   }
+  // Segundo renglón de una anotación («Retirado por: OSCAR» / «DIEGUEZ»).
+  const soloTextoLinea=Object.keys(celdas).every(k=>["descripcion","referencia","otra","unidad"].includes(k));
+  if(anotacion&&!tieneCantidad&&!tieneImportes&&(soloTextoLinea||!tieneRef)&&linea.y-yAnterior<=2*Math.max(linea.alto,altoFila)){
+   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Continuación de una anotación del proveedor"});
+   yAnterior=linea.y;continue;
+  }
+  anotacion=false;
   if(tieneCantidad||tieneRef||tieneImportes){
-   actual={pagina:pagina.numero,celdas,conflictos,partida,continuaciones:[],y:linea.y};
+   actual={pagina:pagina.numero,celdas,conflictos,partida,textoEstimado,continuaciones:[],y:linea.y};
+   // Texto suelto inmediatamente encima (sin otra fila entre medias): puede ser el primer
+   // renglón de la descripción o una anotación. No se decide: la descripción queda en revisión.
+   const previas=[];
+   for(let i=ignoradas.length-1;i>=0;i--){
+    const v=ignoradas[i];
+    if(!v._sinCantidad||v._fila!==filas.length||linea.y-v._y>3*Math.max(linea.alto,altoFila))break;
+    previas.push(v);
+   }
+   // El OCR puede partir un mismo renglón en dos («Suministro» / «y montaje»): orden por posición.
+   if(previas.length)actual.textoPrevio=previas.sort((a,b)=>a._x-b._x).map(v=>v._texto).filter(Boolean).join(" ");
    filas.push(actual);
   }else{
    const soloTexto=Object.keys(celdas).every(k=>["descripcion","referencia","otra","unidad"].includes(k));
    if(actual&&soloTexto&&celdas.descripcion&&!celdas.referencia&&linea.y-yAnterior<=1.8*linea.alto&&
      !RE_ANOTACION.test(clave(celdas.descripcion.texto))){
     actual.continuaciones.push(celdas.descripcion.texto);
-   }else ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Línea sin cantidad dentro de la tabla"});
+   }else{
+    const ig={pagina:pagina.numero,texto:linea.texto,motivo:"Línea sin cantidad dentro de la tabla"};
+    Object.defineProperties(ig,{_sinCantidad:{value:!!celdas.descripcion},_fila:{value:filas.length},_y:{value:linea.y},_x:{value:linea.celdas[0]?.x0??0},
+     // Sin los trazos de bolígrafo que el OCR lee con confianza casi nula.
+     _texto:{value:linea.celdas.filter(c=>c.conf==null||c.conf>=50).map(c=>c.texto).join(" ")}});
+    ignoradas.push(ig);
+   }
   }
   yAnterior=linea.y;
  }
@@ -455,19 +535,35 @@ function valorPie(lineas,re,opcionesNumero){
 const ETIQ_TOTALES={
  base:/^(BASE IMPONIBLE|BASE|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES)\b/,
  pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA)\b/,
- cuota:/^(CUOTA IVA|TOTAL IVA|IMPORTE IVA|I V A|IVA)\b/,
+ cuota:/^(CUOTA ?[IL1]VA|TOTAL ?[IL1]VA|IMPORTE IVA|I V A|IVA)\b/,
  total:/^(TOTAL A PAGAR|TOTAL ALBARAN|IMPORTE TOTAL|TOTAL EUR|TOTAL)\b/
 };
-const EXCLUIR_TOTAL=/^TOTAL (LINEAS|IVA|RE|NETO|BRUTO)\b/;
+const EXCLUIR_TOTAL=/^TOTAL ?(LINEAS|[IL1]VA|RE|NETO|BRUTO)\b/;
 function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={}){
  const out=[];
- lineas.forEach((linea,li)=>linea.celdas.forEach((celda,ci)=>{
+ lineas.forEach((linea,li)=>{let saltar=-1;linea.celdas.forEach((celda0,ci)=>{
+  if(ci<=saltar)return;
+  // Etiqueta partida en dos celdas por el OCR («Base» «Imponible», «Cuota» «IVA»).
+  const sig=linea.celdas[ci+1];
+  let celda=celda0,usadas=0;
+  if(sig&&sig.x0-celda0.x1<1.5*celda0.alto){
+   const k2=clave(celda0.texto+" "+sig.texto);
+   if(re.test(k2)&&k2.match(re)[0].length>(clave(celda0.texto).match(re)?.[0].length||0)){
+    celda={...celda0,texto:celda0.texto+" "+sig.texto,x1:sig.x1};usadas=1;
+   }
+  }
   const k=clave(celda.texto);const m=k.match(re);
   if(!m||(excluir&&excluir.test(k)))return;
+  saltar=ci+usadas;
   const resto=celda.texto.slice(m[0].length).replace(/^[\s:€]+/,"").trim();
-  const textos=[resto,...linea.celdas.slice(ci+1,ci+4).map(c=>c.texto)];
-  const abajo=lineas[li+1]?.celdas.find(c=>Math.min(c.x1,celda.x1)-Math.max(c.x0,celda.x0)>0);
-  if(abajo)textos.push(abajo.texto);
+  const textos=[resto,...linea.celdas.slice(ci+1+usadas,ci+4+usadas).map(c=>c.texto)];
+  // Valor debajo: la primera celda solapada en horizontal en los tres renglones siguientes.
+  for(const l2 of lineas.slice(li+1,li+4)){
+   if(l2.y-linea.y>4.5*Math.max(linea.alto,celda.alto))break;
+   const abajo=l2.celdas.find(c=>Math.min(c.x1,celda.x1)-Math.max(c.x0,celda.x0)>0);
+   if(abajo&&/\d/.test(abajo.texto)){textos.push(abajo.texto);break;}
+   if(abajo)break;
+  }
   for(const bruto of textos){
    for(const parte of String(bruto||"").split(/\s+(?=\d)/)){
     const t=parte.replace(/€|EUR/gi,"").trim();
@@ -478,7 +574,7 @@ function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={})
     if(n.estado==="OK"&&(!porcentaje||(n.valor>=0&&n.valor<=30)))out.push({...n,etiqueta:celda.texto,caja:caja(celda)});
    }
   }
- }));
+ });});
  return out;
 }
 function leerTotales(lineas,opcionesNumero){
@@ -492,7 +588,13 @@ function leerTotales(lineas,opcionesNumero){
   if(Math.abs(b.valor+c.valor-t.valor)<=0.021&&t.valor>0)combos.push({b,c,t});
  const conPct=combos.flatMap(x=>unicos(P).filter(p=>Math.abs(x.b.valor*p.valor/100-x.c.valor)<=0.021).map(p=>({...x,p})));
  const elegidos=conPct.length?conPct:combos;
- const distintos=[...new Map(elegidos.map(x=>[[x.b.valor,x.c.valor,x.t.valor].join("|"),x])).values()];
+ // Base y cuota se imprimen a veces con 4 y con 2 decimales (77,7416 y 77,74): al céntimo
+ // son la misma combinación; se conserva la que tiene los importes en céntimos.
+ const cent=v=>Math.round(v*100);
+ const decs=x=>[x.b,x.c].reduce((n,y)=>n+((String(y.literal).match(/,(\d+)/)||[,""])[1].length>2?1:0),0);
+ const grupos=new Map();
+ for(const x of elegidos){const k=[cent(x.b.valor),cent(x.c.valor),cent(x.t.valor)].join("|");const y=grupos.get(k);if(!y||decs(x)<decs(y))grupos.set(k,x);}
+ const distintos=[...grupos.values()];
  const marcar=(x,estado,motivo)=>({...x,estado,motivos:motivo?[motivo]:[]});
  if(distintos.length===1){
   const x=distintos[0];
@@ -537,6 +639,26 @@ function campoDescuento(celda,opciones){
  return {...r,literal,caja:caja(celda),conf_ocr:celda?.conf??null,cascada_por_espacios:cascadaConEspacios};
 }
 const redondear=(x,d=2)=>Math.round((x+Math.sign(x)*1e-9)*10**d)/10**d;
+/*
+ * Cantidad ilegible (tapada por una firma o un sello) con precio, descuento e importe
+ * válidos: se calcula qué cantidad haría cuadrar la línea y se ofrece al revisor como
+ * sugerencia. NUNCA se asigna como valor: la cantidad queda vacía y la línea en revisión.
+ */
+function sugerirCantidad(f,precioPor){
+ if(!["VACIO","INVALIDO"].includes(f.cantidad.estado)||f.precio.estado!=="OK"||f.importe.estado!=="OK"||!f.precio.valor)return;
+ if(f.descuento.estado!=="OK"&&f.descuento.estado!=="VACIO")return;
+ const factor=f.descuento.estado==="OK"?f.descuento.factor:1;
+ const q0=f.importe.valor/(f.precio.valor/precioPor*factor);
+ for(const d of [0,1,2,3]){
+  const q=redondear(q0,d);
+  if(q<=0)continue;
+  if(cuadre({...f,cantidad:{estado:"OK",valor:q}},precioPor).estado==="VERIFICADO"){
+   f.cantidad.sugerida=q;
+   f.cantidad.motivos=[...(f.cantidad.motivos||[]),"Cantidad no legible; el cuadre de la línea indica "+q+" (sugerencia para el revisor, no se asigna)"];
+   return;
+  }
+ }
+}
 function cuadre(f,precioPor){
  const ok=x=>x.estado==="OK";
  if(f.precio.estado==="VACIO"&&f.importe.estado==="VACIO"&&f.subtotal.estado==="VACIO")
@@ -644,11 +766,22 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   f.descripcion.valor=f.descripcion.literal||null;f.descripcion.estado=f.descripcion.literal?"OK":"VACIO";
   f.notas.push("Descripción en "+(cruda.continuaciones.length+1)+" renglones");
  }
+ if(cruda.continuacionesDudosas?.length){
+  f.descripcion.literal=[f.descripcion.literal,...cruda.continuacionesDudosas].filter(Boolean).join(" ");
+  f.descripcion.valor=f.descripcion.literal||null;f.descripcion.estado="REVISAR";
+  f.descripcion.motivos=[...(f.descripcion.motivos||[]),"Continuación leída con baja confianza OCR (texto tachado, rodeado o manuscrito)"];
+ }
+ if(cruda.textoPrevio){
+  f.descripcion.estado=f.descripcion.estado==="VACIO"?"VACIO":"REVISAR";
+  f.descripcion.texto_previo=cruda.textoPrevio;
+  f.descripcion.motivos=[...(f.descripcion.motivos||[]),"Texto justo encima de la línea: «"+cruda.textoPrevio+"» (¿primer renglón de la descripción o anotación?)"];
+ }
  for(const campo of cruda.conflictos){
   f[campo]={...f[campo],valor:null,estado:"AMBIGUO",motivos:[...(f[campo].motivos||[]),"Varias cifras en la misma columna"]};
  }
  f.cuadre=cuadre(f,precioPor);
  if(f.cuadre.estado!=="VERIFICADO")repararSeparadoresOCR(f,opcionesNumero,precioPor);
+ sugerirCantidad(f,precioPor);
  const numericos=["cantidad","precio","descuento","importe","subtotal"];
  if(f.cuadre.estado==="VERIFICADO"){
   for(const k of numericos)if(f[k].estado==="OK")f[k].estado="VERIFICADO";
@@ -661,6 +794,15 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   f.motivos.push("Cuadre incompleto: "+f.cuadre.detalle);
  }
  if(f.referencia.estado==="VACIO"&&!perfil?.permite_sin_referencia)f.motivos.push("Línea sin referencia");
+ if(cruda.partida)f.columnas_estimadas=true;
+ // OCR con la fila en un solo bloque: el cuadre confirma las cifras, pero no dónde acaba el
+ // código y empieza la descripción (la posición de cada palabra es estimada).
+ const ocr=Object.values(cruda.celdas).some(c=>c?.conf!=null);
+ if(cruda.textoEstimado&&ocr&&f.cuadre.estado==="VERIFICADO"){
+  for(const k of ["referencia","descripcion"])
+   if(f[k].estado==="OK")f[k]={...f[k],estado:"REVISAR",motivos:[...(f[k].motivos||[]),"Frontera entre código y descripción estimada (fila leída en un solo bloque)"]};
+  f.motivos.push("Código y descripción separados por posición estimada");
+ }
  if(cruda.partida&&f.cuadre.estado!=="VERIFICADO"){
   f.motivos.push("Columnas separadas por posición estimada y sin cuadre que lo confirme");
   for(const k of ["referencia","descripcion","cantidad","unidad","precio","descuento","importe"])
@@ -671,6 +813,7 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   f.motivos.push("Cantidad: "+(f.cantidad.motivos[0]||"celda vacía"));
  for(const k of ["precio","descuento","importe","subtotal"])
   if(["AMBIGUO","INVALIDO"].includes(f[k].estado))f.motivos.push(k+": "+(f[k].motivos[0]||f[k].estado));
+ if(f.descripcion.estado==="REVISAR")f.motivos.push("Descripción: "+(f.descripcion.motivos[f.descripcion.motivos.length-1]||"revisar"));
  f.estado=f.motivos.length?"REVISAR":"OK";
  return f;
 }
@@ -715,7 +858,17 @@ function aplicarConfianza(salida,perfil){
   l.fiable=l.confianza>=UMBRAL_FIABLE;
  }
  for(const t of Object.values(salida.totales||{}))if(t&&typeof t==="object"&&"estado" in t)t.confianza=r2(confianzaCampo(t)??0);
- const criticos=[p?.confianza??0,salida.numero?.confianza??0,salida.fecha?.confianza??0,...salida.lineas.map(l=>l.confianza)];
+ // OCR: con total impreso, una base o cuota no localizada probablemente existe y no se ha leído
+ // no se afirma con confianza alta que falte.
+ const T=salida.totales;
+ if(T&&salida.tipo_pdf!=="DIGITAL"&&T.total?.estado!=="VACIO")for(const k of ["base_imponible","cuota_iva","iva_porcentaje"])
+  if(T[k]?.estado==="VACIO"){
+   const m="No localizado aunque el documento tiene total";
+   T[k].confianza=0.5;if(!(T[k].motivos||[]).includes(m))T[k].motivos=[...(T[k].motivos||[]),m];
+  }
+ // Los totales impresos también deciden la aceptación automática del documento.
+ const confTotales=T?["base_imponible","iva_porcentaje","cuota_iva","total"].map(k=>T[k]?.confianza).filter(x=>typeof x==="number"):[];
+ const criticos=[p?.confianza??0,salida.numero?.confianza??0,salida.fecha?.confianza??0,...salida.lineas.map(l=>l.confianza),...confTotales];
  if(!salida.lineas.length)criticos.push(0);
  if(salida.validaciones.some(v=>v.estado==="FALLO"))criticos.push(0.5);
  salida.confianza=r2(Math.min(...criticos));
@@ -748,7 +901,12 @@ function extraerDePaginas(paginas,opciones={}){
  salida.fecha=leerFecha(zona,opcionesFecha);
  // Algunos proveedores (Saltoki) imprimen número y fecha al pie: se busca en toda la página.
  if(salida.numero.estado==="VACIO"&&primera.t){const n=leerNumero(primera.p.lineas);if(n.estado!=="VACIO")salida.numero=n;}
- if(salida.fecha.estado==="VACIO"&&primera.t){const f=leerFecha(primera.p.lineas,opcionesFecha);if(f.estado!=="VACIO")salida.fecha=f;}
+ const sinEtiqueta=f=>f.motivos.some(m=>/sin etiqueta/i.test(m));
+ if((salida.fecha.estado==="VACIO"||sinEtiqueta(salida.fecha))&&primera.t){
+  const f=leerFecha(primera.p.lineas,opcionesFecha);
+  // Una fecha etiquetada en el pie prevalece sobre una sin etiqueta del encabezado.
+  if(salida.fecha.estado==="VACIO"?f.estado!=="VACIO":f.estado!=="VACIO"&&!sinEtiqueta(f)&&f.estado!=="AMBIGUO")salida.fecha=f;
+ }
  // Formato numérico: perfil confirmado o pruebas en las cifras del propio documento.
  const crudas=tablas.flatMap(x=>x.t?x.t.filas:[]);
  const literales=crudas.flatMap(f=>["cantidad","precio","subtotal","importe"].map(k=>f.celdas[k]?.texto).filter(Boolean));
@@ -835,5 +993,16 @@ async function extraerPdf(pdfjs,datos,opciones={}){
  return extraerDePaginas(paginas,opciones);
 }
 
-return {VERSION,UMBRAL_FIABLE,extraerPdf,extraerDePaginas,finalizar,leerTablaPagina,identificarProveedor,cuadre};
+/* Celdas de etiqueta («FECHA», «ALBARÁN Nº») de una página: para releer su casilla por OCR. */
+function celdasEtiqueta(pagina,campo){
+ const [re,excluir]=campo==="fecha"?[RE_FECHA,EXCLUIR_FECHA]:[RE_NUMERO,EXCLUIR_NUMERO];
+ const out=[];
+ for(const l of pagina.lineas)for(const c of l.celdas){
+  const k=N().sinAcentos(c.texto).replace(/[.:]/g," ").replace(/\s+/g," ").trim();
+  if(re.test(k)&&!excluir.test(k))out.push(c);
+ }
+ return out;
+}
+
+return {VERSION,UMBRAL_FIABLE,extraerPdf,extraerDePaginas,finalizar,leerTablaPagina,identificarProveedor,cuadre,celdasEtiqueta};
 });

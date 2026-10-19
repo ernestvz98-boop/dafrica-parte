@@ -26,13 +26,20 @@ const BASURA=/^[|¦—–_\-'"`´‘’.,:;!¡¿?()\[\]{}<>«»=~*+#°º\\/]+$/;
 function paginaDesdePalabras(palabras,{numero=1,anchoPx,altoPx,dpi=300,desplazamiento=[0,0],anchoPagina=null,altoPagina=null}={}){
  const k=72/dpi,[dx,dy]=desplazamiento;
  const descartadas=[];
+ const inclinacion=estimarInclinacion(palabras,anchoPx);
+ if(inclinacion){
+  // Escaneo torcido: se endereza la página girando las posiciones alrededor del centro.
+  const cx=(anchoPx||0)/2;
+  palabras=palabras.map(p=>{const d=inclinacion*((p.x0+p.x1)/2-cx);return {...p,y0:p.y0-d,y1:p.y1-d};});
+ }
  const fragmentos=[];
  for(const p of palabras){
   const texto=String(p.texto||"").trim();
   if(!texto)continue;
   if(BASURA.test(texto)){descartadas.push(texto);continue;}
   // Texto girado de los márgenes (avisos legales verticales): basura de baja confianza en el borde.
-  if(anchoPx&&(p.x1<0.08*anchoPx||p.x0>0.97*anchoPx)&&Number.isFinite(p.conf)&&p.conf<75){descartadas.push(texto);continue;}
+  // Los fragmentos cortos del texto girado salen con confianza media («25», «Ep:»): umbral mayor.
+  if(anchoPx&&(p.x1<0.08*anchoPx||p.x0>0.97*anchoPx)&&Number.isFinite(p.conf)&&p.conf<(texto.length<=3?92:75)){descartadas.push(texto);continue;}
   const alto=(p.y1-p.y0)*k;
   if(alto<=0)continue;
   fragmentos.push({texto,crudo:null,x0:(p.x0+dx)*k,x1:(p.x1+dx)*k,y:(p.y1+dy)*k,alto,conf:Number.isFinite(p.conf)?p.conf:null});
@@ -43,8 +50,37 @@ function paginaDesdePalabras(palabras,{numero=1,anchoPx,altoPx,dpi=300,desplazam
   numero,tipo:"OCR",ancho:anchoPagina??(anchoPx*k),alto:altoPagina??(altoPx*k),
   caracteres:fragmentos.reduce((n,f)=>n+f.texto.length,0),fraccion_imagen:1,
   conf_media:confs.length?Math.round(confs.reduce((a,b)=>a+b,0)/confs.length):null,
-  lineas,avisos:descartadas.length?[descartadas.length+" signos sueltos del OCR descartados"]:[]
+  lineas,inclinacion,avisos:[...(descartadas.length?[descartadas.length+" signos sueltos del OCR descartados"]:[]),
+   ...(inclinacion?["Escaneo inclinado "+(Math.atan(inclinacion)*180/Math.PI).toFixed(2)+"°: posiciones enderezadas"]:[])]
  };
+}
+
+/*
+ * Pendiente del escaneo (dy/dx) a partir de las líneas que el propio OCR agrupa:
+ * mediana de las pendientes de las líneas largas de palabras fiables. 0 si es despreciable
+ * o no hay datos (el motor no indica a qué línea pertenece cada palabra).
+ */
+function estimarInclinacion(palabras,anchoPx){
+ const grupos=new Map();
+ for(const p of palabras){
+  if(p.linea==null||!(p.conf>=70)||!/\w{2,}/.test(String(p.texto||"")))continue;
+  if(!grupos.has(p.linea))grupos.set(p.linea,[]);
+  grupos.get(p.linea).push(p);
+ }
+ const pendientes=[];
+ for(const g of grupos.values()){
+  if(g.length<3)continue;
+  const xs=g.map(p=>(p.x0+p.x1)/2),ys=g.map(p=>p.y1);
+  const span=Math.max(...xs)-Math.min(...xs);
+  if(anchoPx&&span<0.25*anchoPx)continue;
+  const mx=xs.reduce((a,b)=>a+b)/xs.length,my=ys.reduce((a,b)=>a+b)/ys.length;
+  let num=0,den=0;xs.forEach((x,i)=>{num+=(x-mx)*(ys[i]-my);den+=(x-mx)**2;});
+  if(den>0)pendientes.push(num/den);
+ }
+ if(pendientes.length<3)return 0;
+ pendientes.sort((a,b)=>a-b);
+ const m=pendientes[Math.floor(pendientes.length/2)];
+ return Math.abs(m)>=0.002&&Math.abs(m)<=0.05?m:0;
 }
 
 /* Tesseract TSV (nivel 5 = palabra) → palabras. */
@@ -59,10 +95,10 @@ function palabrasDesdeTsv(tsv){
   const texto=c[i("text")];
   if(!texto||!texto.trim())continue;
   const x=+c[i("left")],y=+c[i("top")],w=+c[i("width")],h=+c[i("height")];
-  out.push({texto,x0:x,y0:y,x1:x+w,y1:y+h,conf:+c[i("conf")]});
+  out.push({texto,x0:x,y0:y,x1:x+w,y1:y+h,conf:+c[i("conf")],linea:[c[i("block_num")],c[i("par_num")],c[i("line_num")]].join("_")});
  }
  return out;
 }
 
-return {paginaDesdePalabras,palabrasDesdeTsv};
+return {paginaDesdePalabras,palabrasDesdeTsv,estimarInclinacion};
 });

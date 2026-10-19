@@ -3,6 +3,31 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-19 · Lector PDF: albaranes escaneados (OCR) y validación con 10 albaranes reales
+
+**Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos).
+- Nuevo `albaranes/ocr.js` y `albaranes/escaneado.js`: lectura OCR multipasada y
+  combinación validada (ver `pruebas/LEEME.md`). Motor de pruebas: Tesseract 5 nativo.
+- `albaranes/extraer.js`, fallos encontrados en los 10 albaranes reales y corregidos:
+  manuscritos tomados como líneas (y «2op» leído como cantidad 2); unidad pegada solo
+  con unidades conocidas; cabecera fusionada con el título «ALBARÁN»; «PRECIO|» y
+  «PRECIOUNIDAD»; títulos con una letra mal leída («Descrinción»); motas en la banda de
+  títulos; «Entrega en:» y su dirección tomados como artículos; texto girado del margen;
+  escaneo inclinado que partía las filas; código y descripción unidos; cifras de la
+  descripción enviadas a la columna de cantidad; número y fecha bajo su etiqueta con el
+  OCR partiendo la fila; fecha del pie de Saltoki; etiquetas de totales partidas,
+  «CuotalVA», base impresa con 4 y 2 decimales; continuaciones y texto previo dudosos
+  ahora se marcan para revisión.
+- Confianza por campo, línea y documento; los totales cuentan para `AUTO_OK`; una
+  cantidad tapada se sugiere al revisor con el cuadre, nunca se asigna.
+- Pruebas: `pruebas/ocr.test.js` (13 regresiones con palabras OCR ficticias, una por
+  fallo real). Total 64 pruebas superadas; informe sintético sin fallos.
+- Evaluador: totales, confianza y aviso por campo, PDF escaneados con varios albaranes.
+- Lote real de 10 albaranes (Saltoki, Rodavi, Maderas Pereira; fuera de git): 158 campos,
+  134 correctos y aceptados (84,8 %), **0 valores erróneos aceptados**; el resto queda
+  marcado para revisión. Valores esperados transcritos por Claude, pendientes de
+  confirmación humana.
+
 ## 2026-10-19 · Valores STEL confirmados y resolución de artículos
 
 **Producción:** sin escrituras en STEL ni en la base de datos.

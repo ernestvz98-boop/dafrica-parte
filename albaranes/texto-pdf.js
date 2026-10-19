@@ -55,7 +55,10 @@ function celdasDeLinea(fragmentos){
    if(f.conf!=null)ultima.conf=ultima.conf==null?f.conf:Math.min(ultima.conf,f.conf);
    ultima.x1=Math.max(ultima.x1,f.x1);
    ultima.alto=Math.max(ultima.alto,f.alto);
-  }else celdas.push({...f});
+   if(ultima.palabras)ultima.palabras.push({texto:f.texto,x0:f.x0,x1:f.x1,conf:f.conf});
+  }else celdas.push({...f,
+   // OCR: se guarda la caja real de cada palabra, para repartir una celda entre columnas sin estimar.
+   ...(f.conf!=null?{palabras:[{texto:f.texto,x0:f.x0,x1:f.x1,conf:f.conf}]}:{})});
  }
  return celdas;
 }

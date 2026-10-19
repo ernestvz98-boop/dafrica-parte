@@ -23,14 +23,16 @@
 })(typeof globalThis!=="undefined"?globalThis:this,function(root,req){
 
 const M=k=>req?req("./"+{extraer:"extraer.js",ocr:"ocr.js",normalizar:"normalizar.js"}[k]):root.DafricaAlbaranes[k];
-const LECTURAS=[{psm:4},{psm:6},{psm:3}];
+// La binarización adaptativa (Sauvola) rescata rótulos y cifras sobre fondos grises.
+const LECTURAS=[{psm:4},{psm:6},{psm:3},{psm:4,umbral:"sauvola"}];
 
 function puntuar(r){
  let s=0;
  if(r.proveedor?.estado==="OK")s+=3;
  if(r.numero?.estado==="OK")s+=2;
  if(r.fecha?.estado==="OK")s+=2;
- for(const l of r.lineas||[])s+=l.cuadre?.estado==="VERIFICADO"?3:l.estado==="OK"?1:-1;
+ // Una fila repartida por posición estimada vale menos que la misma fila con celdas separadas.
+ for(const l of r.lineas||[])s+=(l.cuadre?.estado==="VERIFICADO"?3:l.estado==="OK"?1:-1)-(l.columnas_estimadas?0.5:0);
  for(const v of r.validaciones||[])if(v.estado==="FALLO")s-=2;
  if(r.totales?.validacion?.estado==="OK")s+=2;
  return s;
@@ -105,6 +107,20 @@ function combinarLineas(principal,lecturas){
  });
 }
 
+// Totales: si la principal no los verifica y otra lectura sí (base + cuota = total), se toman
+// de esa; si dos lecturas verifican totales distintos, quedan en revisión.
+function combinarTotales(principal,lecturas){
+ if(principal.totales?.validacion?.estado==="OK")return;
+ const ok=lecturas.filter(r=>r.totales?.validacion?.estado==="OK"&&r.totales.total?.estado==="VERIFICADO");
+ const distintos=[...new Map(ok.map(r=>[[r.totales.base_imponible.valor,r.totales.cuota_iva.valor,r.totales.total.valor].join("|"),r])).values()];
+ if(distintos.length===1){
+  const t=distintos[0].totales;
+  principal.totales={...t,notas:["Totales tomados de la lectura "+distintos[0]._lectura+", confirmados por base + IVA = total"]};
+ }else if(distintos.length>1){
+  principal.totales.validacion={estado:"FALLO",detalle:"Lecturas OCR con totales verificados distintos"};
+ }
+}
+
 /*
  * paginas: [{numero, anchoPx, altoPx, dpi, ocr}] · opciones: las de extraerDePaginas.
  * Devuelve el resultado combinado con `lecturas_ocr` (resumen de cada lectura).
@@ -112,11 +128,33 @@ function combinarLineas(principal,lecturas){
 async function extraerEscaneado(paginas,opciones={}){
  const {extraerDePaginas,finalizar}=M("extraer"),{paginaDesdePalabras}=M("ocr");
  const lecturas=[],resumen=[];
+ let paginasBase=null;
  for(const conf of LECTURAS){
   const pags=[];
-  for(const p of paginas)pags.push(paginaDesdePalabras(await p.ocr({psm:conf.psm}),{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi}));
-  const r=extraerDePaginas(pags,opciones);r._lectura="pagina_psm"+conf.psm;
+  for(const p of paginas)pags.push(paginaDesdePalabras(await p.ocr({psm:conf.psm,umbral:conf.umbral}),{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi}));
+  paginasBase=paginasBase||pags;
+  const r=extraerDePaginas(pags,opciones);r._lectura="pagina_psm"+conf.psm+(conf.umbral?"_"+conf.umbral:"");
+  Object.defineProperty(r,"_pags",{value:pags,enumerable:false});
   lecturas.push(r);
+ }
+ // Cabecera de tabla ilegible en una lectura (banda gris) pero leída en otra: se trasladan
+ // los títulos (posición incluida) a la lectura que no la tiene y se vuelve a extraer.
+ const {leerTablaPagina}=M("extraer");
+ const conCabecera=lecturas.find(r=>r.tablas?.[0]?.y_cabecera!=null);
+ if(conCabecera)for(const r of [...lecturas]){
+  if(r.tablas?.[0]?.y_cabecera!=null)continue;
+  const pags=r._pags.map(pg=>{
+   const origen=conCabecera._pags.find(x=>x.numero===pg.numero);
+   const t=origen&&leerTablaPagina(origen);
+   if(!t)return pg;
+   const titulos=origen.lineas.slice(t.indiceCabecera,t.indiceCabecera+1);
+   const yC=titulos[0].y,alto=titulos[0].alto;
+   const lineas=[...pg.lineas.filter(l=>Math.abs(l.y-yC)>0.8*alto),...titulos].sort((a,b)=>a.y-b.y);
+   return {...pg,lineas};
+  });
+  const r2=extraerDePaginas(pags,opciones);r2._lectura=r._lectura+"+cabecera_"+conCabecera._lectura;
+  Object.defineProperty(r2,"_pags",{value:pags,enumerable:false});
+  if(r2.tablas?.[0]?.y_cabecera!=null)lecturas.push(r2);
  }
  let principal=[...lecturas].sort((a,b)=>puntuar(b)-puntuar(a))[0];
  // Relectura de la banda de la tabla (la zona con más cifras) con la geometría de la principal.
@@ -138,19 +176,44 @@ async function extraerEscaneado(paginas,opciones={}){
   const zonas=[["cabecera",0,Math.ceil(geo.y_cabecera*k)],["pie",Math.floor(geo.y_fin*k),p.altoPx]];
   for(const [nombre,y0,y1] of zonas){
    if(y1-y0<40)continue;
-   for(const psm of [6,11]){
-    const palabras=await p.ocr({psm,region:[0,y0,p.anchoPx,y1-y0]});
+   for(const [psm,umbral] of [[6,null],[11,null],[6,"sauvola"]]){
+    const palabras=await p.ocr({psm,umbral,region:[0,y0,p.anchoPx,y1-y0]});
     const pag=paginaDesdePalabras(palabras,{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi,desplazamiento:[0,y0]});
-    const r=extraerDePaginas([pag],opciones);r._lectura=nombre+"_psm"+psm;r._solo_cabecera=true;
+    const r=extraerDePaginas([pag],opciones);r._lectura=nombre+"_psm"+psm+(umbral?"_"+umbral:"");r._solo_cabecera=true;
     lecturas.push(r);
+   }
+  }
+ }
+ // Casillas de fecha y número que ninguna lectura resolvió (una firma o un sello las cruza):
+ // se recorta solo la casilla, junto a su etiqueta, y se vuelve a leer.
+ for(const campo of ["fecha","numero"]){
+  if(lecturas.some(r=>r[campo]?.estado==="OK"))continue;
+  const {celdasEtiqueta}=M("extraer");
+  for(const pb of paginasBase){
+   const p=paginas.find(x=>x.numero===pb.numero),k=p.dpi/72;
+   for(const et of celdasEtiqueta(pb,campo)){
+    // Dos anchos de recorte: el estrecho deja fuera los trazos que invaden la casilla vecina.
+    const a=Math.max(et.alto,6),ancho=et.x1-et.x0;
+    for(const factor of [4,6]){
+     const x0=Math.max(0,Math.floor((et.x0-3*a)*k)),x1=Math.min(p.anchoPx,Math.ceil((et.x1+factor*Math.max(ancho,2*a))*k));
+     const y0=Math.max(0,Math.floor((et.y-2*a)*k)),y1=Math.min(p.altoPx,Math.ceil((et.y+3*a)*k));
+     if(x1-x0<20||y1-y0<20)continue;
+     const palabras=await p.ocr({psm:6,region:[x0,y0,x1-x0,y1-y0]});
+     const pag=paginaDesdePalabras(palabras,{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi,desplazamiento:[x0,y0]});
+     const r=extraerDePaginas([pag],opciones);r._lectura="casilla_"+campo+"_x"+factor;r._solo_cabecera=true;
+     // De esta lectura solo cuenta el campo releído.
+     for(const otro of ["fecha","numero","proveedor"])if(otro!==campo)r[otro]=null;
+     lecturas.push(r);
+    }
    }
   }
  }
  for(const r of lecturas)resumen.push({lectura:r._lectura,puntuacion:puntuar(r),lineas:r.lineas.length,
   proveedor:r.proveedor?.nif||null,numero:r.numero?.valor||null,fecha:r.fecha?.valor||null,
-  lineas_cuadran:r.lineas.filter(l=>l.cuadre?.estado==="VERIFICADO").length});
+  lineas_cuadran:r.lineas.filter(l=>l.cuadre?.estado==="VERIFICADO").length,totales:r.totales?.validacion?.estado||null});
  combinarCabecera(principal,lecturas.filter(r=>!r._lectura.startsWith("banda")));
  combinarLineas(principal,lecturas.filter(r=>!r._solo_cabecera));
+ combinarTotales(principal,lecturas);
  // Recuento de líneas: la banda de la tabla es la lectura más fiable de las filas.
  const banda=lecturas.find(r=>r._lectura.startsWith("banda"));
  principal.validaciones_extra=[];

@@ -21,8 +21,9 @@ function paginasEscaneadas(pdf,{cache=path.join(path.dirname(pdf),".cache")}={})
   if(!fs.existsSync(png))execFileSync("pdftoppm",["-r",String(DPI),"-gray","-png","-f",String(n),"-l",String(n),"-singlefile",pdf,png.replace(/\.png$/,"")]);
   const {ancho,alto}=tamPng(png);
   paginas.push({numero:n,anchoPx:ancho,altoPx:alto,dpi:DPI,
-   async ocr({psm=4,region=null}={}){
-    const id=`${huella}-p${n}-psm${psm}`+(region?"-"+region.join("_"):"");
+   // umbral "sauvola": binarización adaptativa de Tesseract (rótulos sobre bandas grises).
+   async ocr({psm=4,region=null,umbral=null}={}){
+    const id=`${huella}-p${n}-psm${psm}`+(region?"-"+region.join("_"):"")+(umbral?"-"+umbral:"");
     const tsv=path.join(cache,id+".tsv");
     if(!fs.existsSync(tsv)){
      let img=png;
@@ -32,7 +33,9 @@ function paginasEscaneadas(pdf,{cache=path.join(path.dirname(pdf),".cache")}={})
       execFileSync("pdftoppm",["-r",String(DPI),"-gray","-png","-f",String(n),"-l",String(n),"-singlefile",
        "-x",String(x),"-y",String(y),"-W",String(w),"-H",String(h),pdf,img.replace(/\.png$/,"")]);
      }
-     fs.writeFileSync(tsv,execFileSync("tesseract",[img,"-","-l","spa","--psm",String(psm),"tsv"],{stdio:["ignore","pipe","ignore"],maxBuffer:64*1024*1024}));
+     if(region&&umbral){const base=path.join(cache,`${huella}-p${n}-psm${psm}-`+region.join("_")+".png");if(fs.existsSync(base))img=base;}
+     const extra=umbral==="sauvola"?["-c","thresholding_method=2"]:[];
+     fs.writeFileSync(tsv,execFileSync("tesseract",[img,"-","-l","spa","--psm",String(psm),...extra,"tsv"],{stdio:["ignore","pipe","ignore"],maxBuffer:64*1024*1024}));
     }
     const palabras=palabrasDesdeTsv(fs.readFileSync(tsv,"utf8"));
     // Las coordenadas de un recorte son relativas al recorte: el llamante aplica el desplazamiento.

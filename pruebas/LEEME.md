@@ -13,9 +13,20 @@ cada campo, el **texto literal impreso**, el valor normalizado y un estado:
 | `REVISAR` | leído, pero una comprobación no cuadra; el valor no se acepta |
 | `AMBIGUO` / `INVALIDO` / `VACIO` | sin valor (`null`); nunca se inventa |
 
-Un documento queda `AUTO_OK` solo si el proveedor (por NIF registrado), el número,
-la fecha y todas las líneas están aceptados y todas las validaciones se cumplen.
-Los PDF escaneados devuelven `NO_DIGITAL` sin ningún dato (OCR: fase P1).
+Cada campo, cada línea y el documento llevan además una `confianza` de 0 a 1. Un
+documento queda `AUTO_OK` solo si el proveedor (por NIF registrado), el número, la
+fecha, todas las líneas y los totales están aceptados con confianza ≥ 0,9 y todas las
+validaciones se cumplen.
+
+**PDF escaneados (OCR).** `albaranes/escaneado.js` lee cada página varias veces con
+Tesseract (segmentaciones psm 4/6/3, binarización adaptativa Sauvola para rótulos sobre
+fondo gris, relectura de la banda de la tabla, de cabecera y pie, y de casillas de fecha
+o número tapadas por una firma) y solo combina lo que valida: cifras de línea que
+cuadran, totales con base + IVA = total, cabecera en la que coinciden las lecturas.
+Además: enderezado de escaneos torcidos, descarte de manuscritos y del texto girado de
+los márgenes, y sugerencia (nunca asignación) de una cantidad tapada a partir del cuadre.
+En pruebas se usa Tesseract nativo (`pruebas/motor-tesseract.js`); en la web se usará
+tesseract.js (pendiente de integrar).
 
 | Archivo | Función |
 |---|---|
@@ -23,7 +34,9 @@ Los PDF escaneados devuelven `NO_DIGITAL` sin ningún dato (OCR: fase P1).
 | `albaranes/nif.js` | NIF/NIE/CIF con dígito de control |
 | `albaranes/texto-pdf.js` | texto con coordenadas; detecta DIGITAL/ESCANEADO/MIXTO |
 | `albaranes/proveedores.js` | registro de proveedores por NIF y NIF de DAFRICA |
-| `albaranes/extraer.js` | cabecera, tabla, cuadres, validaciones y estado |
+| `albaranes/extraer.js` | cabecera, tabla, cuadres, totales, validaciones, confianza y estado |
+| `albaranes/ocr.js` | palabras de OCR → líneas y celdas; enderezado; descarte de márgenes |
+| `albaranes/escaneado.js` | varias lecturas OCR por página y combinación validada |
 | `control-28.js` | integración en la pantalla «Interpretar albaranes (sin guardar)» |
 
 ## Ejecutar las pruebas
@@ -54,5 +67,13 @@ demostrar que el evaluador detecta valores erróneos aceptados.
     "proveedores":[{"id":"SALTOKI","nifs":["NIF IMPRESO"],"formato_confirmado":true}]}
    ```
 5. `npm run evaluar` → `pruebas/informes-reales/precision-real.md` y `.json`.
+   El informe incluye la tabla campo a campo: valor esperado, valor extraído,
+   resultado, confianza y el aviso del lector. `--incluir-sin-revisar` evalúa también
+   resultados esperados aún no confirmados (el informe lo advierte).
+
+Un PDF escaneado con un albarán por página lleva `"escaneado": true` y
+`"documentos": [{"pagina": 1, "proveedor_nif": …, "numero": …, "fecha": …,
+"totales": {…}, "lineas": […]}, …]`. Requiere `pdftoppm` y `tesseract` (idioma `spa`).
+Un importe impreso con dos precisiones se expresa como lista: `[77.74, 77.7416]`.
 
 El proceso termina con código 1 si algún valor erróneo se aceptó como bueno.

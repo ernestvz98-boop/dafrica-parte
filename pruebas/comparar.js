@@ -18,22 +18,25 @@ const CRITICAS=new Set(["INCORRECTO_NO_MARCADO","FALTA_MARCA"]);
 const iguales={
  texto:(a,b)=>(a===null||a===undefined||a==="")?(b===null||b===undefined||b===""):N.limpiar(a)===N.limpiar(b),
  descripcion:(a,b)=>N.canon(a)===N.canon(b),
- numero:(a,b)=>(a===null||a===undefined)?(b===null||b===undefined):(typeof b==="number"&&Math.abs(a-b)<1e-9),
+ // Un importe impreso con dos precisiones («77,7416» y «77,74») admite ambas: [77.74, 77.7416].
+ numero:(a,b)=>Array.isArray(a)?a.some(x=>iguales.numero(x,b)):(a===null||a===undefined)?(b===null||b===undefined):(typeof b==="number"&&Math.abs(a-b)<1e-9),
  descuento:(a,b)=>{
   const x=a===null||a===undefined?[]:[].concat(a),y=b===null||b===undefined?[]:[].concat(b);
   return x.length===y.length&&x.every((v,i)=>Math.abs(v-y[i])<1e-9);
  }
 };
 
-function clasificar({campo,esperado,obtenido,estado,debeMarcarse,tipo}){
- const marcado=!ACEPTADOS.has(estado);
+// Por debajo de este umbral el campo no se da por fiable: cuenta como marcado para revisión.
+const UMBRAL=0.9;
+function clasificar({campo,esperado,obtenido,estado,debeMarcarse,tipo,confianza=null,motivos=[]}){
+ const marcado=!ACEPTADOS.has(estado)||(confianza!==null&&confianza<UMBRAL);
  const correcto=iguales[tipo](esperado,obtenido);
  let categoria;
  if(debeMarcarse)categoria=marcado?"MARCADO_COMO_ESPERADO":"FALTA_MARCA";
  else if(!marcado)categoria=correcto?"CORRECTO":"INCORRECTO_NO_MARCADO";
  else if(obtenido===null||obtenido===undefined)categoria=correcto?"CORRECTO_A_REVISAR":"SIN_VALOR_MARCADO";
  else categoria=correcto?"CORRECTO_A_REVISAR":"INCORRECTO_MARCADO";
- return {campo,esperado,obtenido,estado,categoria};
+ return {campo,esperado,obtenido,estado,categoria,correcto,confianza,aviso:marcado?(motivos.filter(Boolean).join("; ")||(confianza!==null&&confianza<UMBRAL?"Confianza "+confianza+" < "+UMBRAL:estado)):""};
 }
 
 // Alineación de líneas esperadas/obtenidas para que una fila perdida no desplace las demás.
@@ -65,12 +68,18 @@ function comparar(resultado,esperado){
  const add=x=>campos.push(clasificar(x));
  const prov=resultado.proveedor||{nif:null,estado:"VACIO"};
  // Un NIF bien leído pero aún no registrado es una lectura correcta del campo.
+ const conf=x=>typeof x?.confianza==="number"?x.confianza:null;
  add({campo:"cabecera.proveedor_nif",tipo:"texto",esperado:esperado.proveedor_nif,obtenido:prov.nif,
-  estado:prov.estado==="NIF_NO_REGISTRADO"?"OK":prov.estado,debeMarcarse:marcados.has("cabecera.proveedor_nif")});
+  estado:prov.estado==="NIF_NO_REGISTRADO"?"OK":prov.estado,debeMarcarse:marcados.has("cabecera.proveedor_nif"),confianza:prov.estado==="NIF_NO_REGISTRADO"?null:conf(prov),motivos:prov.motivos||[]});
  const num=resultado.numero||{valor:null,estado:"VACIO"};
- add({campo:"cabecera.numero",tipo:"texto",esperado:esperado.numero,obtenido:num.valor,estado:num.estado,debeMarcarse:marcados.has("cabecera.numero")});
+ add({campo:"cabecera.numero",tipo:"texto",esperado:esperado.numero,obtenido:num.valor,estado:num.estado,debeMarcarse:marcados.has("cabecera.numero"),confianza:conf(num),motivos:num.motivos||[]});
  const fecha=resultado.fecha||{valor:null,estado:"VACIO"};
- add({campo:"cabecera.fecha",tipo:"texto",esperado:esperado.fecha,obtenido:fecha.valor,estado:fecha.estado,debeMarcarse:marcados.has("cabecera.fecha")});
+ add({campo:"cabecera.fecha",tipo:"texto",esperado:esperado.fecha,obtenido:fecha.valor,estado:fecha.estado,debeMarcarse:marcados.has("cabecera.fecha"),confianza:conf(fecha),motivos:fecha.motivos||[]});
+ // Totales del pie, solo si el resultado esperado los incluye.
+ for(const [k,e] of Object.entries(esperado.totales||{})){
+  const t=resultado.totales?.[k]||{valor:null,estado:"VACIO"};
+  add({campo:"totales."+k,tipo:"numero",esperado:e,obtenido:t.valor,estado:t.estado,debeMarcarse:marcados.has("totales."+k),confianza:conf(t),motivos:t.motivos||[]});
+ }
  const lineas=[];
  for(const [ie,io] of alinear(esperado.lineas||[],resultado.lineas||[])){
   if(io===null){
@@ -80,17 +89,17 @@ function comparar(resultado,esperado){
   }
   if(ie===null){lineas.push({fila_obtenida:io+1,categoria:"LINEA_SOBRANTE"});continue;}
   const e=esperado.lineas[ie],o=resultado.lineas[io],p="lineas."+(ie+1)+".";
-  const reglas=[["referencia","texto",o.referencia.valor,o.referencia.estado],
-   ["descripcion","descripcion",o.descripcion.valor,o.descripcion.estado],
-   ["cantidad","numero",o.cantidad.valor,o.cantidad.estado],
-   ["precio","numero",o.precio.valor,o.precio.estado],
-   ["descuento","descuento",o.descuento.valor===null?null:o.descuento.porcentajes,o.descuento.estado],
-   ["importe","numero",o.importe.valor,o.importe.estado]];
-  for(const [k,tipo,valor,estado] of reglas){
+  const reglas=[["referencia","texto",o.referencia.valor],["descripcion","descripcion",o.descripcion.valor],
+   ["cantidad","numero",o.cantidad.valor],["unidad","texto",o.unidad?.valor??null],["precio","numero",o.precio.valor],
+   ["descuento","descuento",o.descuento.valor===null?null:o.descuento.porcentajes],["importe","numero",o.importe.valor]];
+  for(const [k,tipo,valor] of reglas){
    if(!(k in e))continue;
-   // Un campo vacío que se esperaba vacío es correcto.
-   const est=estado==="VACIO"&&(e[k]===null||e[k]===undefined)&&!marcados.has(p+k)?"OK":estado;
-   add({campo:p+k,tipo,esperado:e[k],obtenido:valor,estado:est,debeMarcarse:marcados.has(p+k)});
+   const campo=o[k]||{estado:"VACIO"};
+   // Un campo vacío que se esperaba vacío es correcto (p. ej. precio = null en un albarán sin precios).
+   const vacioEsperado=campo.estado==="VACIO"&&(e[k]===null||e[k]===undefined)&&!marcados.has(p+k);
+   const motivos=campo.motivos||[];
+   add({campo:p+k,tipo,esperado:e[k],obtenido:valor,estado:vacioEsperado?"OK":campo.estado,debeMarcarse:marcados.has(p+k),
+    confianza:vacioEsperado?null:conf(campo),motivos});
   }
  }
  const criticos=campos.filter(c=>CRITICAS.has(c.categoria)).length+
@@ -115,4 +124,4 @@ function agregar(informes){
  return {porCampo,totales:tot};
 }
 
-module.exports={comparar,agregar,alinear,CRITICAS};
+module.exports={comparar,agregar,alinear,CRITICAS,UMBRAL};
