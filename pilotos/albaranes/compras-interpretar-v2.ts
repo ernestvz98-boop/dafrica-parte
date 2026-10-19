@@ -231,7 +231,7 @@ function normalizedLiteralLine(row:any,i:number){
  if(!row||Number(row.indice)!==i+1)return null;
  const value=parseEsNumber(row.cantidad_impresa);
  const price=parseEsNumber(row.precio_impreso);
- const discount=parseEsNumber(row.descuento_impreso);
+ const discount=parseEsNumber(String(row.descuento_impreso||"").trim().replace(/\s*%$/,""));
  const amount=parseEsNumber(row.importe_impreso);
  return {
   fila:i+1,referencia:String(row.referencia_impresa||"").trim(),
