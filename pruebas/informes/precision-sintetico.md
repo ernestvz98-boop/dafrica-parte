@@ -3,8 +3,8 @@
 - Corpus: **sintético**
 - Versión del extractor: `determinista-p0-1`
 - Documentos evaluados: **14**
-- Documentos aceptados automáticamente (AUTO_OK): **7** · AUTO_OK con algún error: **0**
-- Estado de documento igual al esperado: **14/14**
+- Documentos aceptados automáticamente (AUTO_OK): **4** · AUTO_OK con algún error: **0**
+- Estado de documento igual al esperado: **11/14**
 - Campos evaluados: **240** · correctos y aceptados: **226** (94.2 %)
 - **Fallos críticos (valor erróneo aceptado como bueno): 0**
 
@@ -24,27 +24,30 @@
 
 ## Detalle por documento
 
-### S01-cascada-dos-renglones
+### S01-cascada-dos-renglones ⚠
 Proveedor registrado, descuento 20+5, descripción en dos renglones, miles 1.500,00, NIF de DAFRICA en el recuadro del cliente
 
-- Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **AUTO_OK**
+- Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **REVISAR**
 - Proveedor: SUMINISTROS NORTE FICTICIOS, S.L. · NIF B24123457 (OK) · NIF de DAFRICA descartado como emisor: B24000002
 - Número «4500123456» (OK) · Fecha «15/10/2026» → 2026-10-15 (OK)
 - Líneas: 5
 - Validación tabla: OK · Columnas: referencia, descripcion, cantidad, unidad, precio, descuento, importe
 - Validación lineas: OK · 5 líneas de artículo
 - Validación total_lineas: OK · Impreso 5 / leídas 5
-- Validación suma_importes: OK · Suma de líneas 345.02 / impreso «345,02»
+- Validación totales: FALLO · Base + IVA no coincide con el total impreso
+- Incidencia: Validación totales: Base + IVA no coincide con el total impreso
 
-### S02-subtotal-anotacion-recogida
+### S02-subtotal-anotacion-recogida ⚠
 Columnas ARTÍCULO/SUBTOTAL/TOTAL, número y fecha en tabla de cabecera, fecha con año de dos cifras, fila «RETIRADO POR» con cantidad
 
-- Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **AUTO_OK**
+- Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **REVISAR**
 - Proveedor: FERRETERIA DEL SIL FICTICIA, S.L. · NIF B24555559 (OK) · NIF de DAFRICA descartado como emisor: B24000002
 - Número «003424» (OK) · Fecha «17-10-26» → 2026-10-17 (OK)
 - Líneas: 2 · ignoradas: «RETIRADO POR: PEDRO G. 1» (Anotación de recogida, no es un artículo)
 - Validación tabla: OK · Columnas: referencia, descripcion, cantidad, precio, subtotal, descuento, importe
 - Validación lineas: OK · 2 líneas de artículo
+- Validación totales: FALLO · Base + IVA no coincide con el total impreso
+- Incidencia: Validación totales: Base + IVA no coincide con el total impreso
 
 ### S03-codigo-con-forma-decimal
 Código impreso 8.286,0800 que NO es un precio, cantidades con 4 decimales, fecha en texto, línea sin código
@@ -102,17 +105,18 @@ El emisor no imprime su NIF: solo aparece el de DAFRICA como destinatario. No de
 - Incidencia: proveedor: Solo aparece el NIF del destinatario (DAFRICA): el emisor no se puede identificar
   - `cabecera.proveedor_nif` MARCADO_COMO_ESPERADO · esperado null · obtenido null (VACIO)
 
-### S07-multipagina
+### S07-multipagina ⚠
 Tabla en dos páginas con cabecera repetida y «SUMA Y SIGUE»; total de líneas y base en la última
 
-- Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **AUTO_OK**
+- Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **REVISAR**
 - Proveedor: SUMINISTROS NORTE FICTICIOS, S.L. · NIF B24123457 (OK) · NIF de DAFRICA descartado como emisor: B24000002
 - Número «4500777000» (OK) · Fecha «13/10/2026» → 2026-10-13 (OK)
 - Líneas: 5
 - Validación tabla: OK · Columnas: referencia, descripcion, cantidad, unidad, precio, descuento, importe
 - Validación lineas: OK · 5 líneas de artículo
 - Validación total_lineas: OK · Impreso 5 / leídas 5
-- Validación suma_importes: OK · Suma de líneas 42 / impreso «42,00»
+- Validación totales: FALLO · Base + IVA no coincide con el total impreso
+- Incidencia: Validación totales: Base + IVA no coincide con el total impreso
 
 ### S09-texto-caracter-a-caracter
 El PDF posiciona cada carácter por separado (habitual en algunos ERP); títulos abreviados Cód./Artículo/Uds./P.V.P./% Dto/Neto

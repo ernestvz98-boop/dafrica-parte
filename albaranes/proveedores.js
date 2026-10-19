@@ -20,13 +20,13 @@ const REGISTRO={
  // La empresa receptora: nunca puede ser el emisor de un albarán de compra.
  empresa_propia:{
   nombres:["DAFRICA BIERZO","DAFRICA"],
-  nifs:[] // Pendiente: NIF de DAFRICA BIERZO, S.L. tal como figura en sus albaranes.
+  nifs:["B24694960"] // Impreso como destinatario en los albaranes de Saltoki, Rodavi y Maderas Pereira.
  },
  proveedores:[
-  {id:"SALTOKI",nombre:"SALTOKI PONFERRADA, S.L.",nifs:[],formato_numeros:"es",formato_confirmado:false},
-  {id:"RODAVI",nombre:"RODAVI SUMINISTROS, S.L.",nifs:[],formato_numeros:"es",formato_confirmado:false,
+  {id:"SALTOKI",nombre:"SALTOKI PONFERRADA, S.L.",nifs:["B24680043"],formato_numeros:"es",formato_confirmado:true},
+  {id:"RODAVI",nombre:"RODAVI SUMINISTROS, S.L.",nifs:["B24557613"],formato_numeros:"es",formato_confirmado:true,
    anotaciones_no_articulo:["RETIRADO POR","RECOGIDO POR","PEDIDO POR"]},
-  {id:"MADERAS_PEREIRA",nombre:"MADERAS PEREIRA REGUERAS, S.L.U.",nifs:[],formato_numeros:"es",formato_confirmado:false,
+  {id:"MADERAS_PEREIRA",nombre:"MADERAS PEREIRA REGUERAS, S.L.U.",nifs:["B24598583"],formato_numeros:"es",formato_confirmado:true,
    permite_sin_referencia:true,referencia_literal:true}
  ]
 };

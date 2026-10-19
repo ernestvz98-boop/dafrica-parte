@@ -51,6 +51,8 @@ function celdasDeLinea(fragmentos){
   if(ultima&&hueco<umbral){
    ultima.texto+=(hueco>0.12*f.alto?" ":"")+f.texto;
    ultima.crudo=null; // tras unir fragmentos ya no hay posición por carácter
+   // OCR: la confianza de una celda es la de su palabra menos segura.
+   if(f.conf!=null)ultima.conf=ultima.conf==null?f.conf:Math.min(ultima.conf,f.conf);
    ultima.x1=Math.max(ultima.x1,f.x1);
    ultima.alto=Math.max(ultima.alto,f.alto);
   }else celdas.push({...f});
@@ -61,7 +63,9 @@ function celdasDeLinea(fragmentos){
 function agruparLineas(fragmentos){
  const orden=[...fragmentos].sort((a,b)=>a.y-b.y||a.x0-b.x0),lineas=[];
  for(const f of orden){
-  const linea=lineas.find(l=>Math.abs(l.y-f.y)<=0.35*Math.min(l.alto,f.alto));
+  // Tolerancia de 0,45 × altura: absorbe el desfase de línea base del OCR (1–2 pt) y queda muy
+  // por debajo del interlineado real (≥ 1,1 × altura).
+  const linea=lineas.find(l=>Math.abs(l.y-f.y)<=0.45*Math.min(l.alto,f.alto));
   if(linea){linea.fragmentos.push(f);linea.alto=Math.max(linea.alto,f.alto);}
   else lineas.push({y:f.y,alto:f.alto,fragmentos:[f]});
  }
