@@ -79,6 +79,35 @@ async function pcLeerTablaMixta(doc){
      o.fillStyle="#111";o.font="bold 30px sans-serif";o.fillText("F"+(i+1),12,dy+98);
      o.drawImage(fullCanvas,Math.floor(w*.035),sourceY,Math.floor(w*.95),sourceH,94,dy+13,1760,172);
    }
+   // Magnified column evidence: prevent the model mistaking codes that
+   // resemble decimals (8.286,0800) for prices, or EAN text for a code.
+   // Each crop is from the SAME unaltered PDF pixel buffer.
+   const cropHints=document.createElement("canvas");
+   cropHints.width=1860;cropHints.height=detected.length*125+35;
+   const hc=cropHints.getContext("2d",{alpha:false});
+   hc.fillStyle="#fff";hc.fillRect(0,0,cropHints.width,cropHints.height);
+   hc.fillStyle="#172033";hc.font="bold 20px sans-serif";
+   hc.fillText("COLUMNAS AISLADAS DEL ORIGINAL: CODIGO / CANTIDAD / PRECIO / DTO / IMPORTE",12,24);
+   const colRanges=profile==="MADERAS"
+      ?[[.032,.180],[.625,.728],[.726,.823],[.811,.903],[.902,.985]]
+      :[[.028,.155],[.510,.620],[.615,.732],[.805,.895],[.900,.985]];
+   const xStarts=[20,390,695,1000,1305], widths=[355,290,290,290,540];
+   for(let j=0;j<detected.length;j++){
+     const [a,b]=detected[j],middle=(a+b)/2;
+     const sy=Math.max(0,Math.floor(middle-Math.max(h*.005,(b-a)*.9)));
+     const sh=Math.min(h-sy,Math.ceil(Math.max(h*.010,(b-a)*1.8)));
+     const yy=35+j*125;
+     hc.font="bold 18px sans-serif";hc.fillStyle="#263449";
+     hc.fillText("F"+(j+1),2,yy+60);
+     for(let k=0;k<colRanges.length;k++){
+       const [lo,hi]=colRanges[k],cx=Math.floor(w*lo),cw=Math.max(3,Math.floor(w*(hi-lo)));
+       hc.strokeStyle="#cad3df";hc.strokeRect(xStarts[k],yy,widths[k]-6,112);
+       const destW=widths[k]-12;
+       hc.drawImage(fullCanvas,cx,sy,cw,sh,xStarts[k]+3,yy+8,destW,92);
+     }
+   }
+   const hintImage=cropHints.toDataURL("image/jpeg",.91);
+   cropHints.width=0;cropHints.height=0;
    const rowImage=output.toDataURL("image/jpeg",.88);
    output.width=0;output.height=0;
    // Header composite gives the printed date and number more pixels than the
@@ -107,7 +136,7 @@ async function pcLeerTablaMixta(doc){
    return {
     numero_filas_geometricas:detected.length,lineas_validas:true,
     lineas:candidates,
-    imagenes_zonas:[rowImage],imagen_cabecera:headerImage,
+    imagenes_zonas:[rowImage],imagen_columnas:[hintImage],imagen_cabecera:headerImage,
     perfil_formato:profile,permite_sin_referencia:profile==="MADERAS",
     codigo_proyecto:String(doc.codigo_proyecto||""),
     bandas_fisicas:detected.map(([a,b],i)=>({fila:i+1,y_inicio:Math.round(10000*a/h)/10000,y_fin:Math.round(10000*b/h)/10000})),
