@@ -9,16 +9,27 @@ create table if not exists public.stel_proveedores (
   verificado_en timestamptz not null default now()
 );
 
--- Artículos: (proveedor, referencia impresa) → artículo STEL.
+-- Artículos: (proveedor, referencia impresa) → artículo STEL, con trazabilidad de su origen.
 create table if not exists public.stel_articulos (
   id bigserial primary key,
-  account_id bigint not null,
+  account_id bigint not null,                  -- proveedor STEL
+  proveedor_nif text,
   referencia_proveedor text not null,          -- literal impreso
   referencia_canonica text not null,           -- mayúsculas sin signos
-  item_id bigint not null,
-  origen text not null check (origen in ('catalogo_existente','creado_por_dafrica','manual')),
+  descripcion_original text,
+  descripcion_normalizada text,
+  unidad text,
+  codigo_barras text,
+  item_id bigint,                              -- null mientras está en revisión
+  estado text not null check (estado in ('existente','mapeado','creado_automaticamente','revision_articulo')),
+  via text,                                    -- referencia | codigo_barras | descripcion | alta_nueva | manual
+  candidatos bigint[],                         -- artículos posibles cuando hay revisión
+  origen text not null default 'lector_pdf',
+  documento_origen_id uuid references public.coste_documentos(id),  -- albarán que provocó el alta
+  creado_en timestamptz not null default now(),
   verificado_en timestamptz not null default now(),
-  unique (account_id, referencia_canonica)
+  unique (account_id, referencia_canonica),
+  check (estado = 'revision_articulo' or item_id is not null)
 );
 
 -- Ciclo de vida del albarán en STEL y vinculación con la obra.
@@ -47,7 +58,8 @@ alter table public.coste_lineas
   add column if not exists fuente_precio text check (fuente_precio in ('documento','pedido_compra','articulo_stel','factura_original')),
   add column if not exists fuente_documento text,
   add column if not exists fecha_resolucion_precio timestamptz,
-  add column if not exists stel_item_id bigint;
+  add column if not exists stel_item_id bigint,
+  add column if not exists estado_articulo text check (estado_articulo in ('existente','mapeado','creado_automaticamente','revision_articulo'));
 
 -- Acceso: solo funciones del servidor (service_role); la web lee a través de RPC/vistas con permisos.
 alter table public.stel_proveedores enable row level security;

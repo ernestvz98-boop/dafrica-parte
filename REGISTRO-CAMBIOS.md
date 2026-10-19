@@ -3,6 +3,17 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-19 · Valores STEL confirmados y resolución de artículos
+
+**Producción:** sin escrituras en STEL ni en la base de datos.
+- Lecturas (función temporal v6 y v8, ahora desactivada otra vez, v9): series, estados,
+  categorías, impuestos, 14.311 albaranes de compra (300 más recientes analizados) y catálogo.
+- Confirmado: serie por defecto ABP26 (id 766480), estado inicial «Pendiente de facturar»
+  (id 23350), STEL guarda precio 0 (nunca null) en líneas. Detalle en `docs/stel-prueba-controlada.md`.
+- `albaranes/articulos.js` (+ 10 pruebas): mapeo guardado → referencia → código de barras →
+  descripción normalizada → anti-duplicados → alta; varias coincidencias → `revision_articulo`.
+- Propuesta SQL ampliada con la trazabilidad de artículos (no aplicada).
+
 ## 2026-10-19 · Regla de precios pendientes y diseño de creación de albaranes en STEL
 
 **Producción:** sin escrituras en STEL ni en la base de datos.
