@@ -9,7 +9,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
  const root=$("pcBatch");if(!root||!has("costes.ver"))return;
  root.innerHTML='<div class="card">'+
  '<h3>Interpretar albaranes de PDF · SIN GUARDAR</h3>'+
- '<p class="muted">Modo temporal: separa páginas, lee proveedor, número impreso, fecha, PRY y cada artículo. Si hay dos interpretaciones distintas, muestra las dos para contrastarlas. <b>No archiva PDF, no guarda materiales, no registra costes, no crea albaranes en STEL y no asigna obras.</b></p>'+
+ '<p class="muted">Modo temporal: separa páginas, lee proveedor, número impreso, fecha, PRY y cada artículo. Conserva los números con coma decimal tal como se imprimen y muestra las lecturas originales si existen diferencias. <b>No archiva PDF, no guarda materiales, no registra costes, no crea albaranes en STEL y no asigna obras.</b></p>'+
  '<label for="pcPreviewFile">PDF a interpretar (máximo 6 MB y 10 páginas por lote)</label>'+
  '<input type="file" id="pcPreviewFile" accept=".pdf,application/pdf">'+
  '<label style="display:flex;align-items:center;gap:8px;margin:12px 0">'+
@@ -30,15 +30,21 @@ renderComprasLotePilot=function renderComprasTemporal(){
   return '<div class="table-wrap" style="overflow:auto;max-height:700px"><table>'+
    '<thead><tr><th>Fila</th><th>Referencia</th><th>Descripción interpretada</th><th>Cantidad</th><th>Unidad</th><th>Precio impreso</th><th>Lecturas</th></tr></thead><tbody>'+
    rows.map(r=>{
-    const statusText=r.estado_lectura==="COINCIDE"?"Coinciden":r.estado_lectura==="DIFERENTE"?"Difieren":"Lectura incompleta";
+    const statusText=r.estado_lectura==="COINCIDE"?"Coinciden":r.estado_lectura==="COINCIDENCIA_PRINCIPAL"?"Referencia, descripción y cantidad coinciden (otros campos incompletos)":r.estado_lectura==="DIFERENTE"?"Difieren":"Lectura incompleta";
     const value=Array.isArray(r.lecturas)?r.lecturas:[];
-    const evidence=value.length?'<details><summary>'+esc(statusText)+(r.campos_diferentes?.length?' ('+esc(r.campos_diferentes.join(", "))+')':'')+'</summary>'+
+    const literal=Array.isArray(r.lecturas_literales)?r.lecturas_literales:[];
+    const extra=literal.length?'<p><b>Columnas transcritas literalmente:</b></p>'+literal.map((x,i)=>
+      '<p><b>Transcripción literal '+(i+1)+'</b>: código '+esc(x.referencia||"vacío")+
+      ' · cantidad «'+esc(x.cantidad_impresa||"ilegible")+'» · precio «'+esc(x.precio_impreso||"en blanco")+
+      '» · descuento «'+esc(x.descuento_impreso||"en blanco")+'» · importe «'+
+      esc(x.importe_impreso||"en blanco")+'»</p>').join(""):"";
+    const evidence=value.length||literal.length?'<details><summary>'+esc(statusText)+(r.campos_diferentes?.length?' ('+esc(r.campos_diferentes.join(", "))+')':'')+'</summary>'+
        value.map((x,i)=>'<p><b>Lectura '+(i+1)+'</b>: '+esc(x.referencia||"sin referencia")+' | '+esc(x.descripcion||"sin descripción")+
        ' | Cant. '+esc(x.cantidad??"no legible")+' | '+esc(x.unidad||"sin unidad")+
-       ' | Precio '+esc(x.precio_unitario??"no consta")+'</p>').join("")+'</details>':'No disponible';
+       ' | Precio '+esc(x.precio_unitario??"no consta")+'</p>').join("")+extra+'</details>':'No disponible';
     return '<tr><td>'+esc(r.fila)+'</td><td>'+esc(r.referencia||"—")+'</td>'+
-      '<td>'+esc(r.descripcion||"No legible")+'</td><td>'+esc(r.cantidad??"—")+'</td>'+
-      '<td>'+esc(r.unidad||"—")+'</td><td>'+esc(r.precio_unitario??"No consta")+'</td><td>'+evidence+'</td></tr>';
+      '<td>'+esc(r.descripcion||"No legible")+'</td><td>'+esc(r.cantidad_impresa||((r.cantidad??"—")) )+'</td>'+
+      '<td>'+esc(r.unidad||"—")+'</td><td>'+esc(r.precio_impreso||(r.precio_unitario??"No consta"))+'</td><td>'+evidence+'</td></tr>';
    }).join("")+'</tbody></table></div>';
  };
  const renderResult=(r,source,index)=>{
@@ -53,7 +59,8 @@ renderComprasLotePilot=function renderComprasTemporal(){
   const header='<p><b>Número impreso:</b> '+esc(number)+' · <b>Fecha:</b> '+esc(r.fecha||"No comprobada")+
     ' · <b>Proveedor:</b> '+esc(r.proveedor||"No identificado")+'</p>'+
     '<p><b>Obra impresa:</b> '+esc(r.obra_impresa||"No consta")+
-    ' · <b>PRY manuscrito:</b> '+esc(r.pry_literal||r.pry_codigo||"No consta")+
+    ' · <b>PRY identificado:</b> '+esc(r.pry_codigo||"No identificado")+
+    (r.anotacion_manual?'<br><b>Otras anotaciones:</b> '+esc(r.anotacion_manual):"")+
     ' · <b>Estado:</b> '+(verified?'Lectura concordante':'Hay campos o filas por corroborar')+'</p>';
   const alt=Array.isArray(r.cabeceras_leidas)&&r.cabeceras_leidas.length?
     '<details><summary>Ver las lecturas de la cabecera</summary>'+
@@ -107,7 +114,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
        }catch(e){warning="No pudo delimitarse la tabla física: "+String(e?.message||e)}
      }
      try{
-       const res=await authFetch(SUPABASE_URL+"/functions/v1/compras-interpretar-v1",{
+       const res=await authFetch(SUPABASE_URL+"/functions/v1/compras-interpretar-v2",{
          method:"POST",headers:{"Content-Type":"application/json"},
          body:JSON.stringify({
            data:"data:application/pdf;base64,"+d.pdf_separado_b64,
