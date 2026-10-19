@@ -203,18 +203,19 @@ const exactSchema={type:"object",additionalProperties:false,properties:{
  lineas:{type:"array",items:exactLineSchema},
  dudas:{type:"array",items:{type:"string"}}
 },required:["lineas","dudas"]};
-async function readPrintedCells(key:string,images:string[],count:number,model:string,profile:string){
+async function readPrintedCells(key:string,images:string[],count:number,model:string,profile:string,zoom:string[]=[]){
  const content:any[]=[{
  type:"input_text",
  text:"COPIA LITERAL DE TABLA ESPAÑOLA ESCANEADA. NO REALICES CÁLCULOS NI CONVIERTAS NÚMEROS A NUMBER. Cada imagen muestra filas marcadas F1...F"+count+
  ". Para cada fila escribe el texto tal cual aparece en las columnas. IMPORTANTE: en MADERAS PEREIRA la cantidad se imprime 1,0000 (=una unidad) y 4,0000 (=cuatro). No confundas 1,0000 con 1000 ni tomes el descuento 20,00 como cantidad. " +
- "Las columnas son: Cod. Artículo (a la izquierda), Descripción, Cantidad, Precio, Dto. e Importe (a la derecha). 'Cod. Artículo' NO pertenece a Descripción. "+
+ "Las columnas se leen por posición, no por apariencia de los números. MADERAS PEREIRA: Código artículo (muy a la izquierda), Descripción, Cantidad, Precio, Dto, Importe. En MADERAS un código puede parecer decimal, como 8.286,0800: es CÓDIGO, no precio. Los EAN de 13 dígitos y cadenas T1004t o F1008M pueden estar al COMIENZO DE LA DESCRIPCIÓN y NO sustituyen al código impreso. RODAVI: ARTÍCULO, DESCRIPCIÓN, CANTIDAD, PRECIO UNIDAD, SUBTOTAL, DTO, TOTAL. El SUBTOTAL no es unidad ni PRECIO UNITARIO. No hay columna UNIDAD en estos modelos: unidad_impresa debe ser cadena vacía. "+
  "Copia los separadores originales, comas y puntos SIN convertir: referencia_impresa mantiene los puntos/comas del código; cantidad_impresa conserva '1,0000'; precio_impreso conserva, por ejemplo, '520,0000'; descuento_impreso '20,00'. "+
  "Si una columna está vacía, devuelve cadena vacía, NUNCA null/0 ni valores de columnas vecinas. "+
  "Un título como 'obra torre del bierzo', 'suministro y montaje' o 'REF TORRE' no es una línea de material. "+
  "Enumera cada FILA FÍSICA sin desplazar ninguna. Si una cifra es ilegible deja ese campo vacío y anota duda. Proveedor: "+profile+"."
  }];
  images.forEach((img,i)=>{content.push({type:"input_text",text:"FILAS F"+(i*5+1)+" a F"+Math.min(count,(i+1)*5)+". Lee texto de CADA COLUMNA por separado."});content.push({type:"input_image",image_url:img,detail:"high"});});
+ if(zoom.length){content.push({type:"input_text",text:"SEGUNDA IMAGEN DE CONTROL: recortes AMPLIADOS de las cinco columnas de cada fila del MISMO PDF. En cada fila, el bloque de más a la izquierda es el código de artículo; a continuación se ven cantidad, precio unitario, descuento e importe en ese orden. Usa estos acercamientos para evitar saltar columnas."});zoom.forEach(img=>content.push({type:"input_image",image_url:img,detail:"high"}));}
  const response=await fetch("https://api.openai.com/v1/responses",{
   method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},
   body:JSON.stringify({model,store:false,input:[{role:"user",content}],
@@ -386,6 +387,10 @@ Deno.serve(async(req:Request)=>{
    const hasGeometry=Number.isInteger(n)&&n>=1&&n<=50&&
      Array.isArray(bands)&&bands.length===Math.ceil(n/5)&&
      bands.every((b:any)=>typeof b==="string"&&b.startsWith("data:image/jpeg;base64,"));
+   const candidateZoom=input?.imagen_columnas;
+   const columnImages=Array.isArray(candidateZoom)&&candidateZoom.length===1&&
+     candidateZoom.every((x:any)=>typeof x==="string"&&/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(x)&&x.length<2800000)?
+     candidateZoom:[];
    const jobs:any=[
      vision(key,pdf,Deno.env.get("OPENAI_VISION_MODEL")||"gpt-4o"),
      vision(key,pdf,Deno.env.get("OPENAI_VISION_AUDIT_MODEL")||"gpt-4.1")
@@ -394,8 +399,8 @@ Deno.serve(async(req:Request)=>{
      jobs.push(auditBands(key,bands,n,"gpt-4o"));
      jobs.push(auditBands(key,bands,n,"gpt-4.1"));
      if(["MADERAS","RODAVI"].includes(String(input?.perfil_formato||"").toUpperCase())){
-       jobs.push(readPrintedCells(key,bands,n,"gpt-4o",String(input.perfil_formato)));
-       jobs.push(readPrintedCells(key,bands,n,"gpt-4.1",String(input.perfil_formato)));
+       jobs.push(readPrintedCells(key,bands,n,"gpt-4o",String(input.perfil_formato),columnImages));
+       jobs.push(readPrintedCells(key,bands,n,"gpt-4.1",String(input.perfil_formato),columnImages));
      }
    }
    if(input?.imagen_cabecera){
