@@ -257,7 +257,7 @@ const cleanUnit=(v:any)=>{
 const benignText=(v:any)=>norm(v).replace(/[^A-Z0-9]/g,"");
 function mergeLiteralRows(lines:any[],fromLiteral:any[],n:number){
  const rows:any[]=[];
- const equalRef=(a:any,b:any)=>benignText(a)===benignText(b);
+ const equalRef=(a:any,b:any)=>String(a??"").replace(/\s+/g,"").toUpperCase()===String(b??"").replace(/\s+/g,"").toUpperCase();
  const amountValid=(r:any)=>{
   if(!r)return false;
   if(r.cantidad===null||r.precio_unitario===null||r.importe===null)return null;
