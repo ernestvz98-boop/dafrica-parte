@@ -99,7 +99,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
      status.textContent="Interpretando "+(index+1)+" de "+split.documentos.length+
        " · "+String(d.numero||"documento sin identificar");
      if(!d.pdf_separado_b64){out[index]={error:"No se pudo separar el PDF de este documento"};continue}
-     let n=null,rows=null,bands=null,header=null,profile="",noRef=false,warning="";
+     let n=null,rows=null,bands=null,columnHints=null,header=null,profile="",noRef=false,warning="";
      if((d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
        try{
          const geo=String(d.proveedor||"").toUpperCase().includes("SALTOKI")?
@@ -107,7 +107,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
             await pcLeerTablaMixta(d);
          if(geo?.lineas_validas&&Number.isInteger(geo.numero_filas_geometricas)&&
             geo.numero_filas_geometricas===geo.lineas?.length){
-           n=geo.numero_filas_geometricas;rows=geo.lineas;bands=geo.imagenes_zonas;
+           n=geo.numero_filas_geometricas;rows=geo.lineas;bands=geo.imagenes_zonas;columnHints=geo.imagen_columnas||null;
            header=geo.imagen_cabecera||null;profile=geo.perfil_formato||"";
            noRef=geo.permite_sin_referencia===true;
          }else warning=geo?.geometria_razon||"La geometría de tabla no es concluyente";
@@ -119,7 +119,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
          body:JSON.stringify({
            data:"data:application/pdf;base64,"+d.pdf_separado_b64,
            numero_esperado:d.numero||"",proveedor_esperado:d.proveedor||"",fecha_esperada:d.fecha||null,
-           lineas_geometricas:n,geometria_filas:rows,geometria_imagenes:bands,imagen_cabecera:header,
+           lineas_geometricas:n,geometria_filas:rows,geometria_imagenes:bands,imagen_columnas:columnHints,imagen_cabecera:header,
            perfil_formato:profile,permite_sin_referencia:noRef
          })
        });
