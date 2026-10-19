@@ -255,7 +255,7 @@ const cleanUnit=(v:any)=>{
  return x;
 };
 const benignText=(v:any)=>norm(v).replace(/[^A-Z0-9]/g,"");
-function mergeLiteralRows(lines:any[],fromLiteral:any[],n:number){
+function mergeLiteralRows(lines:any[],fromLiteral:any[],n:number,profile:string){
  const rows:any[]=[];
  const equalRef=(a:any,b:any)=>String(a??"").replace(/\s+/g,"").toUpperCase()===String(b??"").replace(/\s+/g,"").toUpperCase();
  const amountValid=(r:any)=>{
@@ -273,7 +273,11 @@ function mergeLiteralRows(lines:any[],fromLiteral:any[],n:number){
   const old=lines[i]||{},diff:string[]=[];
   // Independently confirm EACH FIELD. A description discrepancy must not
   // suppress a correctly verified quantity or printed reference.
-  const codeOK=!!a&&!!b&&equalRef(a.referencia,b.referencia);
+  // A 13-digit EAN from the description must not be accepted as the
+  // supplier's printed decimal article code just because two models agree.
+  const shape=(v:string)=>!v||profile!=="MADERAS"||/^\d{1,3}\.\d{3},\d{4}$/.test(v);
+  const sameCode=!!a&&!!b&&equalRef(a.referencia,b.referencia);
+  const codeOK=sameCode&&shape(a.referencia)&&shape(b.referencia);
   const quantityOK=!!a&&!!b&&a.cantidad!==null&&a.cantidad>0&&a.cantidad===b.cantidad;
   const descriptionOK=!!a&&!!b&&!!benignText(a.descripcion)&&
      benignText(a.descripcion)===benignText(b.descripcion);
@@ -295,20 +299,22 @@ function mergeLiteralRows(lines:any[],fromLiteral:any[],n:number){
     partial?"PARCIAL":"DIFERENTE";
   const present=a||b;
   const code=codeOK?(a?.referencia||""):"";
+  const suspiciousCode=sameCode&&!codeOK;
   const quantity=quantityOK?a.cantidad:null;
   const price=priceOK?a.precio_unitario:null;
   const discount=discountOK?a.descuento:null;
   const amount=totalOK?a.importe:null;
   rows.push({
    ...old,fila:i+1,
-   referencia:code,descripcion:descriptionOK?a.descripcion:(a?.descripcion||b?.descripcion||""),
+   referencia:code,referencia_candidata:!codeOK?(a?.referencia||b?.referencia||""):"",
+   descripcion:descriptionOK?a.descripcion:(a?.descripcion||b?.descripcion||""),
    cantidad:quantity,cantidad_impresa:quantityOK?a.cantidad_impresa:"",
    // None of the RODAVI/MADERAS specimen layouts has a physical 'unidad' column.
    unidad:"",precio_unitario:price,precio_impreso:priceOK?a.precio_impreso:"",
    descuento:discount,descuento_impreso:discountOK?a.descuento_impreso:"",
    importe:amount,importe_impreso:totalOK?a.importe_impreso:"",
    estado_lectura:status,campos_diferentes:diff,
-   comprobacion_literal:critical,
+   comprobacion_literal:critical,codigo_formato_no_confirmado:suspiciousCode,
    campos_comprobados:{
      referencia:codeOK,cantidad:quantityOK,descripcion:descriptionOK,
      precio:priceOK,descuento:discountOK,importe:totalOK,
@@ -456,7 +462,7 @@ Deno.serve(async(req:Request)=>{
    const maxRows=hasGeometry?n:Math.max(0,...lengths);
    let materials=previewLines(readViews,maxRows,hasGeometry);
    if(hasGeometry&&["MADERAS","RODAVI"].includes(String(input?.perfil_formato||"").toUpperCase()))
-     materials=mergeLiteralRows(materials,literals,n);
+     materials=mergeLiteralRows(materials,literals,n,String(input?.perfil_formato||"").toUpperCase());
    // Supplier collection notes can contain a quantity without constituting
    // an article. Exclude only when BOTH readers explicitly report the pickup
    // note and neither one reads a unit price.
