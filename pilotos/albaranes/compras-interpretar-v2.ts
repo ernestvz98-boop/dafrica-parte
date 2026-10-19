@@ -284,12 +284,12 @@ function mergeLiteralRows(lines:any[],fromLiteral:any[],n:number){
     descuento_impreso:prefer.descuento_impreso,importe_impreso:prefer.importe_impreso,
     descuento:one.descuento===two.descuento?prefer.descuento:null,
     importe:one.importe===two.importe?prefer.importe:null,
-    unidad:cleanUnit(prefer.unidad)||cleanUnit(old.unidad)||"",
+    unidad:prefer.unidad||"", // No unit column on many source layouts; never infer one.
     estado_lectura:diff.length?"COINCIDENCIA_PRINCIPAL":"COINCIDE",
     campos_diferentes:diff,
     comprobacion_literal:true
   }:{
-    ...old,estado_lectura:"DIFERENTE",campos_diferentes:[...new Set([...(old.campos_diferentes||[]),...diff])],
+    ...old,cantidad:null,precio_unitario:null,unidad:"",estado_lectura:"DIFERENTE",campos_diferentes:[...new Set([...(old.campos_diferentes||[]),...diff])],
     comprobacion_literal:false
   };
   clean.lecturas_literales=[one,two].filter(Boolean);
@@ -426,7 +426,8 @@ Deno.serve(async(req:Request)=>{
    const lengths=readViews.map((v:any)=>Array.isArray(v.lineas)?v.lineas.length:0);
    const maxRows=hasGeometry?n:Math.max(0,...lengths);
    let materials=previewLines(readViews,maxRows,hasGeometry);
-   if(literals.length===2&&hasGeometry)materials=mergeLiteralRows(materials,literals,n);
+   if(hasGeometry&&["MADERAS","RODAVI"].includes(String(input?.perfil_formato||"").toUpperCase()))
+     materials=mergeLiteralRows(materials,literals,n);
    const disagreement=materials.filter(x=>!["COINCIDE","COINCIDENCIA_PRINCIPAL"].includes(x.estado_lectura)).length;
    const numberExpected=String(input?.numero_esperado||"");
    if(numberExpected&&header.numero&&canon(numberExpected)!==canon(header.numero))
