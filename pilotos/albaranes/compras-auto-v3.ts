@@ -518,7 +518,7 @@ Deno.serve(async(req:Request)=>{
     if(!existing.length){
       const newRows=result.items.map((v:any)=>({
         documento_id:docId,codigo_articulo:v.referencia,descripcion:v.descripcion,
-        cantidad:v.cantidad,unidad:v.unidad||null,precio_unitario:null,obra_id:null
+        cantidad:v.cantidad,unidad:v.unidad||null,precio_unitario:allowed==="ALBARAN"?null:v.precio_unitario,obra_id:null
       }));
       const created=await fetch(base+"/rest/v1/coste_lineas",{
         method:"POST",headers:{...dbHead,Prefer:"return=minimal"},
