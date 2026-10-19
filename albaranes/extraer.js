@@ -388,7 +388,7 @@ function leerTablaPagina(pagina){
    // continuación de la columna de texto anterior («… (BOLSA 100)»).
    if(NUMERICAS.has(campo)&&!pareceNumero(c.texto)&&!RE_CANTIDAD_UNIDAD.test(c.texto.trim())&&ultimoTexto)campo=ultimoTexto;
    // Una cifra que termina muy a la izquierda de su título no es de esa columna: forma parte
-   // del texto anterior («Aglomerado 2,44 x 1,22 x 19 mm»).
+   // del texto anterior («Tablero 2,44 x 1,22 x 19 mm»).
    const col=cols.find(x=>x.campo===campo);
    if(NUMERICAS.has(campo)&&col?.x0!=null&&c.x1<col.x0-2*(c.alto||altoFila)&&ultimoTexto)campo=ultimoTexto;
    if(!NUMERICAS.has(campo))ultimoTexto=campo;
@@ -470,7 +470,7 @@ function leerTablaPagina(pagina){
    ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Texto sin artículo ni cifras válidas (posible manuscrito o marca)"});
    continue;
   }
-  // Segundo renglón de una anotación («Retirado por: OSCAR» / «DIEGUEZ»).
+  // Segundo renglón de una anotación («Retirado por: JUAN» / «PÉREZ»).
   const soloTextoLinea=Object.keys(celdas).every(k=>["descripcion","referencia","otra","unidad"].includes(k));
   if(anotacion&&!tieneCantidad&&!tieneImportes&&(soloTextoLinea||!tieneRef)&&linea.y-yAnterior<=2*Math.max(linea.alto,altoFila)){
    ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Continuación de una anotación del proveedor"});
@@ -588,7 +588,7 @@ function leerTotales(lineas,opcionesNumero){
   if(Math.abs(b.valor+c.valor-t.valor)<=0.021&&t.valor>0)combos.push({b,c,t});
  const conPct=combos.flatMap(x=>unicos(P).filter(p=>Math.abs(x.b.valor*p.valor/100-x.c.valor)<=0.021).map(p=>({...x,p})));
  const elegidos=conPct.length?conPct:combos;
- // Base y cuota se imprimen a veces con 4 y con 2 decimales (77,7416 y 77,74): al céntimo
+ // Base y cuota se imprimen a veces con 4 y con 2 decimales (48,0000 y 48,00): al céntimo
  // son la misma combinación; se conserva la que tiene los importes en céntimos.
  const cent=v=>Math.round(v*100);
  const decs=x=>[x.b,x.c].reduce((n,y)=>n+((String(y.literal).match(/,(\d+)/)||[,""])[1].length>2?1:0),0);
@@ -747,7 +747,7 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
    if(f.unidad.estado==="VACIO")f.unidad={...f.unidad,literal:m[2],valor:m[2],estado:"OK"};
   }
  }
- // Cantidad y precio pegados en el original («1,00001.890,0000»): se separan solo si
+ // Cantidad y precio pegados en el original («1,00001.250,0000»): se separan solo si
  // ambas cifras tienen los decimales que usa el documento; el cuadre debe confirmarlo.
  for(const [k,otro] of [["cantidad","precio"],["precio","cantidad"]]){
   if(f[k].estado!=="INVALIDO"||f[otro].estado!=="VACIO"||!opcionesNumero.decimales)continue;

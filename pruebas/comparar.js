@@ -18,7 +18,7 @@ const CRITICAS=new Set(["INCORRECTO_NO_MARCADO","FALTA_MARCA"]);
 const iguales={
  texto:(a,b)=>(a===null||a===undefined||a==="")?(b===null||b===undefined||b===""):N.limpiar(a)===N.limpiar(b),
  descripcion:(a,b)=>N.canon(a)===N.canon(b),
- // Un importe impreso con dos precisiones («77,7416» y «77,74») admite ambas: [77.74, 77.7416].
+ // Un importe impreso con dos precisiones («48,0000» y «48,00») admite ambas: [48, 48.0].
  numero:(a,b)=>Array.isArray(a)?a.some(x=>iguales.numero(x,b)):(a===null||a===undefined)?(b===null||b===undefined):(typeof b==="number"&&Math.abs(a-b)<1e-9),
  descuento:(a,b)=>{
   const x=a===null||a===undefined?[]:[].concat(a),y=b===null||b===undefined?[]:[].concat(b);
