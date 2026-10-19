@@ -28,9 +28,9 @@ renderComprasLotePilot=function renderComprasTemporal(){
   const rows=Array.isArray(d.lineas)?d.lineas:[];
   if(!rows.length)return '<p class="muted">Sin filas fiables en la tabla. Se necesita una lectura de mayor calidad.</p>';
   return '<div class="table-wrap" style="overflow:auto;max-height:700px"><table>'+
-   '<thead><tr><th>Fila</th><th>Referencia</th><th>Descripción interpretada</th><th>Cantidad</th><th>Unidad</th><th>Precio impreso</th><th>Lecturas</th></tr></thead><tbody>'+
+   '<thead><tr><th>Fila</th><th>Referencia</th><th>Descripción interpretada</th><th>Cantidad</th><th>Unidad</th><th>Precio unitario</th><th>Dto. %</th><th>Importe final</th><th>Lecturas</th></tr></thead><tbody>'+
    rows.map(r=>{
-    const statusText=r.estado_lectura==="COINCIDE"?"Coinciden":r.estado_lectura==="COINCIDENCIA_PRINCIPAL"?"Referencia, descripción y cantidad coinciden (otros campos incompletos)":r.estado_lectura==="DIFERENTE"?"Difieren":"Lectura incompleta";
+    const statusText=r.estado_lectura==="COINCIDE"?"Coinciden":r.estado_lectura==="COINCIDENCIA_PRINCIPAL"?"Referencia, descripción y cantidad coinciden; datos económicos incompletos":r.estado_lectura==="PARCIAL"?"Código y cantidad coinciden; descripción pendiente":r.estado_lectura==="DIFERENTE"?"Difieren":"Lectura incompleta";
     const value=Array.isArray(r.lecturas)?r.lecturas:[];
     const literal=Array.isArray(r.lecturas_literales)?r.lecturas_literales:[];
     const extra=literal.length?'<p><b>Columnas transcritas literalmente:</b></p>'+literal.map((x,i)=>
@@ -44,7 +44,8 @@ renderComprasLotePilot=function renderComprasTemporal(){
        ' | Precio '+esc(x.precio_unitario??"no consta")+'</p>').join("")+extra+'</details>':'No disponible';
     return '<tr><td>'+esc(r.fila)+'</td><td>'+esc(r.referencia||"—")+'</td>'+
       '<td>'+esc(r.descripcion||"No legible")+'</td><td>'+esc(r.cantidad_impresa||((r.cantidad??"—")) )+'</td>'+
-      '<td>'+esc(r.unidad||"—")+'</td><td>'+esc(r.precio_impreso||(r.precio_unitario??"No consta"))+'</td><td>'+evidence+'</td></tr>';
+      '<td>'+esc(r.unidad||"—")+'</td><td>'+esc(r.precio_impreso||(r.precio_unitario??"No consta"))+'</td>'+ 
+      '<td>'+esc(r.descuento_impreso||(r.descuento??"—"))+'</td><td>'+esc(r.importe_impreso||(r.importe??"—"))+'</td><td>'+evidence+'</td></tr>';
    }).join("")+'</tbody></table></div>';
  };
  const renderResult=(r,source,index)=>{
@@ -54,14 +55,14 @@ renderComprasLotePilot=function renderComprasTemporal(){
   const title='<summary style="cursor:pointer;font-weight:bold">'+esc(number)+
     ' · '+esc(r.proveedor||source?.proveedor||"Proveedor no identificado")+
     ' · '+esc(r.lineas_detectadas??0)+' líneas'+
-    ' · '+(verified?'Lecturas concordantes':'Interpretación con dudas')+'</summary>';
+    ' · '+(verified?'Campos principales concordantes':'Campos pendientes de contrastar')+'</summary>';
   const c=r.cabecera||{};
   const header='<p><b>Número impreso:</b> '+esc(number)+' · <b>Fecha:</b> '+esc(r.fecha||"No comprobada")+
     ' · <b>Proveedor:</b> '+esc(r.proveedor||"No identificado")+'</p>'+
     '<p><b>Obra impresa:</b> '+esc(r.obra_impresa||"No consta")+
-    ' · <b>PRY identificado:</b> '+esc(r.pry_codigo||"No identificado")+
+    ' · <b>PRY manuscrito (no confirmado en STEL):</b> '+esc(r.pry_codigo||"No identificado")+
     (r.anotacion_manual?'<br><b>Otras anotaciones:</b> '+esc(r.anotacion_manual):"")+
-    ' · <b>Estado:</b> '+(verified?'Lectura concordante':'Hay campos o filas por corroborar')+'</p>';
+    ' · <b>Estado:</b> '+(verified?'Referencias, cantidades y descripciones concordantes':'Hay campos o filas por corroborar')+'</p>';
   const alt=Array.isArray(r.cabeceras_leidas)&&r.cabeceras_leidas.length?
     '<details><summary>Ver las lecturas de la cabecera</summary>'+
       r.cabeceras_leidas.map((h,i)=>'<p>Lectura '+(i+1)+': '+esc(join([h.numero,h.proveedor,h.fecha], " / "))+'</p>').join("")+'</details>':"";
@@ -136,7 +137,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
    const incomplete=interpreted.length-full;
    const failed=out.length-interpreted.length;
    results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos separados.</b> '+esc(interpreted.length)+
-     ' interpretados, '+esc(full)+' con lecturas concordantes, '+esc(incomplete)+
+     ' interpretados, '+esc(full)+' con los campos principales concordantes, '+esc(incomplete)+
      ' con campos por comprobar, '+esc(failed)+' sin interpretación. <b>0 documentos archivados.</b></p>'+
      out.map((r,i)=>r?.error?
        '<div class="module-note sensitive-note"><b>'+esc(split.documentos[i]?.numero||"Documento "+(i+1))+
