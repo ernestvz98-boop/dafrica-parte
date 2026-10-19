@@ -334,7 +334,13 @@ Deno.serve(async(req:Request)=>{
   }else{
     const pair=await Promise.all([vision(key,pdf,Deno.env.get("OPENAI_VISION_MODEL")||"gpt-4o"),vision(key,pdf,Deno.env.get("OPENAI_VISION_AUDIT_MODEL")||"gpt-4.1")]);
     first=pair[0];second=pair[1];result=compare(first,second,null);
-    if(Array.isArray(first.lineas)&&first.lineas.length>=7)result.errors.push("Documento con tabla larga sin geometría: no publicar");
+    // Full-page agreement is not independent physical evidence on a scan:
+    // unverified RODAVI/MADERAS rows remain held instead of false positives.
+    const vendor=norm(input?.proveedor_esperado||first.proveedor);
+    if(first.tipo==="ALBARAN"&&(vendor.includes("RODAVI")||vendor.includes("MADERAS PEREIRA")))
+      result.errors.push("Faltan bandas físicas contrastadas para este formato; no aceptar lectura global");
+    if(Array.isArray(first.lineas)&&first.lineas.length>=7)
+      result.errors.push("Documento con tabla larga sin geometría: no publicar");
   }
   if(resultCabeceraErrors.length){result.errors.push(...resultCabeceraErrors);result.validated=false;}
   if(cabeceraConfirmada&&input?.numero_esperado&&canon(first.numero)!==canon(input.numero_esperado)){
@@ -396,7 +402,7 @@ Deno.serve(async(req:Request)=>{
     !/^DAFRICABIERZO(?:SLU|SL)?$/.test(canon(first.proveedor));
   const oldDateDiff=old?.fecha_documento&&String(old.fecha_documento)!==String(dateForRecord);
   const missingDateWithoutProof=old&&!old.fecha_documento&&dateForRecord&&!cabeceraConfirmada;
-  if(old&&(oldNumberDiff||(oldSupplierDiff&&!recipientCorrection)||oldDateDiff||missingDateWithoutProof))
+  if(old&&(oldNumberDiff||(oldSupplierDiff&&!recipientCorrection)||(oldDateDiff&&!cabeceraConfirmada)||missingDateWithoutProof))
     result.errors.push("La identidad de la ficha retenida no pudo verificarse: no se sustituye el original");
   const verified=result.validated&&result.errors.length===0&&allowed!=="OTRO"&&!!date&&!!norm(first.numero);
   if(previouslyVerified){
@@ -479,7 +485,7 @@ Deno.serve(async(req:Request)=>{
   etapa="registrar_documento";
   const repaired=old&&verified?{
     ...(recipientCorrection?{proveedor_nombre:record.proveedor_nombre}:{}),
-    ...(!old.fecha_documento&&cabeceraConfirmada?{fecha_documento:record.fecha_documento}:{})
+    ...((!old.fecha_documento||oldDateDiff)&&cabeceraConfirmada?{fecha_documento:record.fecha_documento}:{})
   }:{};
   const changed=old?{...repaired,ia_estado:record.ia_estado,
     ia_datos:{...old.ia_datos,...record.ia_datos,
