@@ -63,7 +63,7 @@ Resultado: **correcto** (valor igual y aceptado), **correcto, a revisar** (igual
 | S01-cascada-dos-renglones | lineas.5.descuento | — | — | correcto | — |  |
 | S01-cascada-dos-renglones | lineas.5.importe | 30 | 30 | correcto | 0.99 |  |
 | S02-subtotal-anotacion-recogida | cabecera.proveedor_nif | B24555559 | B24555559 | correcto | 0.99 |  |
-| S02-subtotal-anotacion-recogida | cabecera.numero | 003424 | 003424 | correcto | 0.96 |  |
+| S02-subtotal-anotacion-recogida | cabecera.numero | 003999 | 003999 | correcto | 0.96 |  |
 | S02-subtotal-anotacion-recogida | cabecera.fecha | 2026-10-17 | 2026-10-17 | correcto | 0.96 |  |
 | S02-subtotal-anotacion-recogida | lineas.1.referencia | 104578 | 104578 | correcto | 0.96 |  |
 | S02-subtotal-anotacion-recogida | lineas.1.descripcion | BROCA SDS PLUS 10X160 | BROCA SDS PLUS 10X160 | correcto | 0.96 |  |
@@ -290,7 +290,7 @@ Columnas ARTÍCULO/SUBTOTAL/TOTAL, número y fecha en tabla de cabecera, fecha c
 
 - Tipo de PDF: DIGITAL · estado esperado **AUTO_OK**, obtenido **AUTO_OK**
 - Proveedor: FERRETERIA DEL SIL FICTICIA, S.L. · NIF B24555559 (OK) · NIF de DAFRICA descartado como emisor: B24000002
-- Número «003424» (OK) · Fecha «17-10-26» → 2026-10-17 (OK)
+- Número «003999» (OK) · Fecha «17-10-26» → 2026-10-17 (OK)
 - Líneas: 2 · ignoradas: «RETIRADO POR: PEDRO G. 1» (Anotación del proveedor, no es un artículo)
 - Validación tabla: OK · Columnas: referencia, descripcion, cantidad, precio, subtotal, descuento, importe
 - Validación lineas: OK · 2 líneas de artículo

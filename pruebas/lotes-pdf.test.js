@@ -177,9 +177,9 @@ test('contraste automático bloquea cantidades IA confundidas con bultos y conse
 });
 test('PRY candidato conserva ceros, no asigna obra y no resuelve códigos contradictorios',()=>{
  const vm=require('node:vm'),fs=require('node:fs'),ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync('control-28.js','utf8'),ctx);
- assert.equal(ctx.pcPryCandidato({anotacion_manual:'PRY 00111'}),'00111');
- assert.equal(ctx.pcPryCandidato({pry_codigo:'PRY00111'}),'00111');
- assert.equal(ctx.pcPryCandidato({pry_codigo:'00111',anotacion_manual:'PRY 00222'}),null);
+ assert.equal(ctx.pcPryCandidato({anotacion_manual:'PRY 00999'}),'00999');
+ assert.equal(ctx.pcPryCandidato({pry_codigo:'PRY00999'}),'00999');
+ assert.equal(ctx.pcPryCandidato({pry_codigo:'00999',anotacion_manual:'PRY 00222'}),null);
  assert.equal(ctx.pcPryCandidato({anotacion_manual:'obra 111'}),null);
 });
 test('mismo número y fecha en proveedores distintos no fusiona dos albaranes',()=>{

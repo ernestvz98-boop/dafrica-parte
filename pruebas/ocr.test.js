@@ -155,7 +155,7 @@ test("texto rodeado a bolígrafo: continuación añadida pero marcada; texto pre
 });
 
 test("Rodavi: precio, descuento e importe en sus columnas (el SUBTOTAL no es precio ni importe)",()=>{
- // Caso real 003424 (16/10/2026): el lector anterior guardaba código, descripción y cantidad
+ // Caso real de Rodavi (16/10/2026): el lector anterior guardaba código, descripción y cantidad
  // pero dejaba precio, descuento e importe vacíos. Valores inventados.
  const r=leer([...cabeceraDoc(),...etiquetas("009902","30/09/2026"),
   ...fila(200,["ARTÍCULO",40],["DESCRIPCIÓN",145],["CANTIDAD",290],["PRECIO UNIDAD",346,95,{ancho:60}],["SUBTOTAL",426],["DTO.",491],["TOTAL",543]),

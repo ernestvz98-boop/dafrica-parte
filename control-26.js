@@ -118,7 +118,7 @@ async function pcLeerTablaMixta(doc){
    const rowImage=output.toDataURL("image/jpeg",.88);
    output.width=0;output.height=0;
    // Header composite gives the printed date and number more pixels than the
-   // old [.01,.29] crop, which cut the date on RODAVI 003424.
+   // old [.01,.29] crop, which cut the date on a RODAVI albarán.
    const head=document.createElement("canvas");
    head.width=1840;head.height=850;
    const c=head.getContext("2d",{alpha:false});
