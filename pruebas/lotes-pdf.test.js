@@ -111,23 +111,23 @@ test('copia temporal para IA: rota solo las páginas detectadas y conserva el or
 });
 test('pantalla: OCR parcial visible, IA enderezada y cabecera fiable como pista, sin aceptar campos dudosos',async()=>{
  const vm=require('node:vm'),fs=require('node:fs'),lotesPdf=require('../albaranes/lotes-pdf');
- const bytes=await documento(1),els={};let peticion;
+ const bytes=await documento(1),els={};let peticion,geometria=0;
  for(const id of ['pcBatch','pcPreviewFile','pcPreviewConsent','pcPreviewStart','pcPreviewStatus','pcPreviewResults'])
   els[id]={innerHTML:'',textContent:'',insertAdjacentHTML(_,s){this.innerHTML+=s},addEventListener(_,fn){this.click=fn}};
  els.pcPreviewFile.files=[{name:'test.pdf',size:bytes.length,arrayBuffer:async()=>bytes}];els.pcPreviewConsent.checked=true;
  const det={tipo_pdf:'ESCANEADO_OCR',estado:'REVISAR',orientacion:[{pagina:1,grados:270}],
   numero:{estado:'OK',valor:'009999',literal:'009999',confianza:0.95},fecha:{estado:'OK',valor:'2026-10-15',literal:'15/10/2026',confianza:0.95},
-  proveedor:{nombre:'FICTICIO',nif:'B24123457',estado:'NIF_NO_REGISTRADO'},
+  proveedor:{id:'PERFIL_FICTICIO',nombre:'FICTICIO',nif:'B24123457',estado:'NIF_NO_REGISTRADO'},
   lineas:Array.from({length:3},(_,i)=>({fila:i+1,estado:'OK',confianza:0.6,motivos:[]})),validaciones:[],incidencias:[],confianza:0.6};
  const ctx={console,Uint8Array,window:{DafricaAlbaranes:{lotesPdf,motorNavegador:{cerrar:async()=>{}}}},
   $:id=>els[id],has:()=>true,esc:x=>String(x),renderComprasLotePilot:null,SUPABASE_URL:'https://test.invalid',
-  pcProveedorMostrable:x=>x,pcLeerTablaMixta:async()=>{throw Error('Sin geometría')},
+  pcProveedorMostrable:x=>x,pcLeerTablaMixta:async()=>{geometria++;throw Error('Plantilla incorrecta')},
   sb:async()=>({paginas_pdf:1,documentos:[{numero:'numero_malo',fecha:'2023-10-15',paginas:[1]}]}),
   authFetch:async(url,req)=>{peticion=JSON.parse(req.body);return {ok:true,json:async()=>({estado:'INTERPRETADO_SIN_GUARDAR',numero:'IA',lineas:[],lineas_detectadas:1,lectura_completa:false})}}};
  vm.createContext(ctx);vm.runInContext(fs.readFileSync('control-28.js','utf8'),ctx);vm.runInContext(fs.readFileSync('control-27.js','utf8'),ctx);
  ctx.pcLoadPdfLib=async()=>PDFDocument;ctx.pcLecturaDeterminista=async()=>({estado:'NO_DIGITAL'});ctx.pcLecturaOCR=async()=>det;
  ctx.renderComprasLotePilot();await els.pcPreviewStart.click();
- assert.equal(peticion.numero_esperado,'009999');assert.equal(peticion.fecha_esperada,'2026-10-15');
+ assert.equal(geometria,0);assert.equal(peticion.numero_esperado,'009999');assert.equal(peticion.fecha_esperada,'2026-10-15');
  const pdf=await PDFDocument.load(Buffer.from(peticion.data.split(',')[1],'base64'));
  assert.equal(pdf.getPage(0).getRotation().angle,270);
  const html=els.pcPreviewResults.innerHTML;

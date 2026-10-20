@@ -132,7 +132,9 @@ renderComprasLotePilot=function renderComprasTemporal(){
        if(det.fecha?.estado==="OK"&&det.fecha.confianza>=0.9)d.fecha=det.fecha.valor;
      }
      let n=null,rows=null,bands=null,columnHints=null,header=null,profile="",noRef=false,warning="";
-     if((d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
+     const perfilLocal=det?.proveedor?.id;
+     if(((d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI"))&&
+        (!perfilLocal||["SALTOKI","RODAVI","MADERAS_PEREIRA"].includes(perfilLocal))){
        try{
          const geo=String(d.proveedor||"").toUpperCase().includes("SALTOKI")?
             ((d.lineas||[]).length===1?await pcLeerSaltokiFilaUnica(d):await pcLeerSaltokiFilas(d)):
