@@ -3,6 +3,38 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Lector PDF (Fase 1): PDF grandes, separación, manuscritos y proveedores por huella
+
+**Producción:** sin cambios en esta sesión (rama de trabajo; nada desplegado; sin escrituras en
+STEL ni en la base de datos; solo lecturas de metadatos en Supabase). La función
+`supabase/functions/albaranes-manuscritos` está en el repositorio pero **no desplegada**.
+Incluye la fusión del trabajo paralelo de la rama (bloques PDF, `verificacion.js`,
+`compras-catalogo-lectura`, ya desplegada por esa sesión).
+
+- `albaranes/lector.js`: PDF de cualquier tamaño leído página a página (digital, escaneado o
+  mixto), separación automática de albaranes (número, CIF, «Página k de n», continuación sin
+  totales), errores por página sin detener el resto, cancelación, resumen.
+- `motor-navegador.js`: cada página se renderiza solo si necesita OCR y se libera al cerrar su
+  albarán (antes se renderizaban todas a 300 ppp a la vez); caché de lecturas por página.
+  Comprobado en Chromium con pdf.js + tesseract.js (PDF mixto: 3 albaranes bien separados).
+- `control-29.js`: pantalla «Lector local de albaranes» (varios PDF, progreso por bloques,
+  errores por lote, tabla consolidada, descarga JSON/CSV; catálogo STEL de solo lectura).
+- `albaranes/manuscritos.js` + `vision.js`: detección de anotaciones manuscritas en la imagen
+  y validación de códigos de obra/STEL; visión solo de recortes (pendiente de autorización).
+  Ver `docs/lector-manuscritos.md`.
+- Proveedores sin NIF en claro: los perfiles públicos guardan la huella SHA-256 del CIF.
+  Fallo real encontrado: con el registro público (lo que tiene la web) el lector caía al 74,9 %
+  con **2 errores críticos** (el CIF de DAFRICA aceptado como emisor). Corregido: huellas, CIF
+  de DAFRICA propagado entre lecturas, NIF no registrado siempre en revisión, desempate por
+  cercanía al nombre impreso. Ahora 90,3 % y 0 críticos sin registro privado.
+- Saltoki: «Ø» restituido tras «PRENSAR» (el OCR lo lee M/Y/W); referencias de 10 cifras
+  aceptadas por formato del proveedor + unanimidad de las relecturas.
+- Corpus: separación automática evaluada (30/30 albaranes en su sitio); manuscritos esperados
+  añadidos (60, no evaluables sin motor de visión); corregido un esperado mío («ceranor»).
+- Pruebas: 174 superadas (lector, manuscritos, proveedor por huella, regresiones).
+- Medición (30 albaranes, 545 campos): 90,6 % correcto y automático, 0 errores críticos
+  (90,3 % solo con perfiles públicos). Objetivo > 95 % aún no alcanzado: ver informe.
+
 ## 2026-10-20 · Lector PDF: lote B (20 albaranes reales) y segunda fase automática
 
 **Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos).

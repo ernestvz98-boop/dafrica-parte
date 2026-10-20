@@ -192,3 +192,15 @@ artículos ambiguos, descuadres, discrepancias IA/OCR, separación y conservaci�
 ceros del PRY. El contraste con los catálogos REALES requiere la sesión autorizada
 de la aplicación; las pruebas de esta fase usan catálogos ficticios. No se afirma
 haber verificado el catálogo real ni haber conseguido lectura perfecta del manuscrito.
+
+## Lector completo, manuscritos y registro público
+
+- `node pruebas/evaluar.js --incluir-sin-revisar` lee cada PDF del corpus con
+  `albaranes/lector.js` (separación automática incluida) y compara cada albarán esperado con el
+  documento leído en sus mismas páginas; una separación distinta cuenta como error.
+- `--sin-registro-privado`: evalúa solo con los perfiles públicos (huellas del CIF, sin NIF en
+  claro), que es lo que tiene la web. Debe dar también 0 errores críticos.
+- Manuscritos: `"manuscritos": {"obra": "PRY…", "stel": "ABP26-…"}` en cada albarán esperado.
+  Sin motor de visión se informan aparte («sin evaluar»). Diseño en `docs/lector-manuscritos.md`.
+- `pruebas/lector.test.js` (separación, PDF de 120 páginas, errores, cancelación, mixtos),
+  `pruebas/manuscritos.test.js` y `pruebas/proveedor.test.js` usan datos ficticios.

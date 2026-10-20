@@ -37,6 +37,10 @@ renderComprasLotePilot=function(){
   try{
    const pdfjs=await pcLoadPdfJs();
    const vision=lib.config?.visionManuscritos&&lib.vision?lib.vision.motorSupabase(lib.config.visionManuscritos):null;
+   // Catálogo STEL de SOLO LECTURA (proveedores y artículos, sin precios): una consulta por
+   // ejecución, solo en memoria. Valida CIF y referencias O/0, S/5… con coincidencia única.
+   const catalogo=lib.verificacion&&typeof sb==="function"?
+    await sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(65000)}).catch(()=>null):null;
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
@@ -49,7 +53,10 @@ renderComprasLotePilot=function(){
         (e.lote?" · bloque "+e.lote:"")+" · "+(resultado.documentos.length+e.documentos)+" albaranes · "+(resultado.errores.length+e.errores)+" errores";
       }});
      resultado.archivos.push({nombre:f.name,paginas:fuente.numPaginas,...r.resumen});
-     for(const d of r.documentos)resultado.documentos.push({archivo:f.name,...d});
+     for(const d of r.documentos){
+      if(catalogo&&d.resultado?._ctx)lib.verificacion.verificar(d.resultado,catalogo);
+      resultado.documentos.push({archivo:f.name,...d});
+     }
      for(const e of r.errores)resultado.errores.push({archivo:f.name,...e});
     }catch(e){resultado.errores.push({archivo:f.name,paginas:[],error:String(e?.message||e)});}
     finally{await fuente.cerrar();}
