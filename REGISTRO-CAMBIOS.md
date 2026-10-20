@@ -34,7 +34,7 @@ tesseract.js (`--motor=tesseractjs`) un tercero. Reproducidos, corregidos y con 
   | e01 | 1 | 1 | 40 s | 1,1 GB | 0 / 1 / 0 | 0 |
   | e10 | 10 | 10 | 211 s | 1,2 GB | 4 / 6 / 0 | 0 |
   | e25 | 25 | 24 | 431 s | 1,4 GB | 1 / 23 / 0 | 0 |
-  | e54 | 54 | 52 | 932 s | 1,6 GB | 4 / 48 / 0 | 0 |
+  | e54 | 54 | 52 | 902 s | 1,7 GB | 5 / 47 / 0 | 0 |
 
 ## 2026-10-21 · Lector PDF (Fase 1): validación final
 
