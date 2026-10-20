@@ -6,7 +6,7 @@
 const fs=require("fs");
 const {leerPagina}=require("../albaranes/texto-pdf.js");
 
-async function abrirFuente(ruta,{motor="nativo",render}={}){
+async function abrirFuente(ruta,{motor="nativo",render,cache}={}){
  const pdfjs=await import("pdfjs-dist/legacy/build/pdf.mjs");
  const tarea=pdfjs.getDocument({data:new Uint8Array(fs.readFileSync(ruta)),verbosity:0,isEvalSupported:false,useSystemFonts:true});
  const pdf=await tarea.promise;
@@ -14,7 +14,7 @@ async function abrirFuente(ruta,{motor="nativo",render}={}){
  const paginasOcr=()=>{
   if(!ocr){
    const {paginasEscaneadas}=require(motor==="nativo"?"./motor-tesseract.js":"./motor-tesseractjs.js");
-   ocr=paginasEscaneadas(ruta,render?{render}:{});
+   ocr=paginasEscaneadas(ruta,{...(render?{render}:{}),...(cache?{cache}:{})});
   }
   return ocr;
  };

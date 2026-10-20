@@ -57,9 +57,12 @@ test("página sin cabecera propia tras una sin totales: continúa el albarán; c
 test("una página ilegible se registra como error y el resto del PDF se procesa",async()=>{
  const f=fuenteDe([digital(albaran("600.111"),1),digital(albaran("600.112"),2),digital(albaran("600.113"),3)],{fallan:new Set([2])});
  const r=await leerPdf(f,opciones);
- assert.deepEqual(r.documentos.map(d=>d.paginas),[[1],[3]]);
+ // La página dañada queda como ERROR_DOCUMENTO en su posición: ninguna página se pierde.
+ assert.deepEqual(r.documentos.map(d=>d.paginas),[[1],[2],[3]]);
+ assert.deepEqual(r.documentos.map(d=>d.estado_documento),["AUTO_OK","ERROR_DOCUMENTO","AUTO_OK"]);
  assert.deepEqual(r.errores.map(e=>e.paginas),[[2]]);
  assert.match(r.errores[0].error,/dañada/);
+ assert.equal(r.resumen.error_documento,1);assert.equal(r.resumen.paginas_completas,true);
 });
 
 test("PDF grande (120 páginas): se procesa por bloques, informa del avance y libera cada página",async()=>{
@@ -68,6 +71,9 @@ test("PDF grande (120 páginas): se procesa por bloques, informa del avance y li
  const r=await leerPdf(f,{...opciones,tamLote:10,alProgresar:e=>eventos.push(e)});
  assert.equal(r.documentos.length,120);
  assert.equal(r.errores.length,0);
+ // Sin pérdidas, duplicados ni desorden entre bloques.
+ assert.equal(r.resumen.paginas_completas,true);
+ assert.deepEqual(r.documentos.map(d=>d.resultado.numero.valor),paginas.map((_,i)=>"6"+String(i).padStart(2,"0")+".111"));
  assert.equal(eventos.filter(e=>e.fase==="lote").length,12);
  assert.equal(eventos.at(-1).fase,"fin");
  assert.deepEqual([...new Set(f.liberadas)].sort((a,b)=>a-b),paginas.map(p=>p.numero));
@@ -79,6 +85,16 @@ test("cancelar detiene la lectura y conserva los albaranes ya leídos",async()=>
  const f=fuenteDe(paginas);
  const r=await leerPdf(f,{...opciones,alProgresar:e=>{if(e.fase==="pagina")leidas++;},cancelado:()=>leidas>=4});
  assert.equal(r.documentos.length,4);
+ assert.deepEqual(r.resumen.paginas_no_procesadas,[5,6,7,8,9,10]);
+});
+
+test("estado de cada albarán: AUTO_OK, REVISAR o ERROR_DOCUMENTO (nada reconocible)",()=>{
+ const {estadoDocumento}=require("../albaranes/lector.js");
+ assert.equal(estadoDocumento({estado:"AUTO_OK",lineas:[{}]}),"AUTO_OK");
+ assert.equal(estadoDocumento({estado:"REVISAR",lineas:[{}],numero:{valor:"1"}}),"REVISAR");
+ assert.equal(estadoDocumento({estado:"REVISAR",lineas:[],numero:{valor:null},proveedor:{nif:null}}),"ERROR_DOCUMENTO");
+ assert.equal(estadoDocumento({estado:"NO_DIGITAL"}),"ERROR_DOCUMENTO");
+ assert.equal(estadoDocumento(null),"ERROR_DOCUMENTO");
 });
 
 test("PDF mixto: la página sin capa de texto se lee por OCR y la digital por su texto",async()=>{
@@ -92,4 +108,29 @@ test("PDF mixto: la página sin capa de texto se lee por OCR y la digital por su
  const r=await leerPdf(f,opciones);
  assert.deepEqual(r.documentos.map(d=>d.resultado.tipo_pdf),["DIGITAL","ESCANEADO_OCR"]);
  assert.equal(r.documentos[1].resultado.numero.valor,"600.200");
+});
+
+test("continuación con la misma cabecera de proveedor, «Página 2» sin «de N» y «SUMA Y SIGUE» en la anterior",()=>{
+ const p1={nif:NIF,numero:"4500777000",pagina:null,sigue:true,totales:false,vacia:false};
+ const p2={nif:NIF,numero:null,pagina:{k:2,n:null},sigue:false,totales:true,vacia:false};
+ assert.equal(continua(p1,p1,p2),true);
+ // Solo «SUMA Y SIGUE» (sin «Página 2»): también continúa.
+ assert.equal(continua(p1,p1,{...p2,pagina:null}),true);
+ // Albarán sin totales del mismo proveedor, sin número legible ni aviso de continuación: no se une.
+ assert.equal(continua({...p1,sigue:false},{...p1,sigue:false},{...p2,pagina:null}),false);
+ // «Pág: 1» abre siempre un albarán nuevo.
+ assert.equal(continua(p1,p1,{...p2,pagina:{k:1,n:null}}),false);
+});
+
+test("página escaneada en blanco: se adjunta al albarán anterior y se informa; con tinta pero ilegible: ERROR_DOCUMENTO propio",async()=>{
+ const gris=oscuros=>async()=>{const d=new Uint8Array(100*100).fill(255);for(let i=0;i<oscuros;i++)d[i*7]=0;return {ancho:100,alto:100,datos:d,dpi:75};};
+ const escaneada=(n,oscuros)=>({numero:n,anchoPx:595,altoPx:842,dpi:72,gris:gris(oscuros),async ocr(){return [];}});
+ const vacia=n=>({numero:n,tipo:"ESCANEADO",caracteres:0,fraccion_imagen:1,lineas:[]});
+ const sinTotales=[...cabeceraDoc(),...etiquetas("600.111"),...titulos(),...linea(218,"1300000001")];
+ const f=fuenteDe([digital(sinTotales,1),vacia(2),vacia(3),digital(albaran("600.112"),4)],{ocr:{2:escaneada(2,0),3:escaneada(3,900)}});
+ const r=await leerPdf(f,opciones);
+ assert.deepEqual(r.documentos.map(d=>d.paginas),[[1,2],[3],[4]]);
+ assert.deepEqual(r.documentos[0].paginas_en_blanco,[2]);
+ assert.equal(r.documentos[1].estado_documento,"ERROR_DOCUMENTO");
+ assert.deepEqual(r.resumen.paginas_en_blanco,[2]);assert.equal(r.resumen.paginas_completas,true);
 });

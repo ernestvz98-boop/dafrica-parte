@@ -61,7 +61,17 @@ function crearPaginas(pdf,leer,{cache=path.join(path.dirname(pdf),".cache"),rend
   const png=render==="navegador"?path.join(cache,"navegador","nav-p"+n+".png"):path.join(cache,`${huella}-p${n}.png`);
   if(render==="navegador"&&!fs.existsSync(png))throw Error("Falta "+png+": exporta antes las páginas desde el navegador");
   if(!fs.existsSync(png))execFileSync("pdftoppm",["-r",String(DPI),"-gray","-png","-f",String(n),"-l",String(n),"-singlefile",pdf,png.replace(/\.png$/,"")]);
-  paginas.push(pagina(n,png,`${huella}-p${n}`,0));
+  // Una página con la MISMA imagen que otra ya leída (copiada a otro PDF) reutiliza sus lecturas
+  // en caché: el OCR depende solo de la imagen.
+  let id=`${huella}-p${n}`;
+  if(render!=="navegador"){
+   const indice=path.join(cache,"indice-imagenes.json");
+   const mapa=fs.existsSync(indice)?JSON.parse(fs.readFileSync(indice,"utf8")):{};
+   const clave=crypto.createHash("sha256").update(fs.readFileSync(png)).digest("hex").slice(0,24);
+   if(mapa[clave]&&fs.existsSync(path.join(cache,mapa[clave]+".png")))id=mapa[clave];
+   else if(mapa[clave]!==id){mapa[clave]=id;fs.writeFileSync(indice,JSON.stringify(mapa));}
+  }
+  paginas.push(pagina(n,id===`${huella}-p${n}`?png:path.join(cache,id+".png"),id,0));
  }
  function pagina(n,png,id,rotacion){
   const {ancho,alto}=tamPng(png);

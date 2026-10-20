@@ -3,11 +3,47 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Lector PDF (Fase 1): validación final
+
+**Producción:** desplegada, con autorización expresa del usuario, la función Edge
+`albaranes-manuscritos` (visión solo de RECORTES; exige sesión con `costes.ver`; no guarda nada;
+no accede a STEL ni a la base de datos). `main` sin cambios. Catálogo STEL solo en lectura
+(`compras-catalogo-lectura`); ninguna escritura en STEL.
+
+- Segunda fase con visión, siempre validada: una celda dudosa (código, descripción, número o
+  fecha) se acepta solo si la lectura de visión del recorte coincide exactamente con una de las
+  lecturas OCR de esa celda; número y fecha además deben cumplir el formato del proveedor o ser
+  una fecha válida. Nunca precios, cantidades ni importes.
+- Catálogo STEL (solo lectura): un código con caracteres confundibles (O/0, S/5, I/1, B/8, Z/2,
+  G/6) se resuelve si su clase de equivalencia tiene un único artículo del proveedor, el
+  proveedor está verificado (cuenta del catálogo o huella del CIF) y la descripción es
+  compatible (mismas cifras y ≥ 60 % de palabras).
+- Separación de albaranes: continuación por «Página 2» sin «de N» y por «SUMA Y SIGUE»; una
+  página escaneada en blanco se adjunta al albarán anterior y se informa; una página con tinta
+  pero ilegible es un ERROR_DOCUMENTO propio, nunca se une a otro albarán.
+- Estados de documento separados: AUTO_OK, REVISAR y ERROR_DOCUMENTO; `paginas_completas`
+  comprueba que no hay pérdidas, duplicados ni desorden entre bloques.
+- Unidades: «mi» ya no se lee como «m» (clase de letras por mayúscula/minúscula); una unidad
+  ausente en la lectura principal se toma de las otras lecturas de la misma fila solo si todas
+  coinciden.
+- Eliminados de comentarios y del registro dos números de albarán reales que quedaban de
+  sesiones anteriores.
+- Pruebas: 190 superadas (regresiones nuevas: visión de cabecera, página en blanco o ilegible,
+  continuación, unidades, códigos confundibles por catálogo).
+- Medición (30 albaranes reales, 545 campos): **495 correctos y automáticos (90,8 %)**,
+  520 con el valor correcto (95,4 %), **0 errores críticos**; solo con perfiles públicos
+  90,5 % y 0 críticos; separación 30/30. Sintéticos: 0 críticos. El efecto de la visión y del
+  catálogo no se puede medir sin la sesión de un usuario: ver `pruebas/LEEME.md`
+  («Lectura de la web»).
+- Estrés (fuera de git): PDF de 1, 10, 25 y 54 páginas, mixtos (escaneados reales + digitales
+  sintéticos), con un albarán de dos páginas y una página en blanco. En Node: separación igual al
+  manifiesto, páginas completas, resultados idénticos a la lectura por separado. Chromium: en curso al hacer este commit.
+
 ## 2026-10-21 · Lector PDF (Fase 1): PDF grandes, separación, manuscritos y proveedores por huella
 
-**Producción:** sin cambios en esta sesión (rama de trabajo; nada desplegado; sin escrituras en
-STEL ni en la base de datos; solo lecturas de metadatos en Supabase). La función
-`supabase/functions/albaranes-manuscritos` está en el repositorio pero **no desplegada**.
+**Producción:** sin cambios en `main`; sin escrituras en STEL ni en la base de datos; solo
+lecturas de metadatos en Supabase. La función `supabase/functions/albaranes-manuscritos` se
+desplegó después, con autorización expresa (ver la entrada «validación final»).
 Incluye la fusión del trabajo paralelo de la rama (bloques PDF, `verificacion.js`,
 `compras-catalogo-lectura`, ya desplegada por esa sesión).
 
@@ -70,7 +106,7 @@ Los PDF, sus resultados esperados y los NIF reales siguen fuera de git (`pruebas
 
 **Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos;
 solo lecturas en Supabase para localizar el caso).
-- Caso de partida: albarán Rodavi 003424 (subido el 16/10). En la ficha guardada había
+- Caso de partida: un albarán de Rodavi subido el 16/10. En la ficha guardada había
   código, descripción y cantidad, pero precio, descuento e importe vacíos. Causa: lo
   procesaron las funciones de IA (`compras-auto-v3`, hoy desactivada, y
   `compras-interpretar-v2`). La primera no tiene campos de descuento ni de importe y anula

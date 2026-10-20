@@ -40,12 +40,15 @@ lee completa). La segunda fase usa visión **solo sobre recortes** de esas anota
 Los valores esperados de los manuscritos (transcritos por Claude a partir de las imágenes, aún
 sin confirmar por una persona) están en `pruebas/corpus-real/*.esperado.json` (fuera de git).
 
-## Activación (pendiente de autorización)
+## Activación
 
-1. Desplegar `supabase/functions/albaranes-manuscritos` (usa el secreto existente
-   `OPENAI_API_KEY`; exige sesión con permiso `costes.ver`; no guarda nada).
-2. En la web: `DafricaAlbaranes.config = {visionManuscritos: {url: <función>, token: () => <JWT>}}`.
-3. Ejecutar el corpus con el motor real y revisar la tabla de manuscritos del informe.
+- 2026-10-21: función `albaranes-manuscritos` **desplegada** con autorización del usuario (solo
+  sesión con permiso `costes.ver`; rechaza llamadas sin sesión). La pantalla «Lector local de
+  albaranes» (`control-29.js`) la usa automáticamente con la sesión del usuario; se puede
+  desactivar con `DafricaAlbaranes.config = {vision: false}`.
+- Medición con visión y catálogo: abrir la pantalla con sesión, leer los PDF del corpus,
+  «Descargar resultado (JSON)» y ejecutar `node pruebas/evaluar-web.js albaranes.json`
+  (compara con `pruebas/corpus-real/*.esperado.json`, fuera de git).
 
 Coste estimado con `gpt-4o` (precios publicados de referencia, a confirmar en la factura real):
 ≈ 5 recortes por albarán en 1 llamada de hasta 8 imágenes, ~1.500 tokens de entrada y ~300 de

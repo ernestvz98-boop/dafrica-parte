@@ -370,3 +370,19 @@ test('sin porcentaje impreso en ninguna lectura no se deduce descuento a partir 
  const r=await extraerEscaneado(motorDescuentoAmpliado({sinDescuento:true}),{registro:registroCon(),hoy:HOY});
  assert.equal(r.lineas[0].descuento.valor,null);assert.equal(r.lineas[0].cuadre.estado,'DESCUADRE');
 });
+
+test("unidad «ml» que una lectura OCR lee «mi»: se toma de otra lectura de la misma fila; si discrepan, no",async()=>{
+ const tit=fila(200,["CÓDIGO",60],["CONCEPTO",120],["CANTIDAD",400],["PRECIO",460],["DTO%",500],["IMPORTE",545]);
+ const linea=u=>fila(218,["1300000001",60],["TUBO",120],["MULTICAPA",150],["2,00",420],[u,432],["10,000",462],["50",510],["10,00",560]);
+ const motor=porPsm=>[{numero:1,anchoPx:595,altoPx:842,dpi:72,async ocr({psm=4,region=null}={}){
+  const ps=[...cabeceraDoc(),...etiquetas(),...tit,...linea(porPsm[psm]||"mi")];
+  if(!region)return ps;
+  const [x,y,ww,h]=region;
+  return ps.filter(p=>p.x0>=x&&p.x1<=x+ww&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+ }}];
+ const r=await extraerEscaneado(motor({6:"ml",3:"ml"}),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].unidad.valor,"ml");
+ // Todas las lecturas dicen «mi»: no se acepta «m» (resto de raya) ni se deduce «ml».
+ const s=await extraerEscaneado(motor({}),{registro:registroCon(),hoy:HOY});
+ assert.ok(!["m","ml"].includes(s.lineas[0]?.unidad?.valor));
+});

@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 /*
  * DAFRICA · Visión sobre RECORTES de albaranes (segunda fase del lector): anotaciones manuscritas
  * (modo por defecto) y celdas impresas dudosas (modo "impreso", aceptadas solo si coinciden con el OCR).
- * PENDIENTE DE AUTORIZACIÓN: no desplegada. Ver albaranes/manuscritos.js y docs/lector-manuscritos.md.
+ * Desplegada con autorización del usuario (2026-10-21). Ver albaranes/manuscritos.js y docs/lector-manuscritos.md.
  *
  * - Solo acepta recortes PNG pequeños (máx. 8 por llamada, ~450 KB cada uno), nunca la página.
  * - Solo devuelve transcripciones de códigos PRY/ABP y textos cortos; nunca precios, cantidades
@@ -33,18 +33,23 @@ const INSTRUCCIONES=[
  "tachado=true si la anotación está tachada o rayada.",
  "lecturas: interpretaciones normalizadas sin espacios (p. ej. PRY00123). Si un carácter es dudoso (una cifra corregida o sobrescrita, 1/7, 0/6, 5/6…) da UNA lectura por cada interpretación plausible, con su confianza 0–1. No inventes ni completes cifras que no se vean.",
  "Nunca leas ni devuelvas precios, cantidades ni importes."].join("\n");
+async function autorizado(req:Request){
+ const auth=req.headers.get("Authorization")||"",base=Deno.env.get("SUPABASE_URL")||"",servicio=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+ if(!auth.startsWith("Bearer ")||!base||!servicio)return false;
+ const u=await fetch(base+"/auth/v1/user",{headers:{Authorization:auth,apikey:servicio},signal:AbortSignal.timeout(10000)});
+ if(!u.ok)return false;
+ const p=await fetch(base+"/rest/v1/rpc/mis_permisos",{method:"POST",headers:{Authorization:auth,apikey:servicio,"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(10000)});
+ const permisos=p.ok?await p.json():[];
+ return Array.isArray(permisos)&&permisos.some((x:any)=>x.codigo==="costes.ver");
+}
 Deno.serve(async(req:Request)=>{
  if(req.method==="OPTIONS")return new Response(null,{headers:cors});
  if(req.method!=="POST")return json({error:"Método no permitido"},405);
  try{
-  const auth=req.headers.get("Authorization")||"",base=Deno.env.get("SUPABASE_URL")||"",servicio=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
-  if(!auth.startsWith("Bearer ")||!base||!servicio)return json({error:"Sesión requerida"},401);
-  const p=await fetch(base+"/rest/v1/rpc/mis_permisos",{method:"POST",headers:{Authorization:auth,apikey:servicio,"Content-Type":"application/json"},body:"{}"});
-  const permisos=p.ok?await p.json():[];
-  if(!Array.isArray(permisos)||!permisos.some((x:any)=>x.codigo==="costes.ver"))return json({error:"Sin permiso"},403);
+  if(!await autorizado(req))return json({error:"Sin permiso"},403);
+  const body=await req.json().catch(()=>null);
   const clave=Deno.env.get("OPENAI_API_KEY")||"";
   if(!clave)return json({error:"Falta OPENAI_API_KEY"},503);
-  const body=await req.json().catch(()=>null);
   const recortes=Array.isArray(body?.recortes)?body.recortes:[];
   if(!recortes.length||recortes.length>8||recortes.some((d:any)=>typeof d!=="string"||!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(d)||d.length>600000))
    return json({error:"Recortes no válidos (1 a 8 PNG pequeños)"},400);

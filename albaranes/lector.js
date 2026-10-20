@@ -22,6 +22,8 @@
 const M=k=>req?req("./"+{extraer:"extraer.js",escaneado:"escaneado.js",normalizar:"normalizar.js",manuscritos:"manuscritos.js"}[k]):root.DafricaAlbaranes[k];
 
 const RE_PAGINA=/\bP[AÁ]G(?:INA)?\.?\s*:?\s*(\d{1,3})\s*(?:DE|\/)\s*(\d{1,3})\b/i;
+// «Página 2» sin «de N» (cabecera repetida en la continuación).
+const RE_PAGINA_SOLA=/\bP[AÁ]G(?:INA)?\.?\s*:?\s*(\d{1,3})\b/i;
 const RE_SIGUE=/\bSUMA\s+Y\s+SIGUE\b|\bCONTIN[UÚ]A\b/i;
 
 /* Datos de una página que deciden si abre un albarán nuevo o continúa el anterior. */
@@ -32,7 +34,7 @@ function firmaPagina(resultado,pagina){
  return {
   nif:resultado?.proveedor?.nif||null,
   numero:num&&num.estado!=="VACIO"&&num.valor?M("normalizar").canon(num.valor):null,
-  pagina:m?{k:+m[1],n:+m[2]}:null,
+  pagina:m?{k:+m[1],n:+m[2]}:(m2=>m2?{k:+m2[1],n:null}:null)(texto.match(RE_PAGINA_SOLA)),
   sigue:RE_SIGUE.test(texto),
   totales:resultado?.totales?.total?.estado&&resultado.totales.total.estado!=="VACIO",
   vacia:!(pagina?.lineas||[]).length&&!(resultado?.lineas||[]).length
@@ -51,6 +53,8 @@ function continua(primera,ultima,f){
  if(f.nif&&primera.nif&&f.nif!==primera.nif)return false;
  if(f.numero&&primera.numero)return f.numero===primera.numero;
  if(!f.numero&&!f.nif)return ultima.sigue||!ultima.totales;
+ // Misma cabecera de proveedor sin número propio tras «SUMA Y SIGUE»: continuación anunciada.
+ if(!f.numero&&f.nif===primera.nif&&ultima.sigue)return true;
  return false;
 }
 
@@ -66,6 +70,24 @@ function agruparPaginas(firmas){
 }
 
 const esOcr=p=>p.tipo!=="DIGITAL";
+/*
+ * Estado de cada albarán leído: AUTO_OK (todo verificado), REVISAR (algún campo para revisión) o
+ * ERROR_DOCUMENTO (no se ha podido leer: página dañada, escaneo sin OCR o nada reconocible).
+ */
+/* ¿Página sin tinta? Digital: sin texto ni imagen. Escaneada: < 0,2 % de píxeles oscuros. */
+async function enBlanco(texto,paginaOcr){
+ if(!esOcr(texto))return !(texto.lineas||[]).length&&!(texto.fraccion_imagen>0.05);
+ if(typeof paginaOcr?.gris!=="function")return false;
+ const g=await paginaOcr.gris(4);let n=0;
+ for(let i=0;i<g.datos.length;i++)if(g.datos[i]<128)n++;
+ return n<0.002*g.datos.length;
+}
+function estadoDocumento(r){
+ if(!r||r.estado==="NO_DIGITAL"||r.estado==="ERROR_SEPARACION")return "ERROR_DOCUMENTO";
+ if(r.estado==="AUTO_OK")return "AUTO_OK";
+ if(!(r.lineas||[]).length&&!r.numero?.valor&&!r.proveedor?.nif)return "ERROR_DOCUMENTO";
+ return "REVISAR";
+}
 // Texto de un error cualquiera (algunos motores rechazan con valores que no son Error).
 const textoError=e=>e?.message||(typeof e==="string"?e:(()=>{try{return JSON.stringify(e);}catch(_){return "";}})())||"Error desconocido al leer la página";
 
@@ -82,8 +104,9 @@ async function leerPdf(fuente,opciones={}){
 
  async function cerrar(){
   if(!grupo.length)return;
-  const g=grupo;grupo=[];
-  const paginas=g.map(x=>x.n);
+  const g0=grupo;grupo=[];
+  const paginas=g0.map(x=>x.n),blancas=g0.filter(x=>x.blanca&&x!==g0[0]).map(x=>x.n);
+  const g=g0.filter(x=>!blancas.includes(x.n));
   try{
    let resultado;
    if(g.length===1)resultado=g[0].resultado;
@@ -94,16 +117,22 @@ async function leerPdf(fuente,opciones={}){
     resultado=await M("escaneado").extraerEscaneado(await Promise.all(g.map(x=>fuente.ocr(x.n))),opciones);
     resultado.incidencias=[...(resultado.incidencias||[]),"Albarán con páginas digitales y escaneadas: leído por OCR"];
    }
-   documentos.push({indice:documentos.length+1,paginas,resultado});
+   const doc={indice:documentos.length+1,paginas,resultado,estado_documento:g0[0].blanca&&g0.length===blancas.length+1&&!(resultado?.lineas||[]).length?"ERROR_DOCUMENTO":estadoDocumento(resultado)};
+   if(blancas.length)doc.paginas_en_blanco=blancas;
+   if(g0[0].blanca&&doc.estado_documento==="ERROR_DOCUMENTO")doc.error="Página en blanco";
+   documentos.push(doc);
   }catch(e){
    errores.push({paginas,error:textoError(e)});
+   documentos.push({indice:documentos.length+1,paginas,resultado:null,estado_documento:"ERROR_DOCUMENTO",error:textoError(e)});
   }finally{
-   for(const x of g)await fuente.liberar?.(x.n);
+   for(const x of g0)await fuente.liberar?.(x.n);
   }
  }
 
+ let procesadas=0;
  for(let n=1;n<=total;n++){
   if(cancelado()){aviso("cancelado",{pagina:n});break;}
+  procesadas=n;
   if(Math.floor((n-1)/tamLote)!==lote){lote=Math.floor((n-1)/tamLote);aviso("lote",{lote:lote+1,pagina:n});}
   aviso("pagina",{pagina:n});
   let texto=null,resultado=null;
@@ -115,22 +144,34 @@ async function leerPdf(fuente,opciones={}){
    // Página que no se puede leer: se registra y se cierra el albarán en curso.
    await cerrar();
    errores.push({paginas:[n],error:textoError(e)});
+   documentos.push({indice:documentos.length+1,paginas:[n],resultado:null,estado_documento:"ERROR_DOCUMENTO",error:textoError(e)});
    await fuente.liberar?.(n);
    continue;
   }
   const firma=firmaPagina(resultado,esOcr(texto)?{lineas:(resultado?._pags||[]).flatMap(p=>p.lineas)}:texto);
-  const x={n,texto,resultado,firma};
-  if(grupo.length&&continua(grupo[0].firma,grupo.at(-1).firma,firma))grupo.push(x);
+  // Página en blanco (sin tinta: p. ej. el reverso de un escaneo a doble cara): se adjunta al
+  // albarán anterior y se informa. Una página CON tinta pero sin nada reconocible nunca se une a
+  // otro albarán: queda como documento propio (ERROR_DOCUMENTO), en su posición.
+  firma.vacia=await enBlanco(texto,esOcr(texto)?await fuente.ocr(n):null);
+  const ilegible=!firma.vacia&&!(resultado?.lineas||[]).length&&!resultado?.numero?.valor&&!resultado?.proveedor?.nif;
+  const x={n,texto,resultado,firma,blanca:firma.vacia};
+  if(grupo.length&&!ilegible&&continua(grupo[0].firma,grupo.at(-1).firma,firma))grupo.push(x);
   else{await cerrar();grupo=[x];}
  }
  await cerrar();
  // Anotaciones manuscritas: la coherencia del lote se aplica con todos los albaranes leídos.
  const conObra=documentos.filter(d=>d.resultado?.manuscritos);
  if(conObra.length)M("manuscritos").coherenciaLote(conObra.map(d=>d.resultado.manuscritos));
+ // Cada página del PDF está en exactamente un documento (o queda sin procesar si se canceló).
+ const vistas=documentos.flatMap(d=>d.paginas);
  const resumen={
   paginas:total,documentos:documentos.length,errores:errores.length,
-  auto_ok:documentos.filter(d=>d.resultado?.estado==="AUTO_OK").length,
-  revisar:documentos.filter(d=>d.resultado?.estado!=="AUTO_OK").length,
+  auto_ok:documentos.filter(d=>d.estado_documento==="AUTO_OK").length,
+  revisar:documentos.filter(d=>d.estado_documento==="REVISAR").length,
+  error_documento:documentos.filter(d=>d.estado_documento==="ERROR_DOCUMENTO").length,
+  paginas_no_procesadas:Array.from({length:total-procesadas},(_,i)=>procesadas+i+1),
+  paginas_completas:vistas.length===procesadas&&new Set(vistas).size===vistas.length&&vistas.every((p,i)=>p===i+1),
+  paginas_en_blanco:documentos.flatMap(d=>d.paginas_en_blanco||[]),
   digitales:documentos.filter(d=>d.resultado?.tipo_pdf==="DIGITAL").length,
   escaneados:documentos.filter(d=>d.resultado?.tipo_pdf==="ESCANEADO_OCR").length
  };
@@ -138,5 +179,5 @@ async function leerPdf(fuente,opciones={}){
  return {documentos,errores,resumen};
 }
 
-return {leerPdf,agruparPaginas,firmaPagina,continua};
+return {leerPdf,agruparPaginas,firmaPagina,continua,estadoDocumento};
 });

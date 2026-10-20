@@ -179,8 +179,11 @@ function intervalos(columnas){
 // Solo unidades conocidas: «2op» (manuscrito leído por el OCR) no es «2 op».
 const UNIDADES="UD|UDS|UN|UNI|UND|UNDS|U|M|ML|MT|MTS|M2|M3|KG|KGS|G|GR|L|LT|LTS|SAC|SACO|SACOS|PZ|PZA|PZAS|PCE|PCS|PAQ|CJ|CAJ|CAJA|CAJAS|ROL|RL|BOL|BL|H|HR|HRS|TN|T|PAR|JGO|JG|BID|PAL|PLT|BAR|ENV|MIL|CT|CTO";
 // Tras la unidad puede quedar pegada la raya de la tabla leída como «j», «l», «I» o «!» («1,00 Cajaj»).
-const RE_CANTIDAD_UNIDAD=new RegExp("^([-−]?[\\d.,]+)\\s*(("+UNIDADES+")\\.?)[|jI!\\]]?$","i");
-const RE_UNIDAD_SOLA=new RegExp("^(("+UNIDADES+")\\.?)$","i");
+// La unidad admite mayúsculas y minúsculas, pero el resto de raya NO: «2,00 mi» no es «2,00 m»
+// (es un «ml» mal leído); por eso no se usa el indicador «i» en toda la expresión.
+const UNIDADES_AMBOS=UNIDADES.split("|").map(u=>u.split("").map(c=>/[A-Z]/.test(c)?"["+c+c.toLowerCase()+"]":c).join("")).join("|");
+const RE_CANTIDAD_UNIDAD=new RegExp("^([-−]?[\\d.,]+)\\s*(("+UNIDADES_AMBOS+")\\.?)[|jI!\\]]?$");
+const RE_UNIDAD_SOLA=new RegExp("^(("+UNIDADES_AMBOS+")\\.?)$");
 const pareceNumero=t=>/^(\(\s*[\d.,]+\s*\)|[-−+]?\s*[\d.,]+\s*(\+\s*[\d.,]+\s*)*[−-]?\s*%?)$/.test(String(t).trim());
 // Solo para OCR (celdas con confianza): menos del 40 % de los caracteres con confianza ≥ 50
 // (la escritura a mano sale casi siempre por debajo de 40; el impreso borroso, entre 50 y 70).
@@ -1149,7 +1152,7 @@ function extraerDePaginas(paginas,opciones={}){
   }
  }
  // Formato de número propio del proveedor (comprobado en sus albaranes reales): un número que
- // no lo cumple («26102749» por «26/02749») no se acepta.
+ // no lo cumple («26101234» por «26/01234») no se acepta.
  if(perfil?.formato_numero&&salida.numero.estado==="OK"&&!new RegExp(perfil.formato_numero).test(salida.numero.valor)){
   salida.numero={...salida.numero,estado:"REVISAR",motivos:[...salida.numero.motivos,"No tiene el formato de número habitual del proveedor"]};
  }

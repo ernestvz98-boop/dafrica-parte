@@ -93,6 +93,14 @@ function combinarLineas(principal,lecturas){
    return a&&b&&l.pagina===o.pagina&&Math.abs(a[1]-b[1])<=0.6*Math.min(a[3],b[3]);
   }).map(o=>o.referencia?.literal).filter(Boolean))];
   l.lecturas_coincidentes=1+alternativas.filter(o=>claveLinea(o)===claveLinea(l)&&o.cantidad?.valor===l.cantidad?.valor).length;
+  // Unidad impresa que esta lectura no ve («ml» leído «mi») y otras lecturas de la MISMA fila física
+  // (misma cantidad, misma altura) sí: se toma si todas las que la leen coinciden. Nunca se deduce.
+  if(l.unidad?.estado==="VACIO"&&l.cantidad?.valor!=null&&a){
+   const vistas=alternativas.filter(o=>o.unidad?.estado==="OK"&&o.unidad.valor&&o.cantidad?.valor===l.cantidad.valor&&o.pagina===l.pagina&&
+    o.cantidad?.caja&&Math.abs(a[1]-o.cantidad.caja[1])<=0.6*Math.min(a[3],o.cantidad.caja[3]));
+   const distintas=[...new Set(vistas.map(o=>String(o.unidad.valor).toLowerCase()))];
+   if(distintas.length===1)l.unidad={...vistas[0].unidad,notas:[...(vistas[0].unidad.notas||[]),"Unidad leída en otra lectura OCR de la misma fila ("+vistas.length+")"]};
+  }
   // Cifras que cuadran en otra lectura de la misma línea.
   if(l.cuadre?.estado!=="VERIFICADO"){
    const mismaFilaParaDescuento=o=>{
@@ -238,6 +246,7 @@ async function segundaFase(principal,paginas,lecturas,opciones){
  const N=M("normalizar");
  const resueltos=[];
  // Cabecera: número y fecha. Cajas: las de todas las lecturas que vieron algo en ese campo.
+ const pendientesCabecera=[];
  for(const campo of ["numero","fecha"]){
   const actual=principal[campo];
   if(actual?.estado==="OK"&&(actual.confianza??0)>=0.9)continue;
@@ -252,9 +261,17 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   const cajas=[...new Map(conCaja.map(c=>[c.map(v=>Math.round(v/4)).join(","),c])).values()].slice(0,4);
   if(!cajas.length)continue;
   const r=await resolverCampo(pag,campo,cajas,{perfil,opcionesFecha,validacionEstructural:campo==="fecha"||!!perfil?.formato_numero});
-  if(!r||r.conflicto){if(r?.conflicto)actual.motivos=[...(actual.motivos||[]),"Relecturas con valores distintos: "+r.conflicto.join(" | ")];continue;}
+  const valida=v=>v!=null&&v!=="";
+  if(!r||r.conflicto){
+   if(r?.conflicto)actual.motivos=[...(actual.motivos||[]),"Relecturas con valores distintos: "+r.conflicto.join(" | ")];
+   const cand=[actual?.estado==="OK"?actual.valor:null,...(r?.conflicto||[])].filter(valida);
+   if(cand.length)pendientesCabecera.push({campo,candidatos:cand,caja:actual?.caja||cajas[0]});
+   continue;
+  }
   if(actual?.estado==="OK"&&N.canon(actual.valor)!==N.canon(r.valor)){
-   actual.motivos=[...(actual.motivos||[]),"La relectura dirigida da «"+r.valor+"»"];continue;
+   actual.motivos=[...(actual.motivos||[]),"La relectura dirigida da «"+r.valor+"»"];
+   pendientesCabecera.push({campo,candidatos:[actual.valor,r.valor],caja:actual.caja||cajas[0]});
+   continue;
   }
   const valor=campo==="fecha"?r.valor:r.valor.replace(/\s*\/\s*/g,"/");
   principal[campo]={...(actual||{}),literal:r.textos[0],valor,estado:"OK",caja:r.caja,motivos:[],
@@ -290,6 +307,9 @@ async function segundaFase(principal,paginas,lecturas,opciones){
  // Segundo motor independiente (visión del RECORTE de la celda, nunca la página): se acepta un
  // texto solo si coincide exactamente con alguna lectura OCR de esa celda. Nunca cifras
  // económicas; nunca una variante O/0, S/5… que el OCR no haya visto.
+ // Número y fecha en conflicto (p. ej. «3504» / «3904»): la visión del recorte decide solo entre
+ // los candidatos del OCR y su lectura debe cumplir el formato del proveedor o ser una fecha válida.
+ for(const x of pendientesCabecera)pendientes.push({...x,cabecera:true,l:{[x.campo]:{caja:x.caja},fila:"cabecera"}});
  if(typeof opciones.vision==="function"&&pendientes.length&&typeof pag.recortePng==="function"){
   const k=pag.dpi/72,recortes=pendientes.map(x=>{
    const [x0,y,x1,alto]=x.l[x.campo].caja;
@@ -304,7 +324,21 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   const igual=(campo,a,b)=>campo==="referencia"?N.canon(a)===N.canon(b)&&N.canon(a)!=="":
    String(a).replace(/\s+/g," ").trim()===String(b).replace(/\s+/g," ").trim()&&String(a).trim()!=="";
   pendientes.forEach((x,i)=>{
-   const v=lecturas[i];if(v==null)return;
+   let v=lecturas[i];if(v==null)return;
+   if(x.cabecera){
+    // Valor de la visión normalizado y validado igual que el OCR; debe ser uno de los candidatos.
+    const cv=candidatoDe(x.campo,v,{perfil,opcionesFecha});
+    const iguales=[...new Set(x.candidatos)].filter(c=>cv&&(x.campo==="fecha"?c===cv:N.canon(c)===N.canon(cv)));
+    if(iguales.length!==1)return;
+    const actual=principal[x.campo]||{};
+    principal[x.campo]={...actual,valor:x.campo==="fecha"?iguales[0]:String(iguales[0]).replace(/\s*\/\s*/g,"/"),literal:actual.literal||v,estado:"OK",
+     motivos:[],caja:x.caja,resolucion:{metodo:"vision_coincide_ocr",confianza:0.95,
+      evidencias:["Visión del recorte de la casilla: «"+v+"»","Coincide con una lectura OCR: «"+iguales[0]+"»",
+       "Lecturas OCR en conflicto: "+[...new Set(x.candidatos)].join(" | "),
+       x.campo==="fecha"?"Fecha válida":perfil?.formato_numero?"Cumple el formato de número del proveedor ("+perfil.formato_numero+")":"Valor con forma de número de albarán"]}};
+    resueltos.push(x.campo+" (visión = OCR)");
+    return;
+   }
    const coincide=[...new Set(x.candidatos)].filter(cand=>igual(x.campo,cand,v));
    if(coincide.length!==1)return;
    const c=x.l[x.campo];
