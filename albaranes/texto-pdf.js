@@ -73,6 +73,16 @@ function agruparLineas(fragmentos){
   else lineas.push({y:f.y,alto:f.alto,fragmentos:[f]});
  }
  lineas.sort((a,b)=>a.y-b.y);
+ // Un mismo renglón partido en dos (el código y el texto algo más arriba que las cifras, p. ej.
+ // por un trazo de bolígrafo): renglones a menos de 0,7 alturas cuyos fragmentos no se solapan
+ // en horizontal se unen. Dos filas reales están separadas al menos ~1,1 alturas.
+ for(let i=0;i+1<lineas.length;){
+  const a=lineas[i],b=lineas[i+1];
+  const solapan=a.fragmentos.some(f=>b.fragmentos.some(g=>Math.min(f.x1,g.x1)-Math.max(f.x0,g.x0)>0));
+  if(b.y-a.y<=0.7*Math.min(a.alto,b.alto)&&!solapan){
+   a.fragmentos.push(...b.fragmentos);a.alto=Math.max(a.alto,b.alto);a.y=Math.max(a.y,b.y);lineas.splice(i+1,1);
+  }else i++;
+ }
  return lineas.map((l,i)=>{
   const celdas=celdasDeLinea(l.fragmentos);
   return {indice:i,y:l.y,alto:l.alto,celdas,texto:celdas.map(c=>c.texto).join(" ")};

@@ -34,12 +34,18 @@ function paginaDesdePalabras(palabras,{numero=1,anchoPx,altoPx,dpi=300,desplazam
  }
  const fragmentos=[];
  for(const p of palabras){
-  const texto=String(p.texto||"").trim();
+  // Rayas verticales de la tabla pegadas a la palabra («1301097020|»): no forman parte del texto.
+  // Tampoco una cola de rayas largas («JERRAP25LN-—», la tinta de un subrayado); «1,00-» se conserva.
+  const texto=String(p.texto||"").trim().replace(/^[|¦]+|[|¦]+$/g,"").replace(/[-—–]*[—–][-—–]*$/,"").trim();
   if(!texto)continue;
   if(BASURA.test(texto)){descartadas.push(texto);continue;}
+  // Trazos de bolígrafo (círculos, subrayados) leídos como 1–3 caracteres de confianza ínfima.
+  if(texto.length<=3&&Number.isFinite(p.conf)&&p.conf<30&&!/^\d+([.,]\d+)?%?$/.test(texto)){descartadas.push(texto);continue;}
   // Texto girado de los márgenes (avisos legales verticales): basura de baja confianza en el borde.
   // Los fragmentos cortos del texto girado salen con confianza media («25», «Ep:»): umbral mayor.
-  if(anchoPx&&(p.x1<0.08*anchoPx||p.x0>0.97*anchoPx)&&Number.isFinite(p.conf)&&p.conf<(texto.length<=3?92:75)){descartadas.push(texto);continue;}
+  // Fragmentos de 1–3 caracteres en el margen exterior: letras sueltas del texto vertical
+  // (aviso legal), aunque el OCR les dé confianza alta; ningún dato de la tabla está ahí solo.
+  if(anchoPx&&(p.x1<0.08*anchoPx||p.x0>0.97*anchoPx)&&(texto.length<=3||(Number.isFinite(p.conf)&&p.conf<75))){descartadas.push(texto);continue;}
   const alto=(p.y1-p.y0)*k;
   if(alto<=0)continue;
   fragmentos.push({texto,crudo:null,x0:(p.x0+dx)*k,x1:(p.x1+dx)*k,y:(p.y1+dy)*k,alto,conf:Number.isFinite(p.conf)?p.conf:null});

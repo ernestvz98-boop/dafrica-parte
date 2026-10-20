@@ -3,6 +3,37 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-20 · Lector PDF: lote B (20 albaranes reales) y segunda fase automática
+
+**Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos).
+Los PDF, sus resultados esperados y los NIF reales siguen fuera de git (`pruebas/corpus-real/`).
+`albaranes/proveedores.js` ya no lleva NIF: se leen del registro privado (`fusionar`).
+
+- Lote B: 2 PDF escaneados, 20 albaranes (9 + 11), 7 proveedores nuevos (formato de número
+  y nombres propios por proveedor, sin NIF).
+- OCR: orientación automática (páginas de lado o del revés); títulos en blanco sobre banda
+  oscura leídos invertidos; rayas de tabla y colas de subrayado fuera del texto; letras
+  sueltas del margen descartadas.
+- Cabecera: NIF personal (DNI/NIE) no es el emisor; número por formato del proveedor (sin
+  etiqueta, tras una serie o con etiqueta propia «SALIDA»); fecha junto al título «ALBARÁN».
+- Tabla: columna de código deducida por posición; unidades pegadas a la cantidad (ml, cajas,
+  pce); referencia en dos renglones; anotaciones («Obra…», «En almacén…», una palabra suelta
+  en la columna de código) fuera de las líneas; abonos (sello «ABONO» o todo negativo).
+- Totales: cifra impresa que exige el cálculo (base + cuota = total, base × % = cuota, suma
+  de líneas) aunque su etiqueta no se lea; cifras de pie de todas las lecturas OCR;
+  relectura casilla a casilla de un pie con bordes que el OCR de página no ve.
+- Segunda fase: relectura dirigida de número, fecha, código y descripción dudosos con 6
+  estrategias; se resuelve por consenso fiable o unanimidad con validación estructural, y se
+  guarda método, confianza, estrategias, evidencias y lectura inicial. Dos lecturas fiables
+  distintas → no se resuelve.
+- Fallo crítico encontrado y corregido: un código alfanumérico («S» leída «5») aceptado por
+  consenso OCR. Los códigos con caracteres confundibles (O/0, S/5, I/1, B/8, Z/2, G/6) ya no
+  se aceptan solo por OCR (necesitan validación externa: catálogo).
+- Pruebas: 100 superadas (30 regresiones nuevas en `pruebas/lote-b.test.js`, datos ficticios).
+- Medición (30 albaranes reales, 543 campos; esperados aún sin confirmar por una persona):
+  **0 errores críticos aceptados**; 90,2 % correcto y aceptado automáticamente; 94,8 % con
+  el valor correcto; 98,1 % sin contar referencias y descripciones.
+
 ## 2026-10-20 · Lector PDF: OCR en el navegador y columnas económicas de Rodavi
 
 **Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos;

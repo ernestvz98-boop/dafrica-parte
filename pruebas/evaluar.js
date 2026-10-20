@@ -20,7 +20,7 @@
  */
 const fs=require("fs"),path=require("path");
 const {extraerPdf,VERSION}=require("../albaranes/extraer.js");
-const {REGISTRO}=require("../albaranes/proveedores.js");
+const {REGISTRO,fusionar}=require("../albaranes/proveedores.js");
 const {comparar,agregar,CRITICAS,UMBRAL}=require("./comparar.js");
 
 const cargarPdfjs=()=>import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -36,16 +36,10 @@ async function evaluarSinteticos(){
  return {corpus:"sintético",informes,pendientes:[]};
 }
 
+// Registro privado de la carpeta (NIF reales, fuera de git) fusionado con los perfiles públicos.
 function registroReal(carpeta){
  const archivo=path.join(carpeta,"registro.json");
- if(!fs.existsSync(archivo))return REGISTRO;
- const extra=JSON.parse(fs.readFileSync(archivo,"utf8"));
- const proveedores=REGISTRO.proveedores.map(p=>{
-  const r=(extra.proveedores||[]).find(x=>x.id===p.id);
-  return r?{...p,...r}:p;
- });
- for(const r of extra.proveedores||[])if(!proveedores.some(p=>p.id===r.id))proveedores.push(r);
- return {empresa_propia:{...REGISTRO.empresa_propia,...(extra.empresa_propia||{})},proveedores};
+ return fusionar(REGISTRO,fs.existsSync(archivo)?JSON.parse(fs.readFileSync(archivo,"utf8")):null);
 }
 
 // Motor OCR: "nativo" (Tesseract instalado), "tesseractjs" (motor de la web sobre imágenes de

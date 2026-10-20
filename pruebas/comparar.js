@@ -28,7 +28,9 @@ const iguales={
 
 // Por debajo de este umbral el campo no se da por fiable: cuenta como marcado para revisión.
 const UMBRAL=0.9;
-function clasificar({campo,esperado,obtenido,estado,debeMarcarse,tipo,confianza=null,motivos=[]}){
+// inciertos: campos cuyo valor esperado no se pudo transcribir con seguridad (pendientes de
+// confirmación humana). Se informan, pero no cuentan en la precisión.
+function clasificar({campo,esperado,obtenido,estado,debeMarcarse,tipo,confianza=null,motivos=[],incierto=false}){
  const marcado=!ACEPTADOS.has(estado)||(confianza!==null&&confianza<UMBRAL);
  const correcto=iguales[tipo](esperado,obtenido);
  let categoria;
@@ -36,6 +38,7 @@ function clasificar({campo,esperado,obtenido,estado,debeMarcarse,tipo,confianza=
  else if(!marcado)categoria=correcto?"CORRECTO":"INCORRECTO_NO_MARCADO";
  else if(obtenido===null||obtenido===undefined)categoria=correcto?"CORRECTO_A_REVISAR":"SIN_VALOR_MARCADO";
  else categoria=correcto?"CORRECTO_A_REVISAR":"INCORRECTO_MARCADO";
+ if(incierto)categoria="ESPERADO_INCIERTO";
  return {campo,esperado,obtenido,estado,categoria,correcto,confianza,aviso:marcado?(motivos.filter(Boolean).join("; ")||(confianza!==null&&confianza<UMBRAL?"Confianza "+confianza+" < "+UMBRAL:estado)):""};
 }
 
@@ -64,8 +67,8 @@ function alinear(esperadas,obtenidas){
 }
 
 function comparar(resultado,esperado){
- const campos=[],marcados=new Set(esperado.marcados||[]);
- const add=x=>campos.push(clasificar(x));
+ const campos=[],marcados=new Set(esperado.marcados||[]),inciertos=new Set(esperado.inciertos||[]);
+ const add=x=>campos.push(clasificar({...x,incierto:inciertos.has(x.campo)}));
  const prov=resultado.proveedor||{nif:null,estado:"VACIO"};
  // Un NIF bien leído pero aún no registrado es una lectura correcta del campo.
  const conf=x=>typeof x?.confianza==="number"?x.confianza:null;

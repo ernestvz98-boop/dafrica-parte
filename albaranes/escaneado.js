@@ -110,6 +110,9 @@ function combinarLineas(principal,lecturas){
 // Totales: si la principal no los verifica y otra lectura sí (base + cuota = total), se toman
 // de esa; si dos lecturas verifican totales distintos, quedan en revisión.
 function combinarTotales(principal,lecturas){
+ // Cifras del pie vistas por cualquier lectura: completarTotales solo acepta la que exige el
+ // cálculo (p. ej. «21,00 %» cuando base × 21 % = cuota), así que sumar lecturas no la relaja.
+ if(principal._ctx)principal._ctx.cifrasPie=[principal,...lecturas].flatMap(r=>r._ctx?.cifrasPie||[]);
  if(principal.totales?.validacion?.estado==="OK")return;
  const ok=lecturas.filter(r=>r.totales?.validacion?.estado==="OK"&&r.totales.total?.estado==="VERIFICADO");
  const distintos=[...new Map(ok.map(r=>[[r.totales.base_imponible.valor,r.totales.cuota_iva.valor,r.totales.total.valor].join("|"),r])).values()];
@@ -129,12 +132,166 @@ function combinarTotales(principal,lecturas){
 }
 
 /*
+ * SEGUNDA FASE · campos sin aceptar o con confianza < 0,9 (número, fecha, código, descripción).
+ * Se relee SOLO la caja del campo con varias estrategias (línea/palabra, ampliado, binarización
+ * adaptativa, lista de caracteres). Se acepta un valor si TODAS las relecturas que dan un valor
+ * válido coinciden, al menos 4 lo dan, su confianza OCR es ≥ 90 y supera la validación del campo
+ * (formato del proveedor, fecha válida…). Si dan dos valores válidos distintos, no se resuelve.
+ * Cada resolución guarda método, estrategias y evidencias.
+ */
+const ESTRATEGIAS=[{psm:7},{psm:8},{psm:7,escala:2},{psm:13,escala:2},{psm:7,escala:2,umbral:"sauvola"},{psm:6,escala:2}];
+const LISTAS={numero:"0123456789./-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",fecha:"0123456789/-.",referencia:null,descripcion:null};
+const limpiarBordes=t=>String(t||"").replace(/^[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ(]+|[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ)%]+$/g,"");
+async function releerCaja(p,caja,lista){
+ const k=p.dpi/72,[x0,y,x1,alto]=caja;
+ const rx0=Math.max(0,Math.floor((x0-0.6*alto)*k)),rx1=Math.min(p.anchoPx,Math.ceil((x1+0.6*alto)*k));
+ const ry0=Math.max(0,Math.floor((y-1.3*alto)*k)),ry1=Math.min(p.altoPx,Math.ceil((y+0.45*alto)*k));
+ if(rx1-rx0<8||ry1-ry0<8)return [];
+ const salida=[];
+ for(const e of ESTRATEGIAS)for(const l of lista?[null,lista]:[null]){
+  // Signos sueltos (rayas de la tabla, comillas) no cuentan ni en el texto ni en la confianza.
+  const palabras=(await p.ocr({...e,region:[rx0,ry0,rx1-rx0,ry1-ry0],lista:l})).filter(w=>!/^[|¦—–_\-'"`´‘’.,:;!¡¿?()\[\]{}<>«»=~*+#°º\\/]+$/.test(String(w.texto).trim()));
+  if(!palabras.length)continue;
+  salida.push({estrategia:"psm"+e.psm+(e.escala>1?"·x"+e.escala:"")+(e.umbral?"·"+e.umbral:"")+(l?"·lista":""),
+   palabras,texto:palabras.map(w=>w.texto).join(" "),conf:Math.min(...palabras.map(w=>w.conf))});
+ }
+ return salida;
+}
+// Valor candidato de una relectura según el campo; null si no es válido.
+function candidatoDe(campo,texto,ctx){
+ const {perfil,opcionesFecha}=ctx;
+ const N=M("normalizar");
+ const tokens=String(texto).split(/\s+/).map(limpiarBordes).filter(Boolean);
+ if(campo==="numero"){
+  const re=perfil?.formato_numero?new RegExp(perfil.formato_numero):/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i;
+  const v=[...tokens,...tokens.slice(0,-1).map((t,i)=>t+" "+tokens[i+1])].filter(t=>re.test(t)&&/\d/.test(t)&&N.fecha(t).estado!=="OK");
+  return v.length===1?v[0]:null;
+ }
+ if(campo==="fecha"){
+  const v=tokens.map(t=>N.fecha(t,opcionesFecha)).filter(f=>f.estado==="OK");
+  return v.length===1?v[0].valor:null;
+ }
+ // Código: si el recorte alcanza la fila vecina y trae varios, el más parecido a la lectura inicial.
+ if(campo==="referencia"&&ctx.literal&&!/\s/.test(ctx.literal)&&tokens.length>1){
+  const d=(a,b)=>{const m=a.length,n=b.length,D=Array.from({length:m+1},(_,i)=>[i,...Array(n).fill(0)]);
+   for(let j=1;j<=n;j++)D[0][j]=j;
+   for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)D[i][j]=Math.min(D[i-1][j]+1,D[i][j-1]+1,D[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+   return D[m][n];};
+  const orden=[...tokens].sort((a,b)=>d(a,ctx.literal)-d(b,ctx.literal));
+  return d(orden[0],ctx.literal)<d(orden[1],ctx.literal)?orden[0]:null;
+ }
+ const t=tokens.join(" ");
+ return t||null;
+}
+async function resolverCampo(p,campo,cajas,ctx){
+ const validas=[];
+ for(const caja of cajas){
+  for(const r of await releerCaja(p,caja,LISTAS[campo])){
+   const v=candidatoDe(campo,r.texto,ctx);
+   if(v)validas.push({...r,valor:v,caja});
+  }
+ }
+
+ // Consenso de las relecturas FIABLES (confianza ≥ 80): las de confianza ínfima no votan.
+ const fiables=validas.filter(v=>v.conf>=80),distF=[...new Set(fiables.map(v=>v.valor))];
+ const resultado=(lista,conf)=>({valor:lista[0].valor,caja:lista[0].caja,conf,estrategias:lista.map(v=>v.estrategia),
+  textos:[...new Set(lista.map(v=>v.texto))],descartadas:validas.filter(v=>!lista.includes(v)).map(v=>v.estrategia+"=«"+v.valor+"»")});
+ if(distF.length>1)return {conflicto:distF};
+ if(fiables.length>=3)return resultado(fiables,Math.min(...fiables.map(v=>v.conf)));
+ // Pocas relecturas fiables: unanimidad amplia (≥ 8) cuando el campo tiene validación estructural
+ // independiente del OCR (formato de número del proveedor, fecha válida).
+ const distintos=[...new Set(validas.map(v=>v.valor))];
+ if(distintos.length>1)return {conflicto:distintos};
+ const mediana=[...validas.map(v=>v.conf)].sort((a,b)=>a-b)[Math.floor(validas.length/2)];
+ if(ctx.validacionEstructural&&validas.length>=8&&mediana>=40)return resultado(validas,mediana);
+ return null;
+}
+async function segundaFase(principal,paginas,lecturas,opciones){
+ const ctx=principal._ctx||{},perfil=ctx.perfil;
+ const pag=paginas.find(p=>p.numero===(principal.tablas?.[0]?.pagina??paginas[0].numero))||paginas[0];
+ const opcionesFecha={hoy:opciones.hoy,orden:perfil?.orden_fecha||"DMY"};
+ const N=M("normalizar");
+ const resueltos=[];
+ // Cabecera: número y fecha. Cajas: las de todas las lecturas que vieron algo en ese campo.
+ for(const campo of ["numero","fecha"]){
+  const actual=principal[campo];
+  if(actual?.estado==="OK"&&(actual.confianza??0)>=0.9)continue;
+  const conCaja=[actual,...lecturas.map(r=>r[campo])].filter(c=>c?.caja&&c.literal).map(c=>c.caja);
+  // Número con formato de proveedor conocido: también las celdas que CONTIENEN ese formato
+  // («600.1237»: un trazo de firma añadido), aunque su etiqueta no se haya leído.
+  if(campo==="numero"&&perfil?.formato_numero){
+   const re=new RegExp(perfil.formato_numero.replace(/^\^/,"").replace(/\$$/,""));
+   for(const r of lecturas)for(const pg of r._pags||[])for(const l of pg.lineas)for(const c of l.celdas)
+    if(re.test(c.texto)&&N.fecha(c.texto).estado!=="OK")conCaja.push([c.x0,c.y,c.x1,c.alto]);
+  }
+  const cajas=[...new Map(conCaja.map(c=>[c.map(v=>Math.round(v/4)).join(","),c])).values()].slice(0,4);
+  if(!cajas.length)continue;
+  const r=await resolverCampo(pag,campo,cajas,{perfil,opcionesFecha,validacionEstructural:campo==="fecha"||!!perfil?.formato_numero});
+  if(!r||r.conflicto){if(r?.conflicto)actual.motivos=[...(actual.motivos||[]),"Relecturas con valores distintos: "+r.conflicto.join(" | ")];continue;}
+  if(actual?.estado==="OK"&&N.canon(actual.valor)!==N.canon(r.valor)){
+   actual.motivos=[...(actual.motivos||[]),"La relectura dirigida da «"+r.valor+"»"];continue;
+  }
+  const valor=campo==="fecha"?r.valor:r.valor.replace(/\s*\/\s*/g,"/");
+  principal[campo]={...(actual||{}),literal:r.textos[0],valor,estado:"OK",caja:r.caja,motivos:[],
+   notas:[...((actual?.notas)||[]),"Resuelto en la segunda fase por relectura dirigida de la casilla"],
+   resolucion:{metodo:"relectura_dirigida",confianza:0.95,estrategias:r.estrategias,conf_ocr_min:r.conf,
+    evidencias:["Mismo valor en "+r.estrategias.length+" relecturas independientes de la casilla",
+     campo==="numero"&&perfil?.formato_numero?"Cumple el formato de número del proveedor ("+perfil.formato_numero+")":campo==="fecha"?"Fecha válida":"Valor con forma de número de albarán"]}};
+  resueltos.push(campo);
+ }
+ // Líneas: código y descripción leídos con poca confianza (no hay cuadre que los confirme).
+ for(const l of principal.lineas){
+  for(const campo of ["referencia","descripcion"]){
+   const c=l[campo];
+   if(!c||c.estado!=="OK"||(c.confianza??1)>=0.9||!c.caja)continue;
+   const r=await resolverCampo(pag,campo,[c.caja],{perfil,opcionesFecha,literal:c.literal});
+   if(!r)continue;
+   if(r.conflicto){l[campo]={...c,motivos:[...(c.motivos||[]),"Relecturas fiables distintas: "+r.conflicto.join(" | ")]};continue;}
+   // Una referencia no cambia de número de palabras (la relectura no debe arrastrar la celda vecina).
+   if(campo==="referencia"&&r.valor.split(/\s+/).length!==String(c.literal).split(/\s+/).length)continue;
+   const corregido=N.canon(r.valor)!==N.canon(c.literal);
+   l[campo]={...c,literal:r.valor,valor:r.valor,
+    notas:[...(c.notas||[]),...(corregido?["Corregido por relectura dirigida (lectura inicial «"+c.literal+"»)"]:[])],
+    resolucion:{metodo:"relectura_dirigida",confianza:0.93,estrategias:r.estrategias,conf_ocr_min:r.conf,lectura_inicial:c.literal,
+     evidencias:["Mismo texto en "+r.estrategias.length+" relecturas fiables (confianza ≥ 80) de la celda",
+      ...(r.descartadas.length?["Relecturas de baja confianza ignoradas: "+r.descartadas.join(", ")]:[])]}};
+   resueltos.push("linea "+l.fila+" "+campo+(corregido?" (corregido)":""));
+  }
+ }
+ return resueltos;
+}
+
+/*
  * paginas: [{numero, anchoPx, altoPx, dpi, ocr}] · opciones: las de extraerDePaginas.
  * Devuelve el resultado combinado con `lecturas_ocr` (resumen de cada lectura).
  */
+/*
+ * Orientación: páginas escaneadas giradas 90°, 180° o 270°. Si la lectura tal cual es pobre
+ * (pocas palabras fiables), se prueban los otros giros y se elige el que da más palabras
+ * fiables. Una página derecha no cuesta lecturas adicionales.
+ */
+const PALABRA_FIABLE=/[A-Za-zÁÉÍÓÚÑáéíóúñ]{3,}|\d{2,}/;
+const calidadOCR=palabras=>palabras.filter(w=>w.conf>=80&&PALABRA_FIABLE.test(w.texto)).length;
+async function orientar(p){
+ if(typeof p.rotada!=="function")return {pagina:p,grados:0};
+ const q0=calidadOCR(await p.ocr({psm:4}));
+ if(q0>=30)return {pagina:p,grados:0,calidad:q0};
+ let mejor={pagina:p,grados:0,calidad:q0};
+ for(const g of [90,270,180]){
+  const pg=p.rotada(g),q=calidadOCR(await pg.ocr({psm:4}));
+  if(q>mejor.calidad)mejor={pagina:pg,grados:g,calidad:q};
+  if(q>=30&&q>=2*q0)break;
+ }
+ // Solo se gira con una mejora clara; si no, se lee tal cual (y el resultado irá a revisión).
+ return mejor.grados&&mejor.calidad>=Math.max(15,2*q0)?mejor:{pagina:p,grados:0,calidad:q0};
+}
+
 async function extraerEscaneado(paginas,opciones={}){
  const {extraerDePaginas,finalizar}=M("extraer"),{paginaDesdePalabras}=M("ocr");
- const lecturas=[],resumen=[];
+ const lecturas=[],resumen=[],orientacion=[];
+ const orientadas=[];
+ for(const p of paginas){const o=await orientar(p);orientadas.push(o.pagina);orientacion.push({pagina:p.numero,grados:o.grados});}
+ paginas=orientadas;
  for(const conf of LECTURAS){
   const pags=[];
   for(const p of paginas)pags.push(paginaDesdePalabras(await p.ocr({psm:conf.psm,umbral:conf.umbral}),{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi}));
@@ -145,21 +302,39 @@ async function extraerEscaneado(paginas,opciones={}){
  // Cabecera de tabla ilegible en una lectura (banda gris) pero leída en otra: se trasladan
  // los títulos (posición incluida) a la lectura que no la tiene y se vuelve a extraer.
  const {leerTablaPagina}=M("extraer");
+ // titulosDe(numeroPagina) → línea de títulos (o null); se insertan en las lecturas sin cabecera.
+ const trasladar=(titulosDe,etiqueta)=>{
+  for(const r of [...lecturas]){
+   if(r.tablas?.[0]?.y_cabecera!=null||r._solo_cabecera||!r._pags)continue;
+   const pags=r._pags.map(pg=>{
+    const titulos=titulosDe(pg.numero);
+    if(!titulos)return pg;
+    const lineas=[...pg.lineas.filter(l=>Math.abs(l.y-titulos.y)>0.8*titulos.alto),titulos].sort((a,b)=>a.y-b.y);
+    return {...pg,lineas};
+   });
+   const r2=extraerDePaginas(pags,opciones);r2._lectura=r._lectura+"+cabecera_"+etiqueta;
+   Object.defineProperty(r2,"_pags",{value:pags,enumerable:false});
+   if(r2.tablas?.[0]?.y_cabecera!=null)lecturas.push(r2);
+  }
+ };
  const conCabecera=lecturas.find(r=>r.tablas?.[0]?.y_cabecera!=null);
- if(conCabecera)for(const r of [...lecturas]){
-  if(r.tablas?.[0]?.y_cabecera!=null)continue;
-  const pags=r._pags.map(pg=>{
-   const origen=conCabecera._pags.find(x=>x.numero===pg.numero);
-   const t=origen&&leerTablaPagina(origen);
-   if(!t)return pg;
-   const titulos=origen.lineas.slice(t.indiceCabecera,t.indiceCabecera+1);
-   const yC=titulos[0].y,alto=titulos[0].alto;
-   const lineas=[...pg.lineas.filter(l=>Math.abs(l.y-yC)>0.8*alto),...titulos].sort((a,b)=>a.y-b.y);
-   return {...pg,lineas};
-  });
-  const r2=extraerDePaginas(pags,opciones);r2._lectura=r._lectura+"+cabecera_"+conCabecera._lectura;
-  Object.defineProperty(r2,"_pags",{value:pags,enumerable:false});
-  if(r2.tablas?.[0]?.y_cabecera!=null)lecturas.push(r2);
+ if(conCabecera)trasladar(n=>{
+  const origen=conCabecera._pags.find(x=>x.numero===n),t=origen&&leerTablaPagina(origen);
+  return t?origen.lineas[t.indiceCabecera]:null;
+ },conCabecera._lectura);
+ // Ninguna lectura ve los títulos: si están en blanco sobre una banda oscura, se leen invertidos.
+ if(!lecturas.some(r=>r.tablas?.[0]?.y_cabecera!=null)){
+  const titulos=new Map();
+  for(const p of paginas){
+   for(const [y0,y1] of (typeof p.bandasOscuras==="function"?await p.bandasOscuras():[]).slice(0,6)){
+    const ry=Math.max(0,y0-8),rh=Math.min(p.altoPx-ry,y1-y0+16);
+    const palabras=await p.ocr({psm:11,region:[0,ry,p.anchoPx,rh],tratamiento:"invertir"});
+    const pag=paginaDesdePalabras(palabras,{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi,desplazamiento:[0,ry]});
+    const t=leerTablaPagina(pag);
+    if(t){titulos.set(p.numero,{...pag.lineas[t.indiceCabecera],invertida:true});break;}
+   }
+  }
+  if(titulos.size)trasladar(n=>titulos.get(n)||null,"banda_oscura_invertida");
  }
  let principal=[...lecturas].sort((a,b)=>puntuar(b)-puntuar(a))[0];
  // Relectura de la banda de la tabla (la zona con más cifras) con la geometría de la principal.
@@ -185,6 +360,46 @@ async function extraerEscaneado(paginas,opciones={}){
     const palabras=await p.ocr({psm,umbral,region:[0,y0,p.anchoPx,y1-y0]});
     const pag=paginaDesdePalabras(palabras,{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi,desplazamiento:[0,y0]});
     const r=extraerDePaginas([pag],opciones);r._lectura=nombre+"_psm"+psm+(umbral?"_"+umbral:"");r._solo_cabecera=true;
+    Object.defineProperty(r,"_pags",{value:[pag],enumerable:false});
+    lecturas.push(r);
+   }
+  }
+ }
+ // Pie en casillas con borde («BASE IMPONIBLE | % IVA | TOTAL» y las cifras debajo): el OCR de
+ // página no ve las cifras encerradas. Si ninguna lectura cuadra los totales, se relee cada
+ // casilla bajo su título y se extrae de nuevo con los títulos y las cifras releídas.
+ if(geo&&geo.y_cabecera!=null&&!lecturas.some(r=>r.totales?.validacion?.estado==="OK")){
+  const p=paginas.find(x=>x.numero===geo.pagina),k=p.dpi/72;
+  const titulo=t=>/BASE|TOTAL|I\.?V\.?A|IMPORTE|SUMA/.test(String(t).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase());
+  let fila=null;
+  for(const r of lecturas)for(const pb of r._pags||[]){
+   if(fila||pb.numero!==p.numero)continue;
+   fila=pb.lineas.find(l=>l.y>=geo.y_fin-1&&l.celdas.filter(c=>titulo(c.texto)).length>=3&&!l.celdas.some(c=>/\d[.,]\d/.test(c.texto)))||null;
+  }
+  if(fila){
+   const celdas=fila.celdas.filter(c=>!/^[|¦\[\]]+$/.test(c.texto));
+   const palabras=celdas.map(c=>({texto:c.texto,x0:c.x0*k,x1:c.x1*k,y0:(fila.y-fila.alto)*k,y1:fila.y*k,conf:95}));
+   const zonas=[];
+   celdas.forEach((c,i)=>{
+    if(!titulo(c.texto))return;
+    // La casilla abarca el título y un 30 % del hueco con sus vecinos: sin llegar a las rayas
+    // verticales que separan las casillas (con ellas dentro, el OCR de línea falla).
+    const izq=i?c.x0-0.3*(c.x0-celdas[i-1].x1):c.x0-2*fila.alto,der=i<celdas.length-1?c.x1+0.3*(celdas[i+1].x0-c.x1):c.x1+3*fila.alto;
+    zonas.push({izq,der});
+   });
+   const lecturasCasilla=[];
+   for(const z of zonas){
+    const x0=Math.max(0,Math.floor(z.izq*k)),x1=Math.min(p.anchoPx,Math.ceil(z.der*k));
+    const y0=Math.ceil((fila.y+0.4*fila.alto)*k),y1=Math.min(p.altoPx,Math.floor((fila.y+5.5*fila.alto)*k));
+    if(x1-x0<10||y1-y0<10)continue;
+    const ws=(await p.ocr({psm:7,region:[x0,y0,x1-x0,y1-y0]})).filter(w=>/\d/.test(w.texto));
+    lecturasCasilla.push(...ws.map(w=>({...w,x0:w.x0+x0,x1:w.x1+x0,y0:w.y0+y0,y1:w.y1+y0})));
+   }
+   if(lecturasCasilla.length){
+    const pag=paginaDesdePalabras([...palabras,...lecturasCasilla],{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi});
+    const r=extraerDePaginas([pag],opciones);r._lectura="casillas_pie_psm7";r._solo_cabecera=true;
+    for(const otro of ["fecha","numero","proveedor"])r[otro]=null;
+    Object.defineProperty(r,"_pags",{value:[pag],enumerable:false});
     lecturas.push(r);
    }
   }
@@ -236,6 +451,13 @@ async function extraerEscaneado(paginas,opciones={}){
   principal.validaciones_extra.push({nombre:"recuento_lecturas",estado:"FALLO",
    detalle:"La lectura principal tiene "+principal.lineas.length+" líneas y la relectura de la tabla "+banda.lineas.length});
  finalizar(principal);
+ // Segunda fase: relectura dirigida de los campos dudosos; después se recalculan estado y confianza.
+ const resueltos=await segundaFase(principal,paginas,lecturas,opciones);
+ if(resueltos.length){principal.validaciones_extra=principal.validaciones_extra||[];finalizar(principal);}
+ principal.segunda_fase=resueltos;
+ principal.orientacion=orientacion;
+ const giradas=orientacion.filter(o=>o.grados);
+ if(giradas.length)principal.incidencias.push("Página(s) escaneada(s) girada(s) y enderezada(s): "+giradas.map(o=>o.pagina+" ("+o.grados+"°)").join(", "));
  principal.lecturas_ocr=resumen;
  principal.lectura_principal=principal._lectura;
  return principal;

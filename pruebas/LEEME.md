@@ -83,3 +83,8 @@ Un PDF escaneado con un albarán por página lleva `"escaneado": true` y
 Un importe impreso con dos precisiones se expresa como lista: `[48.00, 48.0004]`.
 
 El proceso termina con código 1 si algún valor erróneo se aceptó como bueno.
+
+Opciones de `npm run evaluar`: `--motor=nativo|tesseractjs|navegador` (motor OCR) e
+`--incluir-sin-revisar`. Un campo cuyo valor esperado no se puede confirmar en el papel va en
+`inciertos` del esperado y no cuenta en las métricas. `pruebas/lote-b.test.js` reproduce con
+datos ficticios cada fallo real del lote B (`pruebas/ayudas-ocr.js` construye las palabras).
