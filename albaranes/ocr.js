@@ -32,7 +32,7 @@ function paginaDesdePalabras(palabras,{numero=1,anchoPx,altoPx,dpi=300,desplazam
   const cx=(anchoPx||0)/2;
   palabras=palabras.map(p=>{const d=inclinacion*((p.x0+p.x1)/2-cx);return {...p,y0:p.y0-d,y1:p.y1-d};});
  }
- const fragmentos=[];
+ const fragmentos=[],girados=[];
  for(const p of palabras){
   // Rayas verticales de la tabla pegadas a la palabra («1301097020|»): no forman parte del texto.
   // Tampoco una cola de rayas largas («JERRAP25LN-—», la tinta de un subrayado); «1,00-» se conserva.
@@ -46,17 +46,27 @@ function paginaDesdePalabras(palabras,{numero=1,anchoPx,altoPx,dpi=300,desplazam
   // Fragmentos de 1–3 caracteres en el margen exterior: letras sueltas del texto vertical
   // (aviso legal), aunque el OCR les dé confianza alta; ningún dato de la tabla está ahí solo.
   if(anchoPx&&(p.x1<0.08*anchoPx||p.x0>0.97*anchoPx)&&(texto.length<=3||(Number.isFinite(p.conf)&&p.conf<75))){descartadas.push(texto);continue;}
+  // Palabra girada (aviso legal vertical leído entero, «personaldatostratamiento.»): su caja es
+  // estrecha y alta, imposible para texto horizontal (cada carácter mide al menos ~0,35 de alto),
+  // aunque el OCR le dé confianza alta. No es un dato de la tabla: va aparte (`lineas_giradas`),
+  // donde solo se busca el CIF del emisor (algunos lo imprimen únicamente en ese aviso).
+  if(texto.length>=4&&(p.x1-p.x0)<0.15*(p.y1-p.y0)*texto.length){girados.push({...p,texto});continue;}
   const alto=(p.y1-p.y0)*k;
   if(alto<=0)continue;
   fragmentos.push({texto,crudo:null,x0:(p.x0+dx)*k,x1:(p.x1+dx)*k,y:(p.y1+dy)*k,alto,conf:Number.isFinite(p.conf)?p.conf:null});
  }
  const lineas=TEXTO().agruparLineas(fragmentos);
+ // Texto girado: una línea por línea del OCR, en su orden de lectura.
+ const porLinea=new Map();
+ for(const p of girados){const id=p.linea??"g"+porLinea.size;if(!porLinea.has(id))porLinea.set(id,[]);porLinea.get(id).push(p);}
+ const lineas_giradas=[...porLinea.values()].map(g=>({texto:g.map(p=>p.texto).join(" "),
+  celdas:g.map(p=>({texto:p.texto,x0:(p.x0+dx)*k,x1:(p.x1+dx)*k,y:(p.y1+dy)*k,alto:(p.y1-p.y0)*k,conf:Number.isFinite(p.conf)?p.conf:null}))}));
  const confs=fragmentos.map(f=>f.conf).filter(c=>c!=null);
  return {
   numero,tipo:"OCR",ancho:anchoPagina??(anchoPx*k),alto:altoPagina??(altoPx*k),
   caracteres:fragmentos.reduce((n,f)=>n+f.texto.length,0),fraccion_imagen:1,
   conf_media:confs.length?Math.round(confs.reduce((a,b)=>a+b,0)/confs.length):null,
-  lineas,inclinacion,avisos:[...(descartadas.length?[descartadas.length+" signos sueltos del OCR descartados"]:[]),
+  lineas,lineas_giradas,inclinacion,avisos:[...(descartadas.length?[descartadas.length+" signos sueltos del OCR descartados"]:[]),
    ...(inclinacion?["Escaneo inclinado "+(Math.atan(inclinacion)*180/Math.PI).toFixed(2)+"°: posiciones enderezadas"]:[])]
  };
 }

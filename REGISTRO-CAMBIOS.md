@@ -3,6 +3,30 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Lector PDF: fallos hallados en Chromium real (motor de la web, tesseract.js)
+
+**Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos).
+
+La prueba de estrés en Chromium (4 PDF a la vez, 90 páginas, 87 albaranes, 25 min, pico de
+memoria ≈ 1,2 GB del renderizador; sin bloqueos ni errores de página; separación perfecta) dio
+**2 fallos críticos reales** que el Tesseract nativo no produce, y la medición del corpus con
+tesseract.js (`--motor=tesseractjs`) un tercero. Reproducidos, corregidos y con regresión:
+
+- Aviso legal vertical del margen leído como una sola palabra de confianza alta
+  («personaldatostratamiento.»): ocupaba la columna de código y el código real pasaba a la
+  descripción. Una palabra cuya caja es imposible para texto horizontal (estrecha y alta) queda
+  fuera de las líneas, en `lineas_giradas`, donde solo se busca el CIF del emisor (algunos
+  proveedores lo imprimen únicamente ahí: sin esto, 3 albaranes perdían su CIF).
+- «ml» leído «mil» (unidad válida, millar) y aceptado: el cuadre no depende de la unidad. En
+  OCR la unidad «mil» queda en revisión.
+- Descripción partida por un trazo a mano («CODO 92 M-H» + fila sin código «LATON 2»): la línea
+  anterior quedaba aceptada con la descripción cortada. Una fila sin código justo debajo, en la
+  columna de descripción, deja la anterior en revisión (y la combinación elige la lectura OCR
+  que la lee completa).
+- Medición tras los cambios (30 albaranes, 545 campos), 0 críticos en todas: nativo 495
+  (90,8 %), nativo con perfiles públicos 493 (90,5 %), tesseract.js con perfiles públicos 491
+  (90,1 %; antes 489 y 1 crítico). Sintéticos: 224/240, 0 críticos. Pruebas: 193 superadas.
+
 ## 2026-10-21 · Lector PDF (Fase 1): validación final
 
 **Producción:** desplegada, con autorización expresa del usuario, la función Edge

@@ -196,7 +196,7 @@ test("OCR: líneas con importe y sin total localizado no se aceptan automáticam
  assert.notEqual(r.estado,"AUTO_OK");
 });
 
-test("número con formato ajeno al del proveedor («26102749» por «26/02749») no se acepta",()=>{
+test("número con formato ajeno al del proveedor («26109003» por «26/09003») no se acepta",()=>{
  const reg={...registro,proveedores:[{...registro.proveedores[0],formato_numero:"^\\d{2}/\\d{5}$"}]};
  const pag=n=>paginaDesdePalabras([...cabeceraDoc(),...etiquetas(n,"25-09-2026"),...cabeceraSaltoki(),
   ...fila(218,["R-1",60],["TABLERO",120],["1,00",420],["10,000",462],["10,00",560])],{numero:1,anchoPx:595,altoPx:842,dpi:72});
@@ -261,4 +261,51 @@ test("fecha cruzada por la firma: se relee solo su casilla",async()=>{
  const r=await extraerEscaneado(motor({4:pagina},{limpias}),{registro,hoy:HOY});
  assert.equal(r.fecha.valor,"2026-10-14");
  assert.ok(r.lecturas_ocr.some(x=>/^casilla_fecha/.test(x.lectura)));
+});
+
+test("aviso legal vertical del margen leído como una palabra de confianza alta: no ocupa la columna de código",()=>{
+ // tesseract.js lee el texto girado entero («personaldatostratamiento.», conf 96) en una caja
+ // estrecha y alta pegada al borde de la fila: imposible para texto horizontal.
+ const girada={texto:"personaldatostratamiento.",x0:27,x1:41,y0:192,y1:218,conf:96,linea:"V"};
+ const r=leer([...cabeceraDoc(),...etiquetas(),...cabeceraSaltoki(),girada,
+  ...fila(218,["1300000001",60],["ACUMULADOR",120],["CARBONO",180],["1,00",420],["10,000",462],["10,00",560])]);
+ assert.equal(r.lineas.length,1);
+ assert.equal(r.lineas[0].referencia.valor,"1300000001");
+ assert.equal(r.lineas[0].descripcion.valor,"ACUMULADOR CARBONO");
+ // Una palabra horizontal normal (aunque esté en el margen y sea larga) no se descarta por esto.
+ assert.ok(paginaDesdePalabras([{texto:"1300000001",x0:20,x1:70,y0:210,y1:218,conf:96}],{anchoPx:595,altoPx:842,dpi:72}).lineas.length===1);
+});
+
+test("unidad «mil» leída por OCR junto a la cantidad: puede ser «ml» con una «i» de más, queda en revisión",()=>{
+ const pag=u=>[...cabeceraDoc(),...etiquetas(),...cabeceraSaltoki(),
+  ...fila(218,["1300000001",60],["CANALETA",120],["30,00 "+u,400],["10,000",462],["300,00",560])];
+ const r=leer(pag("mil"));
+ assert.equal(r.lineas[0].cantidad.valor,30);
+ assert.equal(r.lineas[0].unidad.estado,"REVISAR");
+ assert.equal(r.lineas[0].estado,"REVISAR");assert.notEqual(r.estado,"AUTO_OK");
+ assert.equal(leer(pag("ml")).lineas[0].unidad.estado,"OK");
+});
+
+test("CIF del emisor impreso solo en el aviso legal vertical: sigue identificando al proveedor, fuera de la tabla",()=>{
+ const cabecera=fila(40,["PROVEEDOR",60],["FICTICIO,",115],["S.L.",165]);
+ const tabla=[...etiquetas(),...cabeceraSaltoki(),...fila(218,["1300000001",60],["TUBO",120],["1,00",420],["10,000",462],["10,00",560])];
+ const girado=[{texto:"CIF.:",x0:27,x1:36,y0:300,y1:330,conf:90,linea:"V"},{texto:NIF,x0:27,x1:36,y0:335,y1:390,conf:92,linea:"V"}];
+ const r=leer([...cabecera,...tabla,...girado]);
+ assert.equal(r.proveedor.nif,NIF);assert.equal(r.proveedor.via,"nif");
+ assert.equal(r.lineas.length,1);assert.equal(r.lineas[0].referencia.valor,"1300000001");
+ // Sin el aviso girado solo queda el nombre (evidencia más débil).
+ assert.notEqual(leer([...cabecera,...tabla]).proveedor.via,"nif");
+});
+
+test("descripción partida por un trazo a mano («LATON 2» en una fila sin código justo debajo): la anterior no se acepta",()=>{
+ const pag=sigue=>[...cabeceraDoc(),...etiquetas(),...cabeceraSaltoki(),
+  ...fila(218,["1300000001",60],["CODO",120],["92",145],["M-H",160],["-1,00",420],["10,000",462],["-10,00",560]),
+  ...(sigue?fila(224,["LATON",180,60],["2",210,60],["1",420,50]):[]),
+  ...fila(236,["1300000002",60],["ROSCA",120],["DOBLE",150],["-4,00",420],["10,000",462],["-40,00",560])];
+ const r=leer(pag(true));
+ assert.equal(r.lineas[0].descripcion.estado,"REVISAR");
+ assert.match(r.lineas[0].descripcion.motivos.at(-1),/fila siguiente, sin código/);
+ assert.notEqual(r.estado,"AUTO_OK");
+ // Sin esa fila, la descripción se acepta como antes.
+ assert.equal(leer(pag(false)).lineas[0].descripcion.estado,"OK");
 });

@@ -417,6 +417,16 @@ function identificarProveedor(paginas,registro,limiteCabecera=null){
    for(const celda of linea.celdas)for(const n of NIF().buscar(celda.texto))registrar(n,celda);
    for(const n of NIF().buscar(linea.texto))registrar(n,linea.celdas[0]);
   });
+  // Aviso legal girado del margen (fuera de las líneas de la página): solo aporta su CIF, sin
+  // contexto de posición (ni cabecera ni recuadro del cliente). DAFRICA se reconoce por su NIF.
+  for(const linea of pagina.lineas_giradas||[]){
+   const vistos=new Set();
+   for(const celda of linea.celdas)for(const n of [...NIF().buscar(celda.texto),...NIF().buscar(linea.texto)]){
+    if(vistos.has(n.nif))continue;vistos.add(n.nif);
+    encontrados.push({nif:n.nif,literal:n.literal,pagina:pagina.numero,caja:caja(celda),conf:celda.conf??null,propio:esPropioNif(n.nif),enCabecera:false,girado:true,
+     motivo_propio:esPropioNif(n.nif)?"NIF de la empresa propia":""});
+   }
+  }
  }
  const r={nif:null,id:null,nombre:null,estado:"VACIO",motivos:[],notas:[],candidatos:[],nif_propio_detectado:null,caja:null};
  const propio=encontrados.find(e=>e.propio);
@@ -1015,6 +1025,12 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
    if(f[k].estado==="OK")f[k]={...f[k],estado:"REVISAR",motivos:[...(f[k].motivos||[]),"Frontera entre código y descripción estimada (fila leída en un solo bloque)"]};
   f.motivos.push("Código y descripción separados por posición estimada");
  }
+ // «mil» (millar) es una unidad válida, pero el OCR la produce también desde «ml» con una «i»
+ // de más; el cuadre no la confirma (no depende de la unidad). Dos lecturas plausibles: revisión.
+ if(ocr&&/^mil\.?$/i.test(f.unidad.valor||"")&&f.unidad.estado==="OK"){
+  f.unidad={...f.unidad,estado:"REVISAR",motivos:[...(f.unidad.motivos||[]),"«"+f.unidad.literal+"» puede ser «ml» mal leído por el OCR"]};
+  f.motivos.push("Unidad «"+f.unidad.literal+"»: posible «ml» mal leído");
+ }
  if(cruda.partida&&f.cuadre.estado!=="VERIFICADO"){
   f.motivos.push("Columnas separadas por posición estimada y sin cuadre que lo confirme");
   for(const k of ["referencia","descripcion","cantidad","unidad","precio","descuento","importe"])
@@ -1189,6 +1205,17 @@ function extraerDePaginas(paginas,opciones={}){
   }
   salida.lineas.push(fila);
  }
+ // Fila sin código pegada debajo de otra y en la columna de descripción («LATON 2» separado de
+ // «CODO 92 M-H» por un trazo a mano): puede ser el final de la descripción anterior, que entonces
+ // estaría cortada. La anterior no se acepta sin revisión.
+ if(!perfil?.permite_sin_referencia)salida.lineas.forEach((l,i)=>{
+  const ant=salida.lineas[i-1],a=ant?.descripcion?.caja,b=l.descripcion?.caja;
+  if(!ant||l.referencia.estado!=="VACIO"||!a||!b||l.pagina!==ant.pagina||ant.descripcion.estado!=="OK")return;
+  if(b[1]-a[1]>0&&b[1]-a[1]<=2*a[3]&&b[0]>=a[0]-a[3]&&b[0]<=a[2]+a[3]){
+   ant.descripcion={...ant.descripcion,estado:"REVISAR",motivos:[...(ant.descripcion.motivos||[]),"La fila siguiente, sin código, puede ser el final de esta descripción («"+l.descripcion.literal+"»)"]};
+   ant.motivos.push("Descripción posiblemente cortada: sigue una fila sin código");ant.estado="REVISAR";
+  }
+ });
  for(const x of tablas)if(x.t)salida.lineas_ignoradas.push(...x.t.ignoradas);
  // Pie: totales impresos.
  const pie=tablas.flatMap(x=>x.t?x.t.pie:x.p.lineas);
