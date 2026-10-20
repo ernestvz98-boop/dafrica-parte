@@ -315,3 +315,32 @@ test('nombre de perfil sin NIF y CIF registrado en otro proveedor: conserva el c
  const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...filaPrecio(218)],{registro:reg});
  assert.equal(r.proveedor.estado,'AMBIGUO');assert.equal(r.estado,'REVISAR');
 });
+
+function motorDescuentoAmpliado({desplazamiento=0,cantidad='2,00',descuento='20',sinDescuento=false}={}){
+ const base=[...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,['R-0',60,60],['TUBO',120],['MULTICAPA',150],['2,00',420],['10,00',462],['16,00',560])];
+ const nueva=[...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218+desplazamiento,['R-O',60,60],['TUBO',120],['MULTICAPA',150],[cantidad,420],['10,00',462],...(!sinDescuento?[[descuento,510]]:[]),['16,00',560])];
+ return [{numero:1,anchoPx:595,altoPx:842,dpi:72,async ocr({region=null,escala=1}={}){
+  const ps=region&&region[2]===595&&escala===2?nueva:base;
+  if(!region)return ps;
+  const [x,y,w,h]=region;
+  return ps.filter(p=>p.x0>=x&&p.x1<=x+w&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+ }}];
+}
+test('descuento perdido por rasterización: relectura ampliada rescata el literal sin corregir el código dudoso',async()=>{
+ const r=await extraerEscaneado(motorDescuentoAmpliado(),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].descuento.valor,20);assert.equal(r.lineas[0].cuadre.estado,'VERIFICADO');
+ assert.equal(r.lineas[0].referencia.literal,'R-0');assert.ok(r.lineas[0].referencia.confianza<0.9);
+ assert.equal(r.estado,'REVISAR');
+});
+test('un descuento de otra fila física no se traslada aunque los importes coincidan',async()=>{
+ const r=await extraerEscaneado(motorDescuentoAmpliado({desplazamiento:12}),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].descuento.valor,null);assert.equal(r.lineas[0].cuadre.estado,'DESCUADRE');
+});
+test('la relectura con cantidad distinta no corrige una referencia diferente',async()=>{
+ const r=await extraerEscaneado(motorDescuentoAmpliado({cantidad:'4,00',descuento:'60'}),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].cantidad.valor,2);assert.equal(r.lineas[0].descuento.valor,null);
+});
+test('sin porcentaje impreso en ninguna lectura no se deduce descuento a partir del cuadre',async()=>{
+ const r=await extraerEscaneado(motorDescuentoAmpliado({sinDescuento:true}),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].descuento.valor,null);assert.equal(r.lineas[0].cuadre.estado,'DESCUADRE');
+});

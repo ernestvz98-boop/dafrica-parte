@@ -15,7 +15,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
  '<label style="display:flex;align-items:center;gap:8px;margin:12px 0">'+
  '<input type="checkbox" style="width:auto" id="pcPreviewConsent">'+
  '<span>Autorizo el análisis temporal de este PDF mediante IA externa. No se archivará en DAFRICA.</span></label>'+
- '<button type="button" class="btn" id="pcPreviewStart">Interpretar PDF (sin guardar)</button>'+
+ '<button type="button" class="btn" id="pcPreviewStart">Comprobar PDF automáticamente (sin guardar)</button>'+
  '<p class="muted" role="status" id="pcPreviewStatus">Selecciona un PDF.</p>'+
  '<div id="pcPreviewResults"></div>'+
  '<p class="muted">El historial anterior de Supabase se conserva intacto, pero esta pantalla no lo utiliza. Cerrar o actualizar la página elimina las lecturas de esta sesión.</p>'+
@@ -56,7 +56,8 @@ renderComprasLotePilot=function renderComprasTemporal(){
    const det=r.determinista;
    return '<details open style="border:1px solid #d6dee8;border-radius:8px;padding:12px;margin:9px 0">'+
     '<summary>'+esc(det.numero?.valor||"Número pendiente")+' · '+esc(det.lineas.length)+
-    ' artículos leídos con OCR local · requiere revisión</summary>'+pcRenderDeterminista(det)+
+    ' artículos leídos con OCR local · no resuelto automáticamente</summary>'+pcRenderDeterminista(det)+
+    (pcPryCandidato(r)?'<p><b>PRY candidato:</b> '+esc(pcPryCandidato(r))+' · anotación sin confirmar; no se ha asignado ninguna obra.</p>':"")+
     '<details><summary>Comparar con la interpretación de IA (puede contener discrepancias)</summary>'+
     renderResult({...r,determinista:null},source,index)+'</details></details>';
   }
@@ -79,7 +80,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
   const header='<p><b>Número impreso:</b> '+esc(number)+' · <b>Fecha:</b> '+esc(r.fecha||"No comprobada")+
     ' · <b>Proveedor:</b> '+esc(r.proveedor||"No identificado")+'</p>'+
     '<p><b>Obra impresa:</b> '+esc(r.obra_impresa||"No consta")+
-    ' · <b>PRY manuscrito (no confirmado en STEL):</b> '+esc(r.pry_codigo||"No identificado")+
+    ' · <b>PRY candidato (no confirmado en STEL):</b> '+esc(pcPryCandidato(r)||"No identificado")+
     (r.anotacion_manual?'<br><b>Otras anotaciones:</b> '+esc(r.anotacion_manual):"")+
     ' · <b>Filas:</b> '+esc(coverage)+
     ' · <b>Cabecera:</b> '+(verified?'Contrastada':'No completamente contrastada')+'</p>';
@@ -105,11 +106,16 @@ renderComprasLotePilot=function renderComprasTemporal(){
   button.disabled=true;results.textContent="";status.textContent="Separando páginas del PDF sin guardar archivos…";
   try{
    const PDFDocument=await pcLoadPdfLib();
+   // Una consulta privada por ejecución, en paralelo al OCR. Nunca se envía
+   // el PDF a esta función y ningún catálogo se persiste en el navegador.
+   const catalogoPromesa=window.DafricaAlbaranes.verificacion?
+    sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(65000)}).catch(()=>null):Promise.resolve(null);
    const split=await window.DafricaAlbaranes.lotesPdf.procesar({
     PDFDocument,bytes:new Uint8Array(await upload.arrayBuffer()),
     progreso:t=>{if(run===currentRun)status.textContent=t},
     separar:(data)=>sb("/functions/v1/compras-lote-piloto",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({name:upload.name,mime:"application/pdf",data:"data:application/pdf;base64,"+data})}),
+    refinar:async d=>window.DafricaAlbaranes.lotesPdf.dividirPorCabeceras(d,await pcCabecerasPorPagina(d)),
     liberar:()=>window.DafricaAlbaranes.motorNavegador.cerrar(),
     alResultado:(r,d,i)=>{if(run===currentRun)results.insertAdjacentHTML("beforeend",r?.error?
       '<p class="error">'+esc(r.error)+'</p>':renderResult(r,d,i))},
@@ -122,6 +128,13 @@ renderComprasLotePilot=function renderComprasTemporal(){
      if(det?.estado==="NO_DIGITAL"){
        try{det=await pcLecturaOCR(d,t=>{if(run===currentRun)status.textContent="Documento "+(index+1)+" de "+total+" · "+t})}
        catch(e){console.warn("Lectura OCR no disponible",String(e).slice(0,120))}
+     }
+     if(det&&window.DafricaAlbaranes.verificacion){
+       det=window.DafricaAlbaranes.verificacion.verificar(det,await catalogoPromesa);
+     }
+     if(d.separacion_local_dudosa&&det){
+       det={...det,estado:"REVISAR",incidencias:[...(det.incidencias||[]),"Agrupación multipágina sin cabeceras suficientes para confirmar su continuidad"],
+        validaciones:[...(det.validaciones||[]),{nombre:"separacion_multipagina",estado:"FALLO",detalle:"Continuidad no confirmada"}]};
      }
      if(det?.estado==="AUTO_OK"){return {estado:"DETERMINISTA",determinista:det}}
      // Las imágenes para geometría e IA también deben recibir la orientación
@@ -159,7 +172,10 @@ renderComprasLotePilot=function renderComprasTemporal(){
        });
        const value=await res.json().catch(()=>({error:"El servidor no devolvió una respuesta válida"}));
        if(!res.ok)result={error:value.error||"La interpretación no está disponible",etapa:value.etapa,warning,determinista:det};
-       else result={...value,warning,determinista:det};
+       else{
+        const contrastado=pcContrastarLocal(det,value);
+        result={...contrastado,lectura_completa:d.separacion_local_dudosa?false:contrastado.lectura_completa,warning,determinista:det};
+       }
      }catch(e){result={error:String(e?.message||e),warning,determinista:det}}
      return result;
     }
@@ -173,7 +189,8 @@ renderComprasLotePilot=function renderComprasTemporal(){
    const failed=out.length-interpreted.length-deterministic;
    const verifiedLines=interpreted.reduce((n,d)=>n+Number(d.filas_principales_comprobadas||0),0);
    const totalLines=interpreted.reduce((n,d)=>n+Number(d.lineas_detectadas||0),0);
-   results.innerHTML=(split.fallos.length?'<p class="error">Resultado parcial: '+esc(split.fallos.map(f=>'Páginas '+f.inicio+'–'+f.fin+': '+f.error).join(' · '))+'</p>':"")+'<p><b>'+esc(split.documentos.length)+' documentos separados.</b> <b>'+esc(deterministic)+
+   results.innerHTML='<p><b>Comprobación automática: '+esc(deterministic)+' documentos verificados; '+esc(out.length-deterministic)+' no resueltos automáticamente.</b> No se ha solicitado aprobación manual ni se ha creado nada en STEL.</p>'+
+    (split.fallos.length?'<p class="error">Resultado parcial: '+esc(split.fallos.map(f=>'Páginas '+f.inicio+'–'+f.fin+': '+f.error).join(' · '))+'</p>':"")+'<p><b>'+esc(split.documentos.length)+' documentos separados.</b> <b>'+esc(deterministic)+
      ' verificados sin IA (PDF digital u OCR local)</b>, '+esc(interpreted.length)+
      ' interpretados con IA, <b>'+esc(verifiedLines)+' de '+esc(totalLines)+' filas principales contrastadas físicamente</b>, '+
      esc(full)+' documentos con cabecera y líneas verificadas, '+esc(incomplete)+

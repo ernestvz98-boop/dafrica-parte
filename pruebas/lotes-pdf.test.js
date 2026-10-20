@@ -131,7 +131,50 @@ test('pantalla: OCR parcial visible, IA enderezada y cabecera fiable como pista,
  const pdf=await PDFDocument.load(Buffer.from(peticion.data.split(',')[1],'base64'));
  assert.equal(pdf.getPage(0).getRotation().angle,270);
  const html=els.pcPreviewResults.innerHTML;
- assert.match(html,/3 artículos leídos con OCR local · requiere revisión/);
+ assert.match(html,/3 artículos leídos con OCR local · no resuelto automáticamente/);
  assert.match(html,/Proveedor no verificado/);assert.match(html,/Confianza insuficiente/);
  assert.match(html,/Comparar con la interpretación de IA/);assert.doesNotMatch(html,/Todos los campos verificados/);
+});
+test('cabeceras multipágina: separa números distintos y conserva continuaciones con mismo número/fecha',()=>{
+ const {dividirPorCabeceras}=require('../albaranes/lotes-pdf');
+ const cab=(pagina,numero,fecha='2026-10-15')=>({pagina,titulo:true,numero:{valor:numero,estado:'OK',confianza:0.85},fecha:{valor:fecha}});
+ const doc={paginas:[10,11,12],numero:'2026'};
+ const r=dividirPorCabeceras(doc,[cab(1,'2026/1111'),cab(2,'2026/2222'),cab(3,'2026/2222')]);
+ assert.deepEqual(r.map(d=>d.paginas),[[10],[11,12]]);
+ assert.equal(dividirPorCabeceras(doc,[cab(1,'2026'),cab(2,'2026'),cab(3,'2026')])[0].separacion_local_dudosa,true);
+});
+test('refinamiento de separación externa: cada página se interpreta una vez y en orden',async()=>{
+ const r=await procesar({PDFDocument,bytes:await documento(3),
+ separar:async()=>({paginas_pdf:3,documentos:[{paginas:[1,2,3]}]}),
+ refinar:async d=>d.paginas.map(p=>({paginas:[p],numero:'N'+p})),
+ interpretar:async d=>({numero:d.numero})});
+ assert.deepEqual(r.out.map(x=>x.numero),['N1','N2','N3']);assert.deepEqual(r.documentos.flatMap(d=>d.paginas),[1,2,3]);
+});
+test('refinamiento inválido conserva la agrupación original marcada sin perder páginas',async()=>{
+ const r=await procesar({PDFDocument,bytes:await documento(3),
+ separar:async()=>({paginas_pdf:3,documentos:[{paginas:[1,2,3]}]}),
+ refinar:async()=>[{paginas:[1,2]}],interpretar:async d=>({dudosa:d.separacion_local_dudosa})});
+ assert.deepEqual(r.documentos[0].paginas,[1,2,3]);assert.equal(r.out[0].dudosa,true);
+ assert.ok(!r.documentos[0].pdf_separado_b64);
+});
+test('contraste automático bloquea cantidades IA confundidas con bultos y conserva evidencia',()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync('control-28.js','utf8'),ctx);
+ const det={lineas:[{cantidad:{estado:'VERIFICADO',valor:90,confianza:0.99}}]};
+ const entrada={lectura_completa:true,lineas:[{cantidad:30,estado_lectura:'COINCIDE'}]};
+ const r=ctx.pcContrastarLocal(det,entrada);assert.equal(r.lectura_completa,false);assert.equal(r.lineas[0].estado_lectura,'DIFERENTE');
+ assert.equal(r.lineas[0].cantidad,30);assert.ok(r.avisos.some(s=>s.includes('cantidad')));assert.equal(entrada.lectura_completa,true);
+ assert.equal(ctx.pcContrastarLocal(det,{lectura_completa:true,lineas:[]}).lectura_completa,false);
+});
+test('PRY candidato conserva ceros, no asigna obra y no resuelve códigos contradictorios',()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync('control-28.js','utf8'),ctx);
+ assert.equal(ctx.pcPryCandidato({anotacion_manual:'PRY 00111'}),'00111');
+ assert.equal(ctx.pcPryCandidato({pry_codigo:'PRY00111'}),'00111');
+ assert.equal(ctx.pcPryCandidato({pry_codigo:'00111',anotacion_manual:'PRY 00222'}),null);
+ assert.equal(ctx.pcPryCandidato({anotacion_manual:'obra 111'}),null);
+});
+test('mismo número y fecha en proveedores distintos no fusiona dos albaranes',()=>{
+ const {dividirPorCabeceras}=require('../albaranes/lotes-pdf');
+ const cab=(pagina,nif)=>({pagina,titulo:true,numero:{valor:'009999',estado:'OK',confianza:0.95},fecha:{valor:'2026-10-15'},proveedor:{nif}});
+ const r=dividirPorCabeceras({paginas:[1,2]},[cab(1,'B24123457'),cab(2,'B24555559')]);
+ assert.deepEqual(r.map(d=>d.paginas),[[1],[2]]);
 });

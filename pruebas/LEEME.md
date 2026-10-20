@@ -150,3 +150,45 @@ prueba de extremo a extremo en la web publicada.
 Total tras estas regresiones: 118 pruebas aprobadas; evaluación sintética: cero
 fallos críticos aceptados. Los casos públicos usan valores ficticios. No se
 invocan servicios de producción durante las pruebas automáticas.
+
+## Comprobación automática sin intervención por documento
+
+El botón ejecuta separación, orientación, relecturas dirigidas y ampliadas,
+cuadres y contraste de lectura local/IA. Cuando el separador agrupa varias
+páginas, se revisan sus cabeceras: distinto número/fecha/CIF separa documentos;
+continuidad sin prueba suficiente impide aceptar automáticamente el grupo.
+
+`albaranes/verificacion.js` contrasta CIF y referencia/descripción contra
+catálogos completos recibidos de `compras-catalogo-lectura`. Esta función nueva
+solo permite GET sobre `suppliers` y `products` de STEL; exige sesión válida y
+permiso `costes.ver`. La única llamada POST a Supabase es la consulta de permisos
+existente `mis_permisos`. No usa service-role, no recibe PDF y no guarda nada.
+Devuelve únicamente id, CIF/nombre y referencia/descripción, sin precios.
+
+La paginación continúa hasta una respuesta vacía (no presupone que una página
+corta sea el final). Páginas repetidas, errores y límites se declaran incompletos.
+El catálogo se consulta una vez por ejecución y solo existe en memoria.
+
+Una referencia se valida si el código fue observado en OCR y existe una única
+coincidencia con descripción equivalente en el catálogo completo. No se crean
+variantes por sustituciones O/0 inventadas. No se rellenan precios o cantidades
+a partir del catálogo ni se elimina ningún descuadre. Un dato no resuelto tras
+las comprobaciones termina como «No resuelto automáticamente», sin aprobación
+manual ni creación en STEL. La anotación PRY se muestra como candidato literal;
+no confirma ni asigna una obra.
+
+Regresión real con pdf.js 4.10.38 + Tesseract.js y el modelo de la web: se
+reproduce el descuento omitido de un escaneo y se recupera el porcentaje impreso
+por relectura ampliada. El ensayo de las 11 páginas recupera 19 artículos (18 con
+cuadre, uno sin precios); sigue sin haber una tabla fiable en la página manuscrita.
+Se confirma por cabeceras la separación de los dos últimos albaranes. Las imágenes
+se generan con pdf.js y canvas de Node: los resultados deben contrastarse también
+con el navegador del usuario. No se han enviado documentos privados a los tests
+públicos ni a nuevos servicios.
+
+Validación: 143 pruebas aprobadas y evaluación sintética con cero fallos críticos.
+Incluye autorización, ausencia de escrituras, paginación incompleta, CIF duplicado,
+artículos ambiguos, descuadres, discrepancias IA/OCR, separación y conservación de
+ceros del PRY. El contraste con los catálogos REALES requiere la sesión autorizada
+de la aplicación; las pruebas de esta fase usan catálogos ficticios. No se afirma
+haber verificado el catálogo real ni haber conseguido lectura perfecta del manuscrito.

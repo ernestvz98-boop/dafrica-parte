@@ -29,10 +29,50 @@ async function pcLecturaOCR(doc,alProgresar){
  try{return await lib.escaneado.extraerEscaneado(paginas,{registro:lib.proveedores.REGISTRO});}
  finally{await liberar();}
 }
+async function pcCabecerasPorPagina(doc){
+ const lib=window.DafricaAlbaranes,raw=atob(doc.pdf_separado_b64),bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));
+ const pdfjs=await pcLoadPdfJs();
+ const paginas=await lib.textoPdf.leerDocumento(pdfjs,bytes.slice());
+ if(paginas.every(p=>p.tipo==="DIGITAL"))return paginas.map(p=>{
+  const r=lib.extraer.extraerDePaginas([p],{registro:lib.proveedores.REGISTRO});
+  return {pagina:p.numero,numero:r.numero,fecha:r.fecha,proveedor:r.proveedor,titulo:p.lineas.some(l=>/ALBAR[AÁ]N/i.test(l.texto))};
+ });
+ const motor=await lib.motorNavegador.paginasEscaneadas(pdfjs,bytes);
+ try{return await lib.escaneado.leerCabeceras(motor.paginas,{registro:lib.proveedores.REGISTRO});}
+ finally{await motor.liberar();}
+}
 // La IA a veces copia el destinatario como proveedor: nunca se muestra como emisor.
 function pcProveedorMostrable(nombre){
  const valor=String(nombre||"").trim();
  return /DAFRICA/i.test(valor)?"":valor;
+}
+// Solo candidato literal. No rellena ceros ni confirma/asigna ninguna obra.
+function pcPryCandidato(doc){
+ const candidatos=[];
+ const codigo=String(doc?.pry_codigo||"").match(/^(?:PRY\s*)?(\d{3,8})$/i);
+ if(codigo)candidatos.push(codigo[1]);
+ for(const m of [doc?.anotacion_manual,doc?.pry_literal].filter(Boolean).join(" · ").matchAll(/\bPRY\s*[:#-]?\s*(\d{3,8})\b/gi))candidatos.push(m[1]);
+ const unicos=[...new Set(candidatos)];return unicos.length===1?unicos[0]:null;
+}
+function pcContrastarLocal(det,valor){
+ const avisos=[],filas=Array.isArray(valor.lineas)?valor.lineas.map(l=>({...l})):[];
+ if(!det?.lineas?.length)return {...valor,lineas:filas};
+ if(det.lineas.length!==filas.length)avisos.push("El recuento de artículos de IA no coincide con el OCR local");
+ else filas.forEach((l,i)=>{
+  const local=det.lineas[i],campos=[];
+  for(const [k,remoto] of [["cantidad","cantidad"],["precio","precio_unitario"],["importe","importe"]]){
+   const c=local[k];
+   if(c?.estado==="VERIFICADO"&&c.confianza>=0.9&&typeof c.valor==="number"&&
+      (typeof l[remoto]!=="number"||Math.abs(c.valor-l[remoto])>1e-6))campos.push(remoto);
+  }
+  if(campos.length){
+   l.estado_lectura="DIFERENTE";
+   l.campos_diferentes=[...new Set([...(l.campos_diferentes||[]),...campos])];
+   avisos.push("Fila "+(i+1)+": la IA difiere de cifras verificadas del OCR local ("+campos.join(", ")+")");
+  }
+ });
+ return {...valor,lineas:filas,lectura_completa:avisos.length?false:valor.lectura_completa,
+  avisos:[...(valor.avisos||[]),...avisos]};
 }
 function pcRenderDeterminista(det){
  if(!det)return "";
@@ -57,7 +97,7 @@ function pcRenderDeterminista(det){
   .map(v=>'<li>'+esc(v.nombre)+': '+(v.estado==="OK"?"correcta":'<b class="error">'+esc(v.estado)+'</b>')+' · '+esc(v.detalle)+'</li>').join("");
  return '<div class="module-note" style="margin:8px 0">'+
   '<p><b>Lectura determinista '+(det.tipo_pdf==="ESCANEADO_OCR"?'con OCR local':'del PDF digital')+'</b> ('+esc(det.tipo_pdf)+', sin IA) · Estado: <b>'+
-   esc(det.estado==="AUTO_OK"?"Todos los campos verificados":det.estado==="NO_DIGITAL"?"PDF escaneado: requiere OCR":"Requiere revisión")+'</b></p>'+
+   esc(det.estado==="AUTO_OK"?"Todos los campos verificados":det.estado==="NO_DIGITAL"?"PDF escaneado: requiere OCR":"No resuelto automáticamente")+'</b></p>'+
   '<p><b>Proveedor:</b> '+proveedor+(p.nif_propio_detectado?' <span class="muted">(NIF de DAFRICA descartado como emisor)</span>':'')+
    ' · <b>Número:</b> '+celda(det.numero)+' · <b>Fecha:</b> '+celda(det.fecha)+(det.fecha?.valor?' ('+esc(det.fecha.valor)+')':'')+'</p>'+
   (filas?'<div class="table-wrap" style="overflow:auto;max-height:600px"><table><thead><tr><th>Fila</th><th>Referencia</th><th>Descripción</th><th>Cantidad</th><th>Precio</th><th>Dto.</th><th>Importe</th><th>Cuadre</th><th>Estado</th></tr></thead><tbody>'+filas+'</tbody></table></div>':'')+
@@ -66,6 +106,9 @@ function pcRenderDeterminista(det){
   (typeof det.confianza==="number"?'<p class="muted">Confianza del documento: '+esc(det.confianza)+' (se acepta automáticamente desde 0,9)</p>':'')+
   (validaciones?'<ul class="muted">'+validaciones+'</ul>':'')+
   ((det.incidencias||[]).length?'<details><summary>'+esc(det.incidencias.length)+' incidencia(s)</summary>'+det.incidencias.map(x=>'<p class="muted">• '+esc(x)+'</p>').join("")+'</details>':'')+
+  (det.comprobacion_automatica?'<p class="muted"><b>Contraste automático de catálogo:</b> '+
+   esc(det.comprobacion_automatica.catalogo_disponible?"consulta disponible":"consulta no disponible")+
+   (det.comprobacion_automatica.motivos?.length?' · '+esc(det.comprobacion_automatica.motivos.join(" · ")):"")+'</p>':"")+
   '<p class="muted">Los valores se copian literalmente del PDF; los marcados entre corchetes no se aceptan automáticamente.</p>'+
   '</div>';
 }
