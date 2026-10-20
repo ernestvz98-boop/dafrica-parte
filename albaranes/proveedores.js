@@ -9,6 +9,7 @@
  *
  * formato_numeros: "es" (1.234,56) o "en" (1,234.56). formato_confirmado=true
  * solo tras comprobarlo en documentos reales del proveedor.
+ * formato_numero: expresión regular del número de albarán, tomada de sus albaranes reales.
  */
 (function(root,factory){
  const api=factory();
@@ -23,11 +24,13 @@ const REGISTRO={
   nifs:["B24694960"] // Impreso como destinatario en los albaranes de Saltoki, Rodavi y Maderas Pereira.
  },
  proveedores:[
-  {id:"SALTOKI",nombre:"SALTOKI PONFERRADA, S.L.",nifs:["B24680043"],formato_numeros:"es",formato_confirmado:true},
+  {id:"SALTOKI",nombre:"SALTOKI PONFERRADA, S.L.",nifs:["B24680043"],formato_numeros:"es",formato_confirmado:true,
+   formato_numero:"^\\d{3}\\.\\d{3}$"},
   {id:"RODAVI",nombre:"RODAVI SUMINISTROS, S.L.",nifs:["B24557613"],formato_numeros:"es",formato_confirmado:true,
+   formato_numero:"^\\d{6}$",
    anotaciones_no_articulo:["RETIRADO POR","RECOGIDO POR","PEDIDO POR"]},
   {id:"MADERAS_PEREIRA",nombre:"MADERAS PEREIRA REGUERAS, S.L.U.",nifs:["B24598583"],formato_numeros:"es",formato_confirmado:true,
-   permite_sin_referencia:true,referencia_literal:true}
+   permite_sin_referencia:true,referencia_literal:true,formato_numero:"^\\d{2}/\\d{5}$"}
  ]
 };
 

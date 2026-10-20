@@ -3,6 +3,32 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-20 · Lector PDF: OCR en el navegador y columnas económicas de Rodavi
+
+**Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos;
+solo lecturas en Supabase para localizar el caso).
+- Caso de partida: albarán Rodavi 003424 (subido el 16/10). En la ficha guardada había
+  código, descripción y cantidad, pero precio, descuento e importe vacíos. Causa: lo
+  procesaron las funciones de IA (`compras-auto-v3`, hoy desactivada, y
+  `compras-interpretar-v2`). La primera no tiene campos de descuento ni de importe y anula
+  el precio en los albaranes. La segunda solo pide las cifras con geometría fija calibrada
+  por posición y exige que dos lecturas de IA coincidan exactamente. Los PDF escaneados
+  nunca pasaban por el lector determinista, porque en la web no había OCR.
+- Corrección: OCR en el navegador con tesseract.js 5.1.1 y el modelo español servidos
+  desde `vendor/tesseract/` (compatible con la CSP de `index.html`; el PDF no sale del
+  navegador). `albaranes/motor-navegador.js`; «Interpretar PDF» lo usa para los
+  escaneados y, si todo queda verificado, no llama a la IA.
+- Lector: títulos ilegibles en la banda gris se deducen por posición (y se marcan); el
+  total se contrasta con la suma de líneas × IVA (21/10/4/0 %); el total se toma de otra
+  lectura si coinciden; formato de número por proveedor; la casilla de fecha o número se
+  relee si las lecturas discrepan; fila de una sola cifra de manuscrito descartada;
+  confianza baja para cifras vacías en líneas sin cuadre y para un total no localizado.
+- Pruebas: 70 superadas (6 regresiones nuevas, una del caso Rodavi). Evaluador con motores
+  `nativo`, `tesseractjs` y `navegador` (páginas renderizadas por pdf.js en Chromium).
+- Medición (10 albaranes reales, 158 campos, valores esperados aún sin confirmar por una
+  persona): **0 valores erróneos aceptados** con los tres motores; correctos y aceptados
+  automáticamente 134 (nativo y tesseractjs) y 130 (navegador real, ~18 s por albarán).
+
 ## 2026-10-19 · Lector PDF: albaranes escaneados (OCR) y validación con 10 albaranes reales
 
 **Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos).

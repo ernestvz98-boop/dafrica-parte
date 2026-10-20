@@ -48,10 +48,14 @@ function registroReal(carpeta){
  return {empresa_propia:{...REGISTRO.empresa_propia,...(extra.empresa_propia||{})},proveedores};
 }
 
+// Motor OCR: "nativo" (Tesseract instalado), "tesseractjs" (motor de la web sobre imágenes de
+// pdftoppm) o "navegador" (motor de la web sobre las páginas renderizadas por pdf.js en Chromium).
+let MOTOR="nativo";
 async function evaluarEscaneado(ruta,base,esperado,registro){
- const {paginasEscaneadas}=require("./motor-tesseract.js");
+ if(!["nativo","tesseractjs","navegador"].includes(MOTOR))throw Error("Motor OCR desconocido: "+MOTOR);
+ const {paginasEscaneadas}=require(MOTOR==="nativo"?"./motor-tesseract.js":"./motor-tesseractjs.js");
  const {extraerEscaneado}=require("../albaranes/escaneado.js");
- const paginas=paginasEscaneadas(ruta),informes=[];
+ const paginas=paginasEscaneadas(ruta,MOTOR==="navegador"?{render:"navegador"}:{}),informes=[];
  for(const doc of esperado.documentos){
   const pags=paginas.filter(p=>[].concat(doc.pagina).includes(p.numero));
   const resultado=await extraerEscaneado(pags,{registro,hoy:esperado.fecha_proceso});
@@ -92,7 +96,7 @@ function markdown({corpus,informes,pendientes,sinRevisar=[]}){
  L.push("# Informe de precisión · lector determinista de albaranes","");
  if(sinRevisar.length)L.push("> **Aviso:** los resultados esperados de "+sinRevisar.join(", ")+" aún no están confirmados por una persona.","");
  L.push("- Corpus: **"+corpus+"**");
- L.push("- Versión del extractor: `"+VERSION+"`");
+ L.push("- Versión del extractor: `"+VERSION+"`"+(MOTOR!=="nativo"?" · motor OCR: **"+MOTOR+"**":""));
  L.push("- Documentos evaluados: **"+informes.length+"**"+(pendientes.length?" · pendientes de resultado esperado: "+pendientes.length:""));
  L.push("- Confianza: cada campo lleva una confianza 0–1; por debajo de "+UMBRAL+" el campo cuenta como marcado para revisión.");
  L.push("- Documentos aceptados automáticamente (AUTO_OK): **"+auto+"** · AUTO_OK con algún error: **"+autoFalsos+"**");
@@ -143,16 +147,18 @@ function markdown({corpus,informes,pendientes,sinRevisar=[]}){
 async function main(){
  const args=process.argv.slice(2);
  const sinteticos=args.includes("--sinteticos");
+ MOTOR=(args.find(a=>a.startsWith("--motor="))||"--motor=nativo").slice(8);
  const carpeta=args.find(a=>!a.startsWith("--"))||path.join(__dirname,"corpus-real");
  const datos=sinteticos?await evaluarSinteticos():await evaluarCarpeta(carpeta,{incluirSinRevisar:args.includes("--incluir-sin-revisar")});
  const salida=path.join(__dirname,sinteticos?"informes":"informes-reales");
  fs.mkdirSync(salida,{recursive:true});
- const nombre=sinteticos?"precision-sintetico":"precision-real";
+ const nombre=sinteticos?"precision-sintetico":"precision-real"+(MOTOR==="nativo"?"":"-"+MOTOR);
  const {texto,criticos,autoFalsos}=markdown(datos);
  fs.writeFileSync(path.join(salida,nombre+".md"),texto);
  if(!sinteticos)fs.writeFileSync(path.join(salida,nombre+".json"),JSON.stringify(datos,null,1));
  process.stdout.write(texto);
  if(criticos||autoFalsos)process.exitCode=1;
+ if(MOTOR!=="nativo")await require("./motor-tesseractjs.js").cerrar();
 }
 
 if(require.main===module)main().catch(e=>{console.error(e.message||e);process.exitCode=2;});

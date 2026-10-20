@@ -294,6 +294,7 @@ Columnas ARTÍCULO/SUBTOTAL/TOTAL, número y fecha en tabla de cabecera, fecha c
 - Líneas: 2 · ignoradas: «RETIRADO POR: PEDRO G. 1» (Anotación del proveedor, no es un artículo)
 - Validación tabla: OK · Columnas: referencia, descripcion, cantidad, precio, subtotal, descuento, importe
 - Validación lineas: OK · 2 líneas de artículo
+- Validación total_con_lineas: OK · Suma de líneas 26.57 + IVA 0 % = total «26,57»
 
 ### S03-codigo-con-forma-decimal
 Código impreso 8.286,0800 que NO es un precio, cantidades con 4 decimales, fecha en texto, línea sin código

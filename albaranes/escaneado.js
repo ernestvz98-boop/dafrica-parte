@@ -118,6 +118,13 @@ function combinarTotales(principal,lecturas){
   principal.totales={...t,notas:["Totales tomados de la lectura "+distintos[0]._lectura+", confirmados por base + IVA = total"]};
  }else if(distintos.length>1){
   principal.totales.validacion={estado:"FALLO",detalle:"Lecturas OCR con totales verificados distintos"};
+ }else if(principal.totales&&principal.totales.total?.estado==="VACIO"){
+  // Solo el total, sin base ni cuota legibles: se toma si todas las lecturas que lo ven coinciden.
+  // Después se contrasta con la suma de las líneas (finalizar).
+  const vistos=lecturas.map(r=>r.totales?.total).filter(x=>["OK","VERIFICADO"].includes(x?.estado));
+  const valores=[...new Set(vistos.map(x=>x.valor))];
+  if(valores.length===1)principal.totales.total={...vistos[0],estado:"OK",notas:[...(vistos[0].notas||[]),"Total tomado de otra lectura OCR"]};
+  else if(valores.length>1)principal.totales.total={...principal.totales.total,estado:"AMBIGUO",motivos:["Lecturas OCR con totales distintos: "+valores.join(" | ")]};
  }
 }
 
@@ -128,11 +135,9 @@ function combinarTotales(principal,lecturas){
 async function extraerEscaneado(paginas,opciones={}){
  const {extraerDePaginas,finalizar}=M("extraer"),{paginaDesdePalabras}=M("ocr");
  const lecturas=[],resumen=[];
- let paginasBase=null;
  for(const conf of LECTURAS){
   const pags=[];
   for(const p of paginas)pags.push(paginaDesdePalabras(await p.ocr({psm:conf.psm,umbral:conf.umbral}),{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi}));
-  paginasBase=paginasBase||pags;
   const r=extraerDePaginas(pags,opciones);r._lectura="pagina_psm"+conf.psm+(conf.umbral?"_"+conf.umbral:"");
   Object.defineProperty(r,"_pags",{value:pags,enumerable:false});
   lecturas.push(r);
@@ -187,11 +192,21 @@ async function extraerEscaneado(paginas,opciones={}){
  // Casillas de fecha y número que ninguna lectura resolvió (una firma o un sello las cruza):
  // se recorta solo la casilla, junto a su etiqueta, y se vuelve a leer.
  for(const campo of ["fecha","numero"]){
-  if(lecturas.some(r=>r[campo]?.estado==="OK"))continue;
+  // Se relee también si las lecturas dan valores válidos distintos.
+  const validos=new Set(lecturas.filter(r=>r[campo]?.estado==="OK").map(r=>M("normalizar").canon(r[campo].valor)));
+  if(validos.size===1)continue;
   const {celdasEtiqueta}=M("extraer");
-  for(const pb of paginasBase){
-   const p=paginas.find(x=>x.numero===pb.numero),k=p.dpi/72;
+  // La etiqueta se busca en todas las lecturas de página (una sola puede no verla).
+  const etiquetas=[],vistas=new Set();
+  for(const r of lecturas)for(const pb of r._pags||[]){
    for(const et of celdasEtiqueta(pb,campo)){
+    const clave=pb.numero+":"+Math.round(et.x0/20)+":"+Math.round(et.y/20);
+    if(!vistas.has(clave)){vistas.add(clave);etiquetas.push([pb,et]);}
+   }
+  }
+  for(const [pb,et] of etiquetas.slice(0,3)){
+   const p=paginas.find(x=>x.numero===pb.numero),k=p.dpi/72;
+   {
     // Dos anchos de recorte: el estrecho deja fuera los trazos que invaden la casilla vecina.
     const a=Math.max(et.alto,6),ancho=et.x1-et.x0;
     for(const factor of [4,6]){

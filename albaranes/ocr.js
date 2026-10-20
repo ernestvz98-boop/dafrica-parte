@@ -100,5 +100,16 @@ function palabrasDesdeTsv(tsv){
  return out;
 }
 
-return {paginaDesdePalabras,palabrasDesdeTsv,estimarInclinacion};
+/* tesseract.js (salida con {blocks:true}) → palabras; la línea del OCR sirve para el enderezado. */
+function palabrasDesdeTesseractJs(data){
+ const out=[];
+ (data?.blocks||[]).forEach((b,bi)=>(b.paragraphs||[]).forEach((p,pi)=>(p.lines||[]).forEach((l,li)=>(l.words||[]).forEach(w=>{
+  const texto=String(w.text||"").trim();
+  if(!texto)return;
+  out.push({texto,x0:w.bbox.x0,y0:w.bbox.y0,x1:w.bbox.x1,y1:w.bbox.y1,conf:Math.round(w.confidence*1e4)/1e4,linea:bi+"_"+pi+"_"+li});
+ }))));
+ return out;
+}
+
+return {paginaDesdePalabras,palabrasDesdeTsv,palabrasDesdeTesseractJs,estimarInclinacion};
 });

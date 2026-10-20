@@ -103,7 +103,6 @@ function evaluarCabecera(celdas){
   const mezcla=r.some(x=>x.campo==="otra")&&r.some(x=>x.campo!=="otra");
   return mezcla&&celdas.length>1?[{campo:"otra",clave:clave(c.texto),x0:c.x0,x1:c.x1}]:r;
  });
- const ajenas=todas.filter(c=>c.campo==="otra").length;
  const columnas=todas;
  const campos=new Set(columnas.map(c=>c.campo));
  if(campos.has("referencia")&&!campos.has("descripcion")){
@@ -112,9 +111,24 @@ function evaluarCabecera(celdas){
   if(art&&columnas.filter(c=>c.campo==="referencia").length>1){art.campo="descripcion";}
   else if(art&&!columnas.some(c=>c.campo==="referencia"&&c!==art)){art.campo="descripcion";}
  }
- const finales=new Set(columnas.map(c=>c.campo).filter(c=>c!=="otra"));
- const valida=finales.has("cantidad")&&(finales.has("descripcion")||finales.has("referencia"))&&finales.size>=3&&ajenas<=3;
- return {valida,columnas:columnas.sort((a,b)=>a.x0-b.x0),ajenas};
+ let finales=new Set(columnas.map(c=>c.campo).filter(c=>c!=="otra"));
+ // OCR sobre banda gris: los títulos de texto pueden salir ilegibles («ARTO», «ESCMPIÓN»)
+ // mientras CANTIDAD y los económicos se leen. Con cantidad y al menos dos títulos económicos,
+ // los títulos ilegibles a su izquierda se asignan por posición: código y descripción.
+ // Esas columnas quedan marcadas como inferidas (el cuadre no las confirma).
+ const cant=columnas.find(c=>c.campo==="cantidad");
+ const economicos=["precio","subtotal","descuento","importe"].filter(k=>finales.has(k)).length;
+ if(cant&&economicos>=2&&!finales.has("descripcion")&&!finales.has("referencia")){
+  const izquierda=columnas.filter(c=>c.campo==="otra"&&c.x1<=cant.x0).sort((a,b)=>a.x0-b.x0);
+  if(izquierda.length===1||izquierda.length===2){
+   const campos=izquierda.length===2?["referencia","descripcion"]:["descripcion"];
+   izquierda.forEach((c,i)=>{c.campo=campos[i];c.inferida=true;});
+   finales=new Set(columnas.map(c=>c.campo).filter(c=>c!=="otra"));
+  }
+ }
+ const ajenasFinal=columnas.filter(c=>c.campo==="otra").length;
+ const valida=finales.has("cantidad")&&(finales.has("descripcion")||finales.has("referencia"))&&finales.size>=3&&ajenasFinal<=3;
+ return {valida,columnas:columnas.sort((a,b)=>a.x0-b.x0),ajenas:ajenasFinal};
 }
 function buscarCabeceraTabla(lineas,desde=0){
  for(let i=desde;i<lineas.length;i++){
@@ -464,8 +478,11 @@ function leerTablaPagina(pagina){
   // Toda línea con referencia, cantidad o importe es una fila: si falta un dato
   // queda en REVISAR, nunca se descarta en silencio.
   // Ruido (manuscritos, marcas): sin referencia ni descripción y sin ninguna cifra válida.
+  // OCR: tampoco es un artículo una cifra suelta, sin código, descripción ni cantidad, leída con
+  // confianza baja (trazo de un manuscrito que cae en una columna de importes).
   const soloRuido=!tieneRef&&!celdas.descripcion&&
-   Object.entries(celdas).every(([k,c])=>!NUMERICAS.has(k)||!pareceNumero(c.texto));
+   (Object.entries(celdas).every(([k,c])=>!NUMERICAS.has(k)||!pareceNumero(c.texto))||
+    (!tieneCantidad&&Object.values(celdas).every(c=>c.conf!=null&&c.conf<90)));
   if(soloRuido){
    ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Texto sin artículo ni cifras válidas (posible manuscrito o marca)"});
    continue;
@@ -478,7 +495,8 @@ function leerTablaPagina(pagina){
   }
   anotacion=false;
   if(tieneCantidad||tieneRef||tieneImportes){
-   actual={pagina:pagina.numero,celdas,conflictos,partida,textoEstimado,continuaciones:[],y:linea.y};
+   actual={pagina:pagina.numero,celdas,conflictos,partida,textoEstimado,continuaciones:[],y:linea.y,
+    titulosInferidos:cab.columnas.filter(c=>c.inferida).map(c=>c.campo)};
    // Texto suelto inmediatamente encima (sin otra fila entre medias): puede ser el primer
    // renglón de la descripción o una anotación. No se decide: la descripción queda en revisión.
    const previas=[];
@@ -795,6 +813,11 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  }
  if(f.referencia.estado==="VACIO"&&!perfil?.permite_sin_referencia)f.motivos.push("Línea sin referencia");
  if(cruda.partida)f.columnas_estimadas=true;
+ // Columna cuyo título no se pudo leer: asignada por posición, no se acepta sin revisión.
+ for(const k of cruda.titulosInferidos||[])if(f[k]?.estado==="OK"){
+  f[k]={...f[k],estado:"REVISAR",motivos:[...(f[k].motivos||[]),"Título de la columna ilegible: columna deducida por su posición"]};
+  if(!f.motivos.includes("Títulos de columna deducidos por posición"))f.motivos.push("Títulos de columna deducidos por posición");
+ }
  // OCR con la fila en un solo bloque: el cuadre confirma las cifras, pero no dónde acaba el
  // código y empieza la descripción (la posición de cada palabra es estimada).
  const ocr=Object.values(cruda.celdas).some(c=>c?.conf!=null);
@@ -852,6 +875,9 @@ function aplicarConfianza(salida,perfil){
    cantidad:confianzaCampo(l.cantidad,{obligatorio:true}),
    precio:confianzaCampo(l.precio),descuento:confianzaCampo(l.descuento),importe:confianzaCampo(l.importe)
   };
+  // OCR, línea con cifras pero sin cuadre: una cifra vacía puede estar impresa y no leída.
+  if(salida.tipo_pdf!=="DIGITAL"&&l.cuadre?.estado==="INCOMPLETO")
+   for(const k of ["precio","descuento","importe"])if(l[k]?.estado==="VACIO")partes[k]=Math.min(partes[k]??1,0.5);
   for(const [k,v] of Object.entries(partes))if(l[k]&&v!==null)l[k].confianza=r2(v);
   l.confianza=r2(Math.min(...Object.values(partes).filter(v=>v!==null)));
   if(l.estado!=="OK")l.confianza=Math.min(l.confianza,0.5);
@@ -866,6 +892,11 @@ function aplicarConfianza(salida,perfil){
    const m="No localizado aunque el documento tiene total";
    T[k].confianza=0.5;if(!(T[k].motivos||[]).includes(m))T[k].motivos=[...(T[k].motivos||[]),m];
   }
+ // OCR: líneas con importes y ningún total localizado → el total existe y no se ha leído.
+ if(T&&salida.tipo_pdf!=="DIGITAL"&&T.total?.estado==="VACIO"&&salida.lineas.some(l=>l.importe?.valor!=null)){
+  const m="Total no localizado aunque las líneas tienen importes";
+  T.total.confianza=0.5;if(!(T.total.motivos||[]).includes(m))T.total.motivos=[...(T.total.motivos||[]),m];
+ }
  // Los totales impresos también deciden la aceptación automática del documento.
  const confTotales=T?["base_imponible","iva_porcentaje","cuota_iva","total"].map(k=>T[k]?.confianza).filter(x=>typeof x==="number"):[];
  const criticos=[p?.confianza??0,salida.numero?.confianza??0,salida.fecha?.confianza??0,...salida.lineas.map(l=>l.confianza),...confTotales];
@@ -901,6 +932,11 @@ function extraerDePaginas(paginas,opciones={}){
  salida.fecha=leerFecha(zona,opcionesFecha);
  // Algunos proveedores (Saltoki) imprimen número y fecha al pie: se busca en toda la página.
  if(salida.numero.estado==="VACIO"&&primera.t){const n=leerNumero(primera.p.lineas);if(n.estado!=="VACIO")salida.numero=n;}
+ // Formato de número propio del proveedor (comprobado en sus albaranes reales): un número que
+ // no lo cumple («26102749» por «26/02749») no se acepta.
+ if(perfil?.formato_numero&&salida.numero.estado==="OK"&&!new RegExp(perfil.formato_numero).test(salida.numero.valor)){
+  salida.numero={...salida.numero,estado:"REVISAR",motivos:[...salida.numero.motivos,"No tiene el formato de número habitual del proveedor"]};
+ }
  const sinEtiqueta=f=>f.motivos.some(m=>/sin etiqueta/i.test(m));
  if((salida.fecha.estado==="VACIO"||sinEtiqueta(salida.fecha))&&primera.t){
   const f=leerFecha(primera.p.lineas,opcionesFecha);
@@ -969,6 +1005,21 @@ function finalizar(salida){
  if(salida.lineas.some(l=>l.cuadre.estado==="DESCUADRE"))v("cuadre_lineas","FALLO","Hay líneas cuyo importe no cuadra");
  const t=salida.totales;
  if(t?.validacion)v("totales",t.validacion.estado,t.validacion.detalle);
+ // Sin base + IVA = total comprobado (p. ej. rótulos del pie ilegibles), el total se contrasta
+ // con las líneas: suma de importes × (1 + IVA) para los tipos españoles 21, 10, 4 y 0 %.
+ // Si no cuadra con ninguno, pueden faltar líneas o haber otros cargos: el total queda en revisión.
+ const lineasConImporte=salida.lineas.filter(l=>["VERIFICADO","OK"].includes(l.importe.estado));
+ if(t&&t.validacion?.estado!=="OK"&&["OK","VERIFICADO"].includes(t.total?.estado)&&salida.lineas.length&&lineasConImporte.length===salida.lineas.length){
+  const suma=redondear(lineasConImporte.reduce((n,l)=>n+l.importe.valor,0));
+  const tipo=[21,10,4,0].find(x=>Math.abs(redondear(suma+redondear(suma*x/100))-t.total.valor)<=0.021);
+  if(tipo!==undefined){
+   t.total={...t.total,estado:"VERIFICADO",notas:[...(t.total.notas||[]),"Total = suma de líneas "+suma+" + IVA "+tipo+" %"]};
+   v("total_con_lineas","OK","Suma de líneas "+suma+" + IVA "+tipo+" % = total «"+t.total.literal+"»");
+  }else{
+   t.total={...t.total,estado:"REVISAR",motivos:[...(t.total.motivos||[]),"No coincide con la suma de líneas a ningún tipo de IVA (¿líneas sin leer u otros cargos?)"]};
+   v("total_con_lineas","FALLO","Suma de líneas "+suma+" sin tipo de IVA que dé el total «"+t.total.literal+"»");
+  }
+ }
  if(ctx.dudosas.length)v("fin_de_tabla","FALLO","Posibles artículos después del final detectado de la tabla: "+ctx.dudosas.map(t=>"«"+t+"»").join("; "));
  for(const x of salida.validaciones_extra||[])salida.validaciones.push(x);
  // Estado final.

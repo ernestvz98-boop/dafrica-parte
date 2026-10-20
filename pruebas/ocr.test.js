@@ -154,6 +154,78 @@ test("texto rodeado a bolígrafo: continuación añadida pero marcada; texto pre
  assert.equal(r.lineas[0].estado,"REVISAR");
 });
 
+test("Rodavi: precio, descuento e importe en sus columnas (el SUBTOTAL no es precio ni importe)",()=>{
+ // Caso real 003424 (16/10/2026): el lector anterior guardaba código, descripción y cantidad
+ // pero dejaba precio, descuento e importe vacíos. Valores inventados.
+ const r=leer([...cabeceraDoc(),...etiquetas("009902","30/09/2026"),
+  ...fila(200,["ARTÍCULO",40],["DESCRIPCIÓN",145],["CANTIDAD",290],["PRECIO UNIDAD",346,95,{ancho:60}],["SUBTOTAL",426],["DTO.",491],["TOTAL",543]),
+  ...fila(214,["PEDIDO",40],["POR",75],["***",107],["JUAN",125],["1,00",315]),
+  ...fila(226,["100076",40],["SELLADOR",107],["ACRILICO",152],["BLANCO",197],["5,00",315],["3,0000",377],["15,00",447],["20,00",495],["12,00",558]),
+  ...fila(600,["TOTAL:",420],["14,52",500])]);
+ assert.equal(r.lineas.length,1,"«PEDIDO POR» no es un artículo aunque tenga cantidad");
+ const l=r.lineas[0];
+ assert.equal(l.referencia.literal,"100076");
+ assert.equal(l.cantidad.valor,5);
+ assert.equal(l.precio.valor,3);
+ assert.equal(l.subtotal.valor,15);
+ assert.deepEqual(l.descuento.porcentajes,[20]);
+ assert.equal(l.importe.valor,12);
+ assert.equal(l.cuadre.estado,"VERIFICADO");
+ assert.equal(r.totales.total.valor,14.52);
+});
+
+test("títulos de código y descripción ilegibles en la banda gris: columnas por posición, marcadas",()=>{
+ // tesseract.js leyó «ARTO» y «ESCMPIÓN» donde pone ARTÍCULO y DESCRIPCIÓN (caso Rodavi real).
+ const r=leer([...cabeceraDoc(),...etiquetas("009902","30/09/2026"),
+  ...fila(200,["ARTO",40,42],["ESCMPIÓN",145,0],["CANTIDAD",290,71],["PRECIOUNIDAD",346,47],["SUBTOTAL",426,34],["DTO.",491],["TOTAL",543]),
+  ...fila(226,["100076",40],["SELLADOR",107],["ACRILICO",152],["5,00",315],["3,0000",377],["15,00",447],["20,00",495],["12,00",558])]);
+ const l=r.lineas[0];
+ assert.equal(l.referencia.literal,"100076");assert.equal(l.referencia.estado,"REVISAR");
+ assert.equal(l.descripcion.literal,"SELLADOR ACRILICO");assert.equal(l.descripcion.estado,"REVISAR");
+ assert.equal(l.precio.valor,3);assert.equal(l.importe.valor,12);
+ assert.equal(l.cuadre.estado,"VERIFICADO");
+ assert.notEqual(r.estado,"AUTO_OK");
+});
+
+test("OCR: líneas con importe y sin total localizado no se aceptan automáticamente",()=>{
+ const r=leer([...cabeceraDoc(),...etiquetas("009902","30/09/2026"),
+  ...fila(200,["ARTÍCULO",40],["DESCRIPCIÓN",145],["CANTIDAD",290],["PRECIO UNIDAD",346,95,{ancho:60}],["SUBTOTAL",426],["DTO.",491],["TOTAL",543]),
+  ...fila(226,["100076",40],["SELLADOR",107],["5,00",315],["3,0000",377],["15,00",447],["20,00",495],["12,00",558])]);
+ assert.equal(r.lineas[0].cuadre.estado,"VERIFICADO");
+ assert.equal(r.totales.total.confianza,0.5);
+ assert.notEqual(r.estado,"AUTO_OK");
+});
+
+test("número con formato ajeno al del proveedor («26102749» por «26/02749») no se acepta",()=>{
+ const reg={...registro,proveedores:[{...registro.proveedores[0],formato_numero:"^\\d{2}/\\d{5}$"}]};
+ const pag=n=>paginaDesdePalabras([...cabeceraDoc(),...etiquetas(n,"25-09-2026"),...cabeceraSaltoki(),
+  ...fila(218,["R-1",60],["TABLERO",120],["1,00",420],["10,000",462],["10,00",560])],{numero:1,anchoPx:595,altoPx:842,dpi:72});
+ assert.equal(extraerDePaginas([pag("26/09003")],{registro:reg,hoy:HOY}).numero.estado,"OK");
+ const r=extraerDePaginas([pag("26109003")],{registro:reg,hoy:HOY});
+ assert.equal(r.numero.estado,"REVISAR");
+ assert.notEqual(r.estado,"AUTO_OK");
+});
+
+test("total sin base ni cuota legibles: se verifica con la suma de líneas y el IVA, o queda en revisión",()=>{
+ const doc=total=>leer([...cabeceraDoc(),...etiquetas("009902","30/09/2026"),
+  ...fila(200,["ARTÍCULO",40],["DESCRIPCIÓN",145],["CANTIDAD",290],["PRECIO UNIDAD",346,95,{ancho:60}],["SUBTOTAL",426],["DTO.",491],["TOTAL",543]),
+  ...fila(226,["100076",40],["SELLADOR",107],["5,00",315],["3,0000",377],["15,00",447],["20,00",495],["12,00",558]),
+  ...fila(600,["TOTAL:",420],[total,500])]);
+ const bien=doc("14,52");
+ assert.equal(bien.totales.total.estado,"VERIFICADO");
+ assert.ok(bien.validaciones.some(v=>v.nombre==="total_con_lineas"&&v.estado==="OK"));
+ const mal=doc("19,52"); // no cuadra con 21, 10, 4 ni 0 %: ¿falta una línea?
+ assert.equal(mal.totales.total.estado,"REVISAR");
+ assert.notEqual(mal.estado,"AUTO_OK");
+});
+
+test("una cifra suelta de baja confianza, sin código, descripción ni cantidad, no es una línea",()=>{
+ const r=leer([...cabeceraDoc(),...etiquetas(),...cabeceraSaltoki(),
+  ...fila(218,["4300099900",60],["REDUCCION",120],["2,00",420],["30,000",462],["60",505],["5",520],["22,80",560]),
+  ...fila(232,["4",470,75])]);
+ assert.equal(r.lineas.length,1);
+});
+
 /* ------------------------- Combinación de lecturas ------------------------- */
 // Motor OCR simulado: una lista de palabras por variante (psm/umbral) y otra «limpia» para recortes.
 function motor(variantes,{limpias=[]}={}){

@@ -117,6 +117,11 @@ renderComprasLotePilot=function renderComprasTemporal(){
      // PDF digital: lectura exacta del texto. Si todo cuadra no se usa la IA.
      let det=null;
      try{det=await pcLecturaDeterminista(d)}catch(e){console.warn("Lectura determinista no disponible",String(e).slice(0,120))}
+     // PDF escaneado: OCR local con el mismo lector (las cifras solo se aceptan si cuadran).
+     if(det?.estado==="NO_DIGITAL"){
+       try{det=await pcLecturaOCR(d,t=>{if(run===currentRun)status.textContent="Documento "+(index+1)+" de "+split.documentos.length+" · "+t})}
+       catch(e){console.warn("Lectura OCR no disponible",String(e).slice(0,120))}
+     }
      if(det?.estado==="AUTO_OK"){out[index]={estado:"DETERMINISTA",determinista:det};continue}
      let n=null,rows=null,bands=null,columnHints=null,header=null,profile="",noRef=false,warning="";
      if((d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
@@ -158,7 +163,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
    const verifiedLines=interpreted.reduce((n,d)=>n+Number(d.filas_principales_comprobadas||0),0);
    const totalLines=interpreted.reduce((n,d)=>n+Number(d.lineas_detectadas||0),0);
    results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos separados.</b> <b>'+esc(deterministic)+
-     ' verificados desde el PDF digital sin IA</b>, '+esc(interpreted.length)+
+     ' verificados sin IA (PDF digital u OCR local)</b>, '+esc(interpreted.length)+
      ' interpretados con IA, <b>'+esc(verifiedLines)+' de '+esc(totalLines)+' filas principales contrastadas físicamente</b>, '+
      esc(full)+' documentos con cabecera y líneas verificadas, '+esc(incomplete)+
      ' con datos pendientes, '+esc(failed)+' sin interpretación. <b>0 documentos archivados.</b></p>'+
