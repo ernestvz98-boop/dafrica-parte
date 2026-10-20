@@ -265,11 +265,14 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   resueltos.push(campo);
  }
  // Líneas: código y descripción leídos con poca confianza (no hay cuadre que los confirme).
+ const pendientes=[];
  for(const l of principal.lineas){
   for(const campo of ["referencia","descripcion"]){
    const c=l[campo];
    if(!c||c.estado!=="OK"||(c.confianza??1)>=0.9||!c.caja)continue;
    const r=await resolverCampo(pag,campo,[c.caja],{perfil,opcionesFecha,literal:c.literal});
+   // Sin resolver: candidato a la comprobación por un segundo motor (visión del recorte).
+   if(!r||r.conflicto)pendientes.push({l,campo,candidatos:[c.valor??c.literal,...(r?.conflicto||[]),...(campo==="referencia"?c.alternativas_ocr||[]:[])].filter(Boolean)});
    if(!r)continue;
    if(r.conflicto){l[campo]={...c,motivos:[...(c.motivos||[]),"Relecturas fiables distintas: "+r.conflicto.join(" | ")]};continue;}
    // Una referencia no cambia de número de palabras (la relectura no debe arrastrar la celda vecina).
@@ -283,6 +286,34 @@ async function segundaFase(principal,paginas,lecturas,opciones){
       ...(r.descartadas.length?["Relecturas de baja confianza ignoradas: "+r.descartadas.join(", ")]:[])]}};
    resueltos.push("linea "+l.fila+" "+campo+(corregido?" (corregido)":""));
   }
+ }
+ // Segundo motor independiente (visión del RECORTE de la celda, nunca la página): se acepta un
+ // texto solo si coincide exactamente con alguna lectura OCR de esa celda. Nunca cifras
+ // económicas; nunca una variante O/0, S/5… que el OCR no haya visto.
+ if(typeof opciones.vision==="function"&&pendientes.length&&typeof pag.recortePng==="function"){
+  const k=pag.dpi/72,recortes=pendientes.map(x=>{
+   const [x0,y,x1,alto]=x.l[x.campo].caja;
+   const rx0=Math.max(0,Math.floor((x0-0.6*alto)*k)),rx1=Math.min(pag.anchoPx,Math.ceil((x1+0.6*alto)*k));
+   const ry0=Math.max(0,Math.floor((y-1.3*alto)*k)),ry1=Math.min(pag.altoPx,Math.ceil((y+0.45*alto)*k));
+   return pag.recortePng([rx0,ry0,rx1-rx0,ry1-ry0]);
+  });
+  const lecturas=[];
+  try{for(let i=0;i<recortes.length;i+=8)for(const v of await opciones.vision(recortes.slice(i,i+8),{modo:"impreso"})||[])
+   if(Number.isInteger(v.indice))lecturas[i+v.indice]=String(v.texto||"");}
+  catch(e){principal.incidencias=[...(principal.incidencias||[]),"Visión de campos dudosos no disponible: "+String(e?.message||e).slice(0,100)];}
+  const igual=(campo,a,b)=>campo==="referencia"?N.canon(a)===N.canon(b)&&N.canon(a)!=="":
+   String(a).replace(/\s+/g," ").trim()===String(b).replace(/\s+/g," ").trim()&&String(a).trim()!=="";
+  pendientes.forEach((x,i)=>{
+   const v=lecturas[i];if(v==null)return;
+   const coincide=[...new Set(x.candidatos)].filter(cand=>igual(x.campo,cand,v));
+   if(coincide.length!==1)return;
+   const c=x.l[x.campo];
+   x.l[x.campo]={...c,literal:coincide[0],valor:coincide[0],motivos:(c.motivos||[]).filter(m=>!/^Relecturas fiables distintas/.test(m)),
+    resolucion:{metodo:"vision_coincide_ocr",confianza:0.95,lectura_inicial:c.literal,
+     evidencias:["Visión del recorte de la celda: «"+v+"»","Coincide exactamente con una lectura OCR independiente de la misma celda",
+      ...(x.candidatos.length>1?["Lecturas OCR consideradas: "+[...new Set(x.candidatos)].join(" | ")]:[])]}};
+   resueltos.push("linea "+x.l.fila+" "+x.campo+" (visión = OCR)");
+  });
  }
  return resueltos;
 }
