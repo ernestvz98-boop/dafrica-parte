@@ -180,7 +180,8 @@ const DOCUMENTOS=[
     {referencia:"A-100",descripcion:"TORNILLO 4X40 ZINCADO",cantidad:1000,precio:null,descuento:null,importe:null},
     {referencia:"A-200",descripcion:"TACO NYLON 6MM",cantidad:5,precio:null,descuento:null,importe:null},
     {referencia:"A-300",descripcion:"ARANDELA M6",cantidad:12,precio:null,descuento:null,importe:null}
-   ],marcados:["lineas.1.cantidad"]}
+   // NIF válido pero no registrado: se conserva y queda marcado para revisión (no se acepta solo).
+   ],marcados:["lineas.1.cantidad","cabecera.proveedor_nif"]}
  },
  {
   id:"S05-descuadre-precio-por-100-sin-fecha",
@@ -296,7 +297,7 @@ const DOCUMENTOS=[
   },
   esperado:{estado_documento:"REVISAR",tipo_pdf:"DIGITAL",proveedor_nif:NIF.D,numero:"55001",fecha:"2026-10-10",
    lineas:[{referencia:"T-9",descripcion:"TUERCA M10",cantidad:40,precio:null,descuento:null,importe:null}],
-   marcados:[]}
+   marcados:["cabecera.proveedor_nif"]}
  },
  {
   id:"S11-fecha-sin-etiqueta-fila-sin-cantidad-portes",

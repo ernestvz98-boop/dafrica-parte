@@ -286,3 +286,29 @@ test("títulos de tabla en blanco sobre banda oscura: se leen invertidos y se tr
  assert.equal(r.lineas.length,1);
  assert.equal(r.lineas[0].cantidad.valor,5);
 });
+
+/* ------------- Símbolos que el OCR no conoce y formato de referencia ------------- */
+test("Ø leído como M/Y/W tras «PRENSAR» se restituye solo con el perfil del proveedor y solo en escaneados",()=>{
+ const {restituirGlifos}=require("../albaranes/extraer.js");
+ const perfil={glifos_ocr:[["(\\bPRENSAR )(?:[MYWH]{1,2}9?)(?=\\d{2}X\\d)","$1Ø"]]};
+ assert.equal(restituirGlifos("TE REDUCIDA PRENSAR M54X28X54 INOX",perfil),"TE REDUCIDA PRENSAR Ø54X28X54 INOX");
+ assert.equal(restituirGlifos("REDUCCION PRENSAR Y922X15 INOX",perfil),"REDUCCION PRENSAR Ø22X15 INOX");
+ assert.equal(restituirGlifos("ENTRONQUE MACHO PRENSAR WH28X1 INOX",perfil),"ENTRONQUE MACHO PRENSAR Ø28X1 INOX");
+ // Una métrica real («TORNILLO CARRIL M8X30») no se toca; sin perfil, tampoco.
+ assert.equal(restituirGlifos("TORNILLO CARRIL M8X30 38/40",perfil),"TORNILLO CARRIL M8X30 38/40");
+ assert.equal(restituirGlifos("REDUCCION PRENSAR M22X15",null),"REDUCCION PRENSAR M22X15");
+ const reg=registroCon({glifos_ocr:perfil.glifos_ocr});
+ const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300000001",60],["REDUCCION",120],["PRENSAR",170],["M22X15",210],["2,00",420],["10,000",462],["50",510],["10,00",560])],{registro:reg});
+ assert.equal(r.lineas[0].descripcion.valor,"REDUCCION PRENSAR Ø22X15");
+ assert.equal(r.lineas[0].descripcion.literal,"REDUCCION PRENSAR M22X15");
+});
+
+test("referencia solo de cifras con el formato del proveedor: la unanimidad de las 6 relecturas la acepta; sin formato, no",async()=>{
+ const pag=[...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300010015",60,55],["TUBO",120],["MULTICAPA",150],["2,00",420],["10,000",462],["50",510],["10,00",560])];
+ const conFormato=await extraerEscaneado(motorRecortes(pag,({region})=>region[0]<100?[["1300010015",56]]:null),{registro:registroCon({formato_referencia:"^\\d{10}$"}),hoy:HOY});
+ assert.equal(conFormato.lineas[0].referencia.valor,"1300010015");
+ assert.ok(conFormato.lineas[0].referencia.confianza>=0.9);
+ assert.match(conFormato.lineas[0].referencia.resolucion.evidencias[0],/formato de referencia/);
+ const sinFormato=await extraerEscaneado(motorRecortes(pag,({region})=>region[0]<100?[["1300010015",56]]:null),{registro:registroCon(),hoy:HOY});
+ assert.ok(sinFormato.lineas[0].referencia.confianza<0.9);
+});

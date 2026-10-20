@@ -344,8 +344,42 @@ function leerFecha(lineas,opciones){
 // Título del recuadro del cliente (sin cifras: «Nº cliente 4300» no es un recuadro).
 const RE_CLIENTE=/^(DATOS DEL |DATOS )?(CLIENTE|DESTINATARIO|FACTURAR A|ENVIAR A|DIRECCION DE ENTREGA|LUGAR DE ENTREGA|CONSIGNATARIO|ENTREGAR EN)\b[^0-9]*$/;
 // limiteCabecera: y de la cabecera de la tabla en la 1.ª página (el emisor está por encima).
+/*
+ * ¿El CIF está impreso junto al nombre del proveedor (debajo o al lado, como en su membrete) o en
+ * el texto legal del pie («Inscrita en el Registro Mercantil… C.I.F.»)? Sin NIF en el registro es
+ * la única forma de no confundirlo con el CIF del cliente (DAFRICA), impreso en otro recuadro.
+ */
+function cifJuntoAlNombre(pagina,perfil,elegido){
+ if(!pagina||!elegido.caja)return false;
+ const [ex0,ey,ex1]=elegido.caja;
+ const nombres=[perfil.nombre,...(perfil.nombres||[])].map(n=>N().canon(n).replace(/(SLU|SAU|SL|SA)$/,"")).filter(n=>n.length>=5);
+ for(const l of pagina.lineas){
+  const t=N().canon(l.texto);
+  const esLegal=/(REGISTRO|INSCRITA|MERCANTIL)/.test(t)&&NIF().buscar(l.texto).some(n=>n.nif===elegido.nif);
+  if(esLegal)return true;
+  // El nombre puede venir en varias celdas («PROVEEDOR» «FICTICIO, S.L.»): se busca en la línea.
+  // Caja: solo las celdas consecutivas que forman el nombre (no el resto de la línea).
+  let caja=null;
+  for(let i=0;i<l.celdas.length&&!caja;i++){
+   let t="";
+   for(let j=i;j<l.celdas.length&&j<i+5;j++){
+    t+=N().canon(l.celdas[j].texto);
+    if(nombres.some(n=>t.includes(n.slice(0,Math.min(n.length,12))))){caja=[l.celdas[i].x0,l.celdas[j].x1];break;}
+   }
+  }
+  if(!caja)continue;
+  const [cx0,cx1]=caja;
+  const alto=l.alto||8,dy=ey-l.y;
+  const solapeX=Math.min(ex1,cx1+0.15*pagina.ancho)-Math.max(ex0,cx0-0.15*pagina.ancho);
+  if(dy>=-2*alto&&dy<=7*alto&&solapeX>0)return true;
+ }
+ return false;
+}
 function identificarProveedor(paginas,registro,limiteCabecera=null){
  const propios=new Set((registro.empresa_propia?.nifs||[]).map(n=>NIF().normalizar(n)));
+ // NIF de DAFRICA en claro (pruebas, otras lecturas) o por su huella (perfiles públicos).
+ const esPropioNif=n=>propios.has(n)||PROV().esPropio(n,registro);
+ const hayPropios=propios.size>0||(registro.empresa_propia?.huellas_nif||[]).length>0;
  const nombresPropios=(registro.empresa_propia?.nombres||[]).map(n=>N().canon(n)).filter(Boolean);
  const encontrados=[];
  for(const pagina of paginas){
@@ -360,10 +394,10 @@ function identificarProveedor(paginas,registro,limiteCabecera=null){
     const etiquetaCliente=cerca.some(({c,l})=>l.indice<=li&&RE_CLIENTE.test(N().sinAcentos(c.texto)));
     // Con el NIF de DAFRICA configurado basta la comparación exacta; las pistas
     // por nombre o recuadro de cliente solo se usan mientras no esté configurado.
-    const propio=propios.size?propios.has(n.nif):(nombrePropio||etiquetaCliente);
+    const propio=hayPropios?esPropioNif(n.nif):(nombrePropio||etiquetaCliente);
     const enCabecera=pagina.numero===paginas[0].numero&&linea.y<(limiteCabecera??0.3*pagina.alto);
     encontrados.push({nif:n.nif,literal:n.literal,pagina:pagina.numero,caja:caja(celda),conf:celda.conf??null,propio,enCabecera,
-     motivo_propio:propios.has(n.nif)?"NIF de la empresa propia":nombrePropio?"Junto al nombre de DAFRICA":etiquetaCliente?"En el bloque del cliente/destinatario":""});
+     motivo_propio:esPropioNif(n.nif)?"NIF de la empresa propia":nombrePropio?"Junto al nombre de DAFRICA":etiquetaCliente?"En el bloque del cliente/destinatario":""});
    };
    for(const celda of linea.celdas)for(const n of NIF().buscar(celda.texto))registrar(n,celda);
    for(const n of NIF().buscar(linea.texto))registrar(n,linea.celdas[0]);
@@ -388,9 +422,15 @@ function identificarProveedor(paginas,registro,limiteCabecera=null){
   return n.length>=8&&textoPagina.includes(n);
  }));
  if(!ajenos.length){
-  if(porNombre.length===1&&(porNombre[0].nifs||[]).length===1){
+  if(porNombre.length===1&&PROV().tieneIdentificador(porNombre[0])){
    // El CIF impreso no se ha podido leer (OCR): se identifica por el nombre registrado.
    const pr=porNombre[0];
+   // Con solo la huella del NIF no se puede escribir el CIF: proveedor identificado, NIF a revisar.
+   if((pr.nifs||[]).length!==1){
+    Object.assign(r,{nif:null,id:pr.id,nombre:pr.nombre,estado:"REVISAR",via:"nombre_registrado",
+     motivos:["CIF impreso no legible: proveedor identificado por su nombre; el CIF debe completarse"]});
+    return r;
+   }
    Object.assign(r,{nif:pr.nifs[0],id:pr.id,nombre:pr.nombre,estado:"OK",via:"nombre_registrado",
     notas:["CIF impreso no legible: proveedor identificado por su nombre registrado; el CIF procede del registro"]});
    return r;
@@ -403,12 +443,24 @@ function identificarProveedor(paginas,registro,limiteCabecera=null){
   // El emisor figura sobre la tabla de la primera página. Que un NIF esté
   // registrado NO decide (un transportista también puede ser proveedor).
   const arriba=ajenos.filter(e=>e.enCabecera);
-  if(arriba.length===1){elegido=arriba[0];r.notas.push("Otros NIF fuera del encabezado: "+ajenos.filter(e=>e!==elegido).map(e=>e.nif).join(", "));}
+  // Varios en el encabezado: el que está junto al nombre impreso del proveedor (su membrete).
+  const junto=porNombre.length===1?arriba.filter(e=>cifJuntoAlNombre(paginas[0],porNombre[0],e)):[];
+  if(arriba.length>1&&junto.length===1){elegido=junto[0];r.notas.push("CIF elegido por estar junto al nombre del proveedor; otros NIF: "+ajenos.filter(e=>e!==elegido).map(e=>e.nif).join(", "));}
+  else if(arriba.length===1){elegido=arriba[0];r.notas.push("Otros NIF fuera del encabezado: "+ajenos.filter(e=>e!==elegido).map(e=>e.nif).join(", "));}
   else{r.estado="AMBIGUO";r.motivos.push("Varios NIF posibles del emisor: "+r.candidatos.join(", "));return r;}
  }
  r.nif=elegido.nif;r.caja=elegido.caja;r.conf_ocr=elegido.conf??null;
  const ficha=PROV().buscarPorNif(elegido.nif,registro);
  // Un CIF válido que contradice el nombre registrado impreso: no se decide.
+ // Perfil identificado por su nombre impreso pero sin NIF en el registro (la web no guarda NIF
+ // reales): se acepta el CIF leído, que es válido (dígito de control), está en el encabezado y no
+ // es el de DAFRICA.
+ if(porNombre.length===1&&!ficha&&!PROV().tieneIdentificador(porNombre[0])&&!esPersona(elegido)&&cifJuntoAlNombre(paginas[0],porNombre[0],elegido)){
+  const pr=porNombre[0];
+  Object.assign(r,{id:pr.id,nombre:pr.nombre,estado:"OK",via:"nombre_y_cif_leido"});
+  r.notas.push("Proveedor identificado por su nombre impreso; CIF leído del documento (dígito de control válido)");
+  return r;
+ }
  if(porNombre.length===1&&(!ficha||ficha.id!==porNombre[0].id)){
   r.estado="AMBIGUO";r.nif=null;r.motivos.push("El CIF leído ("+elegido.nif+") no corresponde al proveedor cuyo nombre aparece impreso ("+porNombre[0].nombre+")");
   return r;
@@ -849,6 +901,16 @@ function repararSeparadoresOCR(f,opcionesNumero,precioPor){
  f.cuadre=cuadre(f,precioPor);
 }
 
+/*
+ * Símbolos que el OCR no conoce y sustituye por letras, solo donde el perfil del proveedor lo
+ * declara con su contexto: «PRENSAR Ø54X2» se lee «PRENSAR M54X2» / «Y54X2» / «W54X2» según la
+ * lectura. Solo para páginas escaneadas (en un PDF digital el símbolo viene en el texto).
+ */
+function restituirGlifos(texto,perfil){
+ let t=String(texto??"");
+ for(const [patron,reemplazo] of perfil?.glifos_ocr||[])t=t.replace(new RegExp(patron,"g"),reemplazo);
+ return t;
+}
 function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  const c=cruda.celdas;
  const f={
@@ -1033,7 +1095,10 @@ function aplicarConfianza(salida,perfil){
 
 /* ------------------------------ Documento entero ---------------------------- */
 function extraerDePaginas(paginas,opciones={}){
- const registro=opciones.registro||PROV().REGISTRO;
+ const registroBase=opciones.registro||PROV().REGISTRO;
+ // CIF de DAFRICA reconocido por su contexto en otra lectura del mismo albarán.
+ const registro=opciones.nifsPropios?.length?{...registroBase,empresa_propia:{...registroBase.empresa_propia,
+  nifs:[...(registroBase.empresa_propia?.nifs||[]),...opciones.nifsPropios]}}:registroBase;
  const incidencias=[];
  const salida={version:VERSION,motor:"pdfjs-capa-de-texto",
   paginas:paginas.map(p=>({numero:p.numero,tipo:p.tipo,caracteres:p.caracteres,fraccion_imagen:p.fraccion_imagen,avisos:p.avisos})),
@@ -1104,7 +1169,12 @@ function extraerDePaginas(paginas,opciones={}){
    salida.lineas_ignoradas.push({pagina:cruda.pagina,texto:Object.values(cruda.celdas).map(c=>c.texto).join(" "),motivo:"Anotación de recogida, no es un artículo"});
    continue;
   }
-  salida.lineas.push(construirFila(cruda,++n,opcionesNumero,perfil,precioPor));
+  const fila=construirFila(cruda,++n,opcionesNumero,perfil,precioPor);
+  if(salida.tipo_pdf==="ESCANEADO_OCR"&&fila.descripcion.valor){
+   const v=restituirGlifos(fila.descripcion.valor,perfil);
+   if(v!==fila.descripcion.valor){fila.descripcion={...fila.descripcion,valor:v,notas:[...(fila.descripcion.notas||[]),"Símbolo restituido según el formato del proveedor (el OCR no lo reconoce)"]};}
+  }
+  salida.lineas.push(fila);
  }
  for(const x of tablas)if(x.t)salida.lineas_ignoradas.push(...x.t.ignoradas);
  // Pie: totales impresos.
@@ -1247,5 +1317,5 @@ function celdasEtiqueta(pagina,campo){
  return out;
 }
 
-return {VERSION,UMBRAL_FIABLE,extraerPdf,extraerDePaginas,finalizar,leerTablaPagina,identificarProveedor,cuadre,celdasEtiqueta};
+return {VERSION,UMBRAL_FIABLE,restituirGlifos,extraerPdf,extraerDePaginas,finalizar,leerTablaPagina,identificarProveedor,cuadre,celdasEtiqueta};
 });

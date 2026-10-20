@@ -22,7 +22,7 @@
  else{root.DafricaAlbaranes=root.DafricaAlbaranes||{};root.DafricaAlbaranes.escaneado=api;}
 })(typeof globalThis!=="undefined"?globalThis:this,function(root,req){
 
-const M=k=>req?req("./"+{extraer:"extraer.js",ocr:"ocr.js",normalizar:"normalizar.js"}[k]):root.DafricaAlbaranes[k];
+const M=k=>req?req("./"+{extraer:"extraer.js",ocr:"ocr.js",normalizar:"normalizar.js",manuscritos:"manuscritos.js"}[k]):root.DafricaAlbaranes[k];
 // La binarización adaptativa (Sauvola) rescata rótulos y cifras sobre fondos grises.
 const LECTURAS=[{psm:4},{psm:6},{psm:3},{psm:4,umbral:"sauvola"}];
 
@@ -180,7 +180,7 @@ function candidatoDe(campo,texto,ctx){
   const orden=[...tokens].sort((a,b)=>d(a,ctx.literal)-d(b,ctx.literal));
   return d(orden[0],ctx.literal)<d(orden[1],ctx.literal)?orden[0]:null;
  }
- const t=tokens.join(" ");
+ const t=campo==="descripcion"?M("extraer").restituirGlifos(tokens.join(" "),perfil):tokens.join(" ");
  return t||null;
 }
 async function resolverCampo(p,campo,cajas,ctx){
@@ -188,7 +188,16 @@ async function resolverCampo(p,campo,cajas,ctx){
  for(const caja of cajas){
   for(const r of await releerCaja(p,caja,LISTAS[campo])){
    const v=candidatoDe(campo,r.texto,ctx);
-   if(v)validas.push({...r,valor:v,caja});
+   if(!v)continue;
+   // La palabra con un símbolo que el OCR no conoce (Ø) tiene confianza baja por definición:
+   // si el perfil del proveedor lo explica, su confianza no cuenta (el resto de palabras sí).
+   let conf=r.conf;
+   if(campo==="descripcion"&&ctx.perfil?.glifos_ocr&&r.palabras){
+    const R=M("extraer").restituirGlifos;
+    const otras=r.palabras.filter((w,i)=>R((i?r.palabras[i-1].texto+" ":"")+w.texto,ctx.perfil)===(i?r.palabras[i-1].texto+" ":"")+w.texto);
+    if(otras.length&&otras.length<r.palabras.length)conf=Math.min(...otras.map(w=>w.conf));
+   }
+   validas.push({...r,conf,valor:v,caja});
   }
  }
 
@@ -203,7 +212,9 @@ async function resolverCampo(p,campo,cajas,ctx){
  const distintos=[...new Set(validas.map(v=>v.valor))];
  if(distintos.length>1)return {conflicto:distintos};
  const mediana=[...validas.map(v=>v.conf)].sort((a,b)=>a-b)[Math.floor(validas.length/2)];
- if(ctx.validacionEstructural&&validas.length>=8&&mediana>=40)return resultado(validas,mediana);
+ // Referencia solo de cifras con el formato del proveedor: unanimidad de las 6 estrategias.
+ const formatoRef=campo==="referencia"&&ctx.perfil?.formato_referencia&&new RegExp(ctx.perfil.formato_referencia).test(distintos[0]||"")&&/^\d+$/.test(distintos[0]||"");
+ if((ctx.validacionEstructural&&validas.length>=8||formatoRef&&validas.length>=6)&&mediana>=40)return resultado(validas,mediana);
  return null;
 }
 async function segundaFase(principal,paginas,lecturas,opciones){
@@ -253,7 +264,8 @@ async function segundaFase(principal,paginas,lecturas,opciones){
    l[campo]={...c,literal:r.valor,valor:r.valor,
     notas:[...(c.notas||[]),...(corregido?["Corregido por relectura dirigida (lectura inicial «"+c.literal+"»)"]:[])],
     resolucion:{metodo:"relectura_dirigida",confianza:0.93,estrategias:r.estrategias,conf_ocr_min:r.conf,lectura_inicial:c.literal,
-     evidencias:["Mismo texto en "+r.estrategias.length+" relecturas fiables (confianza ≥ 80) de la celda",
+     evidencias:[r.conf>=80?"Mismo texto en "+r.estrategias.length+" relecturas fiables (confianza ≥ 80) de la celda":
+       "Unanimidad de las "+r.estrategias.length+" relecturas de la celda y formato de referencia del proveedor ("+perfil?.formato_referencia+")",
       ...(r.descartadas.length?["Relecturas de baja confianza ignoradas: "+r.descartadas.join(", ")]:[])]}};
    resueltos.push("linea "+l.fila+" "+campo+(corregido?" (corregido)":""));
   }
@@ -298,6 +310,18 @@ async function extraerEscaneado(paginas,opciones={}){
   const r=extraerDePaginas(pags,opciones);r._lectura="pagina_psm"+conf.psm+(conf.umbral?"_"+conf.umbral:"");
   Object.defineProperty(r,"_pags",{value:pags,enumerable:false});
   lecturas.push(r);
+ }
+ // CIF de DAFRICA reconocido en alguna lectura (junto a su nombre o en el bloque del cliente):
+ // se descarta como emisor en todas las lecturas de este albarán.
+ const propios=[...new Set(lecturas.map(r=>r.proveedor?.nif_propio_detectado).filter(n=>n&&/^[A-HJ-NP-SUVW]\d{7}[0-9A-J]$/.test(n)))];
+ if(propios.length){
+  opciones={...opciones,nifsPropios:propios};
+  lecturas.forEach((r,i)=>{
+   if(!r._pags||!(r.proveedor?.candidatos||[]).some(n=>propios.includes(n)))return;
+   const r2=M("extraer").extraerDePaginas(r._pags,opciones);r2._lectura=r._lectura;
+   Object.defineProperty(r2,"_pags",{value:r._pags,enumerable:false});
+   lecturas[i]=r2;
+  });
  }
  // Cabecera de tabla ilegible en una lectura (banda gris) pero leída en otra: se trasladan
  // los títulos (posición incluida) a la lectura que no la tiene y se vuelve a extraer.
@@ -455,6 +479,12 @@ async function extraerEscaneado(paginas,opciones={}){
  const resueltos=await segundaFase(principal,paginas,lecturas,opciones);
  if(resueltos.length){principal.validaciones_extra=principal.validaciones_extra||[];finalizar(principal);}
  principal.segunda_fase=resueltos;
+ // Anotaciones manuscritas (códigos de obra y de STEL): solo con un motor de visión de recortes.
+ if(opciones.vision){
+  try{principal.manuscritos=await M("manuscritos").leerManuscritos(paginas,principal,opciones.vision,
+   {catalogoObras:opciones.catalogoObras||null,albaranStel:opciones.albaranStel||null});}
+  catch(e){principal.manuscritos=null;principal.incidencias=[...(principal.incidencias||[]),"No se han podido leer los manuscritos: "+String(e?.message||e).slice(0,120)];}
+ }
  principal.orientacion=orientacion;
  const giradas=orientacion.filter(o=>o.grados);
  if(giradas.length)principal.incidencias.push("Página(s) escaneada(s) girada(s) y enderezada(s): "+giradas.map(o=>o.pagina+" ("+o.grados+"°)").join(", "));

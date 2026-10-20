@@ -6,14 +6,14 @@
 - Confianza: cada campo lleva una confianza 0–1; por debajo de 0.9 el campo cuenta como marcado para revisión.
 - Documentos aceptados automáticamente (AUTO_OK): **7** · AUTO_OK con algún error: **0**
 - Estado de documento igual al esperado: **14/14**
-- Campos evaluados: **240** · correctos y aceptados: **226** (94.2 %)
+- Campos evaluados: **240** · correctos y aceptados: **224** (93.3 %)
 - **Fallos críticos (valor erróneo aceptado como bueno): 0**
 
 ## Precisión por campo
 
 | Campo | Total | Correcto automático | Marcado (esperado) | Correcto a revisar | Sin valor, marcado | Erróneo, marcado | **Erróneo aceptado** | % automático correcto |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| cabecera.proveedor_nif | 14 | 12 | 2 | 0 | 0 | 0 | **0** | 85.7 % |
+| cabecera.proveedor_nif | 14 | 10 | 4 | 0 | 0 | 0 | **0** | 71.4 % |
 | cabecera.numero | 14 | 13 | 1 | 0 | 0 | 0 | **0** | 92.9 % |
 | cabecera.fecha | 14 | 11 | 3 | 0 | 0 | 0 | **0** | 78.6 % |
 | lineas.*.referencia | 33 | 33 | 0 | 0 | 0 | 0 | **0** | 100.0 % |
@@ -92,7 +92,7 @@ Resultado: **correcto** (valor igual y aceptado), **correcto, a revisar** (igual
 | S03-codigo-con-forma-decimal | lineas.2.precio | 3,2 | 3,2 | correcto | 0.99 |  |
 | S03-codigo-con-forma-decimal | lineas.2.descuento | — | — | correcto | — |  |
 | S03-codigo-con-forma-decimal | lineas.2.importe | 32 | 32 | correcto | 0.99 |  |
-| S04-sin-precios-cantidad-ambigua | cabecera.proveedor_nif | B33123456 | B33123456 | correcto | — |  |
+| S04-sin-precios-cantidad-ambigua | cabecera.proveedor_nif | B33123456 | B33123456 | marcado (esperado) | 0.85 | NIF B33123456 leído correctamente pero no registrado como proveedor |
 | S04-sin-precios-cantidad-ambigua | cabecera.numero | 77812 | 77812 | correcto | 0.96 |  |
 | S04-sin-precios-cantidad-ambigua | cabecera.fecha | 2026-10-18 | 2026-10-18 | correcto | 0.96 |  |
 | S04-sin-precios-cantidad-ambigua | lineas.1.referencia | A-100 | A-100 | correcto | 0.96 |  |
@@ -191,7 +191,7 @@ Resultado: **correcto** (valor igual y aceptado), **correcto, a revisar** (igual
 | S09-texto-caracter-a-caracter | lineas.2.precio | 0,03 | 0,03 | correcto | 0.99 |  |
 | S09-texto-caracter-a-caracter | lineas.2.descuento | — | — | correcto | — |  |
 | S09-texto-caracter-a-caracter | lineas.2.importe | 15 | 15 | correcto | 0.99 |  |
-| S10-dos-nif-de-terceros | cabecera.proveedor_nif | B33123456 | B33123456 | correcto | — |  |
+| S10-dos-nif-de-terceros | cabecera.proveedor_nif | B33123456 | B33123456 | marcado (esperado) | 0.85 | NIF B33123456 leído correctamente pero no registrado como proveedor |
 | S10-dos-nif-de-terceros | cabecera.numero | 55001 | 55001 | correcto | 0.96 |  |
 | S10-dos-nif-de-terceros | cabecera.fecha | 2026-10-10 | 2026-10-10 | correcto | 0.96 |  |
 | S10-dos-nif-de-terceros | lineas.1.referencia | T-9 | T-9 | correcto | 0.96 |  |
@@ -317,6 +317,7 @@ Proveedor no registrado, albarán sin precios, «1.000» sin pruebas del formato
 - Validación lineas: OK · 3 líneas de artículo
 - Incidencia: proveedor: NIF B33123456 leído correctamente pero no registrado como proveedor
 - Incidencia: 1 línea(s) requieren revisión: 1
+  - `cabecera.proveedor_nif` MARCADO_COMO_ESPERADO · esperado "B33123456" · obtenido "B33123456" (OK)
   - `lineas.1.cantidad` MARCADO_COMO_ESPERADO · esperado 1000 · obtenido null (AMBIGUO)
 
 ### S05-descuadre-precio-por-100-sin-fecha
@@ -384,6 +385,7 @@ NIF del emisor (no registrado) en el encabezado y NIF de la agencia de transport
 - Validación tabla: OK · Columnas: referencia, descripcion, cantidad
 - Validación lineas: OK · 1 líneas de artículo
 - Incidencia: proveedor: NIF B33123456 leído correctamente pero no registrado como proveedor
+  - `cabecera.proveedor_nif` MARCADO_COMO_ESPERADO · esperado "B33123456" · obtenido "B33123456" (OK)
 
 ### S11-fecha-sin-etiqueta-fila-sin-cantidad-portes
 Única fecha sin etiqueta (se propone, no se acepta), artículo con referencia pero sin cantidad, descuento sobre precio neto redondeado, línea de PORTES

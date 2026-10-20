@@ -73,7 +73,7 @@ function comparar(resultado,esperado){
  // Un NIF bien leído pero aún no registrado es una lectura correcta del campo.
  const conf=x=>typeof x?.confianza==="number"?x.confianza:null;
  add({campo:"cabecera.proveedor_nif",tipo:"texto",esperado:esperado.proveedor_nif,obtenido:prov.nif,
-  estado:prov.estado==="NIF_NO_REGISTRADO"?"OK":prov.estado,debeMarcarse:marcados.has("cabecera.proveedor_nif"),confianza:prov.estado==="NIF_NO_REGISTRADO"?null:conf(prov),motivos:prov.motivos||[]});
+  estado:prov.estado==="NIF_NO_REGISTRADO"?"OK":prov.estado,debeMarcarse:marcados.has("cabecera.proveedor_nif"),confianza:conf(prov),motivos:prov.motivos||[]});
  const num=resultado.numero||{valor:null,estado:"VACIO"};
  add({campo:"cabecera.numero",tipo:"texto",esperado:esperado.numero,obtenido:num.valor,estado:num.estado,debeMarcarse:marcados.has("cabecera.numero"),confianza:conf(num),motivos:num.motivos||[]});
  const fecha=resultado.fecha||{valor:null,estado:"VACIO"};
@@ -82,6 +82,14 @@ function comparar(resultado,esperado){
  for(const [k,e] of Object.entries(esperado.totales||{})){
   const t=resultado.totales?.[k]||{valor:null,estado:"VACIO"};
   add({campo:"totales."+k,tipo:"numero",esperado:e,obtenido:t.valor,estado:t.estado,debeMarcarse:marcados.has("totales."+k),confianza:conf(t),motivos:t.motivos||[]});
+ }
+ // Anotaciones manuscritas (códigos de obra y de STEL): solo si se ejecutó el motor de visión;
+ // si no, se cuentan aparte como no evaluadas (no hay lectura que comparar).
+ const sinMotor=[];
+ for(const [k,e] of Object.entries(esperado.manuscritos||{})){
+  if(!resultado.manuscritos){sinMotor.push("manuscritos."+k);continue;}
+  const m=resultado.manuscritos[k]||{valor:null,estado:"VACIO"};
+  add({campo:"manuscritos."+k,tipo:"texto",esperado:e,obtenido:m.valor,estado:m.estado,debeMarcarse:marcados.has("manuscritos."+k),confianza:conf(m),motivos:m.motivos||[]});
  }
  const lineas=[];
  for(const [ie,io] of alinear(esperado.lineas||[],resultado.lineas||[])){
@@ -112,7 +120,7 @@ function comparar(resultado,esperado){
   estado_correcto:!esperado.estado_documento||esperado.estado_documento===resultado.estado,
   // Un AUTO_OK con cualquier campo incorrecto es el peor fallo posible.
   auto_ok_falso:resultado.estado==="AUTO_OK"&&(criticos>0||campos.some(c=>c.categoria!=="CORRECTO")),
-  campos,lineas,criticos
+  campos,lineas,criticos,sin_motor:sinMotor
  };
 }
 

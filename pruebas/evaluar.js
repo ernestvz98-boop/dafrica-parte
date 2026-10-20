@@ -37,8 +37,11 @@ async function evaluarSinteticos(){
 }
 
 // Registro privado de la carpeta (NIF reales, fuera de git) fusionado con los perfiles públicos.
+// --sin-registro-privado: solo los perfiles públicos (lo que tiene la web), sin NIF reales.
+let SIN_PRIVADO=false;
 function registroReal(carpeta){
  const archivo=path.join(carpeta,"registro.json");
+ if(SIN_PRIVADO)return REGISTRO;
  return fusionar(REGISTRO,fs.existsSync(archivo)?JSON.parse(fs.readFileSync(archivo,"utf8")):null);
 }
 
@@ -47,13 +50,24 @@ function registroReal(carpeta){
 let MOTOR="nativo";
 async function evaluarEscaneado(ruta,base,esperado,registro){
  if(!["nativo","tesseractjs","navegador"].includes(MOTOR))throw Error("Motor OCR desconocido: "+MOTOR);
- const {paginasEscaneadas}=require(MOTOR==="nativo"?"./motor-tesseract.js":"./motor-tesseractjs.js");
- const {extraerEscaneado}=require("../albaranes/escaneado.js");
- const paginas=paginasEscaneadas(ruta,MOTOR==="navegador"?{render:"navegador"}:{}),informes=[];
+ // El PDF se lee entero con el lector (separación automática en albaranes) y cada albarán
+ // esperado se compara con el documento leído que ocupa exactamente sus páginas.
+ const {abrirFuente}=require("./fuente-node.js"),{leerPdf}=require("../albaranes/lector.js");
+ const fuente=await abrirFuente(ruta,{motor:MOTOR,render:MOTOR==="navegador"?"navegador":undefined});
+ let leido;
+ try{leido=await leerPdf(fuente,{registro,hoy:esperado.fecha_proceso});}finally{await fuente.cerrar();}
+ const informes=[];
  for(const doc of esperado.documentos){
-  const pags=paginas.filter(p=>[].concat(doc.pagina).includes(p.numero));
-  const resultado=await extraerEscaneado(pags,{registro,hoy:esperado.fecha_proceso});
-  informes.push({id:base+" · pág. "+[].concat(doc.pagina).join("-"),descripcion:doc.notas||"",resultado,comparacion:comparar(resultado,doc)});
+  const pags=[].concat(doc.pagina);
+  const encontrado=leido.documentos.find(d=>d.paginas.join(",")===pags.join(","));
+  const id=base+" · pág. "+pags.join("-");
+  if(!encontrado){
+   const vacio={tipo_pdf:"ESCANEADO_OCR",estado:"ERROR_SEPARACION",lineas:[],incidencias:["Separación de albaranes distinta de la esperada: "+
+    leido.documentos.map(d=>"["+d.paginas.join(",")+"]").join(" ")]};
+   informes.push({id,descripcion:doc.notas||"",resultado:vacio,comparacion:comparar(vacio,doc)});
+   continue;
+  }
+  informes.push({id,descripcion:doc.notas||"",resultado:encontrado.resultado,comparacion:comparar(encontrado.resultado,doc)});
  }
  return informes;
 }
@@ -96,6 +110,8 @@ function markdown({corpus,informes,pendientes,sinRevisar=[]}){
  L.push("- Documentos aceptados automáticamente (AUTO_OK): **"+auto+"** · AUTO_OK con algún error: **"+autoFalsos+"**");
  L.push("- Estado de documento igual al esperado: **"+estadosOK+"/"+informes.length+"**");
  L.push("- Campos evaluados: **"+total+"** · correctos y aceptados: **"+(totales.CORRECTO||0)+"** ("+pct(totales.CORRECTO||0,total)+")");
+ const sinMotor=informes.reduce((n,i)=>n+(i.comparacion.sin_motor||[]).length,0);
+ if(sinMotor)L.push("- Anotaciones manuscritas esperadas sin evaluar (no se ha ejecutado el motor de visión de recortes): **"+sinMotor+"**");
  L.push("- **Fallos críticos (valor erróneo aceptado como bueno): "+criticos+"**","");
  L.push("## Precisión por campo","");
  L.push("| Campo | Total | Correcto automático | Marcado (esperado) | Correcto a revisar | Sin valor, marcado | Erróneo, marcado | **Erróneo aceptado** | % automático correcto |");
@@ -142,11 +158,12 @@ async function main(){
  const args=process.argv.slice(2);
  const sinteticos=args.includes("--sinteticos");
  MOTOR=(args.find(a=>a.startsWith("--motor="))||"--motor=nativo").slice(8);
+ SIN_PRIVADO=args.includes("--sin-registro-privado");
  const carpeta=args.find(a=>!a.startsWith("--"))||path.join(__dirname,"corpus-real");
  const datos=sinteticos?await evaluarSinteticos():await evaluarCarpeta(carpeta,{incluirSinRevisar:args.includes("--incluir-sin-revisar")});
  const salida=path.join(__dirname,sinteticos?"informes":"informes-reales");
  fs.mkdirSync(salida,{recursive:true});
- const nombre=sinteticos?"precision-sintetico":"precision-real"+(MOTOR==="nativo"?"":"-"+MOTOR);
+ const nombre=sinteticos?"precision-sintetico":"precision-real"+(MOTOR==="nativo"?"":"-"+MOTOR)+(SIN_PRIVADO?"-sin-registro":"");
  const {texto,criticos,autoFalsos}=markdown(datos);
  fs.writeFileSync(path.join(salida,nombre+".md"),texto);
  if(!sinteticos)fs.writeFileSync(path.join(salida,nombre+".json"),JSON.stringify(datos,null,1));
