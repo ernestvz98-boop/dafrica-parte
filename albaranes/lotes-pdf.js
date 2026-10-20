@@ -64,5 +64,21 @@
   }
   return {documentos:grupos,out,fallos,paginas_pdf:total,paginas_pendientes:faltantes};
  }
- return {procesar};
+ // Conserva el PDF original: solo rota una copia temporal para la lectura
+ // geométrica/IA. Las orientaciones proceden del OCR local, no de una suposición.
+ async function enderezar(PDFDocument,encoded,orientacion=[]){
+  const giros=orientacion.filter(o=>o.grados);
+  if(!giros.length)return encoded;
+  const raw=atob(encoded),bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));
+  const pdf=await PDFDocument.load(bytes),vistas=new Set();
+  for(const o of giros){
+   if(!Number.isInteger(o.pagina)||o.pagina<1||o.pagina>pdf.getPageCount()||
+      ![90,180,270].includes(o.grados)||vistas.has(o.pagina))throw Error("Orientación OCR no válida");
+   vistas.add(o.pagina);
+   const p=pdf.getPage(o.pagina-1);
+   p.setRotation({type:"degrees",angle:(p.getRotation().angle+o.grados)%360});
+  }
+  return base64(await pdf.save());
+ }
+ return {procesar,enderezar};
 });

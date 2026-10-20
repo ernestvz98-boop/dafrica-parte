@@ -286,3 +286,32 @@ test("títulos de tabla en blanco sobre banda oscura: se leen invertidos y se tr
  assert.equal(r.lineas.length,1);
  assert.equal(r.lineas[0].cantidad.valor,5);
 });
+
+/* Un perfil de formato público no contiene NIF privados: no es un conflicto. */
+test("perfil público sin NIF: usa el formato sin verificar la identidad del proveedor",()=>{
+ const reg=registroCon({nifs:[],formato_numero:"^\\d{6}$"});
+ const r=leer([...cabeceraDoc(),...fila(120,["ALBARÁN",60],["AB26",110],["009876",140],["13/10/2026",190]),...titulos(),...filaPrecio(218)],{registro:reg});
+ assert.equal(r.proveedor.estado,"NIF_NO_REGISTRADO");
+ assert.equal(r.proveedor.id,reg.proveedores[0].id);
+ assert.equal(r.numero.valor,"009876");assert.equal(r.estado,"REVISAR");
+ assert.ok(r.proveedor.confianza<0.9);
+});
+test("NIF configurado que contradice el impreso sigue bloqueando al proveedor",()=>{
+ const reg=registroCon({nifs:['B24555559'],formato_numero:"^\\d{6}$"});
+ const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...filaPrecio(218)],{registro:reg});
+ assert.equal(r.proveedor.estado,"AMBIGUO");assert.equal(r.proveedor.nif,null);assert.equal(r.estado,"REVISAR");
+});
+test('número partido por OCR: une año/serie y sufijo impreso, sin tomar solo el año',()=>{
+ const r=leer([...cabeceraDoc(),...fila(120,['Albarán',400],['2026',450,95,{ancho:18}],['/9123',475,93,{ancho:25}]),...titulos(),...filaPrecio(218)]);
+ assert.equal(r.numero.valor,'2026/9123');assert.equal(r.numero.estado,'OK');
+});
+test('un sufijo lejano no se pega al número de albarán',()=>{
+ const r=leer([...cabeceraDoc(),...fila(120,['Albarán',60],['2026',120,95,{ancho:18}],['/9123',510,93,{ancho:25}]),...titulos(),...filaPrecio(218)]);
+ assert.equal(r.numero.valor,'2026');
+});
+test('nombre de perfil sin NIF y CIF registrado en otro proveedor: conserva el conflicto',()=>{
+ const reg=registroCon({nifs:[]});
+ reg.proveedores.push({id:'OTRO',nombre:'OTRO PROVEEDOR FICTICIO',nifs:[NIF]});
+ const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...filaPrecio(218)],{registro:reg});
+ assert.equal(r.proveedor.estado,'AMBIGUO');assert.equal(r.estado,'REVISAR');
+});

@@ -99,3 +99,39 @@ test('frontera contradictoria se rechaza atómicamente y conserva separación pr
    {paginas_pdf:2,documentos:[{numero:'B',paginas:[1,2]}]},interpretar:async()=>assert.fail('Frontera dudosa')});
  assert.equal(r.fallos.length,1);assert.equal(r.documentos[0].numero,'A');assert.deepEqual(r.paginas_pendientes,[11]);
 });
+test('copia temporal para IA: rota solo las páginas detectadas y conserva el original',async()=>{
+ const {enderezar}=require('../albaranes/lotes-pdf');
+ const bytes=await documento(2),original=Buffer.from(bytes).toString('base64');
+ const copia=await enderezar(PDFDocument,original,[{pagina:1,grados:270},{pagina:2,grados:0}]);
+ const pdf=await PDFDocument.load(Buffer.from(copia,'base64'));
+ assert.equal(pdf.getPage(0).getRotation().angle,270);assert.equal(pdf.getPage(1).getRotation().angle,0);
+ assert.equal((await PDFDocument.load(bytes)).getPage(0).getRotation().angle,0);
+ assert.equal(await enderezar(PDFDocument,original,[]),original);
+ await assert.rejects(()=>enderezar(PDFDocument,original,[{pagina:9,grados:270}]),/no válida/);
+});
+test('pantalla: OCR parcial visible, IA enderezada y cabecera fiable como pista, sin aceptar campos dudosos',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),lotesPdf=require('../albaranes/lotes-pdf');
+ const bytes=await documento(1),els={};let peticion;
+ for(const id of ['pcBatch','pcPreviewFile','pcPreviewConsent','pcPreviewStart','pcPreviewStatus','pcPreviewResults'])
+  els[id]={innerHTML:'',textContent:'',insertAdjacentHTML(_,s){this.innerHTML+=s},addEventListener(_,fn){this.click=fn}};
+ els.pcPreviewFile.files=[{name:'test.pdf',size:bytes.length,arrayBuffer:async()=>bytes}];els.pcPreviewConsent.checked=true;
+ const det={tipo_pdf:'ESCANEADO_OCR',estado:'REVISAR',orientacion:[{pagina:1,grados:270}],
+  numero:{estado:'OK',valor:'009999',literal:'009999',confianza:0.95},fecha:{estado:'OK',valor:'2026-10-15',literal:'15/10/2026',confianza:0.95},
+  proveedor:{nombre:'FICTICIO',nif:'B24123457',estado:'NIF_NO_REGISTRADO'},
+  lineas:Array.from({length:3},(_,i)=>({fila:i+1,estado:'OK',confianza:0.6,motivos:[]})),validaciones:[],incidencias:[],confianza:0.6};
+ const ctx={console,Uint8Array,window:{DafricaAlbaranes:{lotesPdf,motorNavegador:{cerrar:async()=>{}}}},
+  $:id=>els[id],has:()=>true,esc:x=>String(x),renderComprasLotePilot:null,SUPABASE_URL:'https://test.invalid',
+  pcProveedorMostrable:x=>x,pcLeerTablaMixta:async()=>{throw Error('Sin geometría')},
+  sb:async()=>({paginas_pdf:1,documentos:[{numero:'numero_malo',fecha:'2023-10-15',paginas:[1]}]}),
+  authFetch:async(url,req)=>{peticion=JSON.parse(req.body);return {ok:true,json:async()=>({estado:'INTERPRETADO_SIN_GUARDAR',numero:'IA',lineas:[],lineas_detectadas:1,lectura_completa:false})}}};
+ vm.createContext(ctx);vm.runInContext(fs.readFileSync('control-28.js','utf8'),ctx);vm.runInContext(fs.readFileSync('control-27.js','utf8'),ctx);
+ ctx.pcLoadPdfLib=async()=>PDFDocument;ctx.pcLecturaDeterminista=async()=>({estado:'NO_DIGITAL'});ctx.pcLecturaOCR=async()=>det;
+ ctx.renderComprasLotePilot();await els.pcPreviewStart.click();
+ assert.equal(peticion.numero_esperado,'009999');assert.equal(peticion.fecha_esperada,'2026-10-15');
+ const pdf=await PDFDocument.load(Buffer.from(peticion.data.split(',')[1],'base64'));
+ assert.equal(pdf.getPage(0).getRotation().angle,270);
+ const html=els.pcPreviewResults.innerHTML;
+ assert.match(html,/3 artículos leídos con OCR local · requiere revisión/);
+ assert.match(html,/Proveedor no verificado/);assert.match(html,/Confianza insuficiente/);
+ assert.match(html,/Comparar con la interpretación de IA/);assert.doesNotMatch(html,/Todos los campos verificados/);
+});

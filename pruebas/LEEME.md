@@ -122,3 +122,31 @@ La exactitud de la separación externa y de OCR/IA sobre documentos reales sigue
 necesitando validación con corpus autorizado. No se garantiza cero errores en
 producción a partir de pruebas sintéticas. La nueva carga de pdf-lib usa el CDN
 cdnjs permitido por la CSP; requiere conexión, igual que pdf.js.
+
+## Regresión de escaneos girados y perfiles sin NIF privado
+
+Corrección posterior al ensayo con un PDF autorizado de 11 páginas escaneadas de
+lado (el archivo, imágenes y lecturas quedan fuera del repositorio):
+
+- Un perfil público sin NIF no se confunde con un CIF contradictorio. Se utiliza
+  su formato, conservando `NIF_NO_REGISTRADO`, confianza inferior a 0,9 y bloqueo
+  de `AUTO_OK`. Un CIF configurado contradictorio o registrado en otro proveedor
+  sigue bloqueado.
+- Un número partido por OCR como `2026 /1234` conserva el sufijo contiguo; no se
+  unen cifras alejadas. Se conserva la confianza más baja de ambas partes.
+- La copia enviada a geometría/IA recibe la orientación detectada por OCR. Solo
+  se usan número/fecha locales como pistas si están OK con confianza >= 0,9.
+- La lectura OCR local parcial se muestra abierta con sus advertencias; la IA
+  queda como comparación. Una fila de baja confianza deja de llamarse «Correcta».
+
+Verificación local del PDF real: 19 líneas recuperadas en las páginas con tabla,
+18 con cuadre y una sin precios. La página manuscrita no produce una tabla local
+fiable; códigos y descripciones de baja confianza siguen marcados. Esto no es una
+certificación de exactitud completa ni una prueba del proveedor externo de IA.
+Se utiliza el motor Tesseract.js y modelo de la web, con rasterización Poppler;
+la rasterización del navegador puede generar diferencias y requiere una nueva
+prueba de extremo a extremo en la web publicada.
+
+Total tras estas regresiones: 118 pruebas aprobadas; evaluación sintética: cero
+fallos críticos aceptados. Los casos públicos usan valores ficticios. No se
+invocan servicios de producción durante las pruebas automáticas.

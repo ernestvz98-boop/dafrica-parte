@@ -47,11 +47,12 @@ function pcRenderDeterminista(det){
    texto+' <b class="error" title="'+esc((c.motivos||[]).join(" · "))+'">['+esc(aceptado(c.estado)?"confianza "+c.confianza:c.estado)+']</b>'+sugerida;
  };
  const p=det.proveedor||{};
- const proveedor=p.nombre?esc(p.nombre)+" · NIF "+esc(p.nif):p.nif?"NIF "+esc(p.nif)+" (no registrado)":"No identificado";
+ const proveedor=p.nombre?esc(p.nombre)+" · NIF "+esc(p.nif)+(p.estado!=="OK"?' <b class="error">[Proveedor no verificado]</b>':""):
+  p.nif?"NIF "+esc(p.nif)+" (no registrado)":"No identificado";
  const filas=(det.lineas||[]).map(l=>'<tr><td>'+esc(l.fila)+'</td><td>'+celda(l.referencia)+'</td><td>'+celda(l.descripcion)+'</td><td>'+
   celda(l.cantidad)+'</td><td>'+celda(l.precio)+'</td><td>'+celda(l.descuento)+'</td><td>'+celda(l.importe)+'</td><td>'+
   esc(l.cuadre?.estado==="VERIFICADO"?"Cuadra":l.cuadre?.estado==="SIN_PRECIOS"?"Sin precios":l.cuadre?.estado||"—")+'</td><td>'+
-  (l.estado==="OK"?"Correcta":'<span class="error">'+esc(l.motivos.join(" · "))+'</span>')+'</td></tr>').join("");
+  (l.estado==="OK"&&l.confianza>=0.9?"Correcta":'<span class="error">'+esc(l.motivos.length?l.motivos.join(" · "):"Confianza insuficiente; no se acepta automáticamente")+'</span>')+'</td></tr>').join("");
  const validaciones=(det.validaciones||[]).filter(v=>v.estado!=="NO_APLICA")
   .map(v=>'<li>'+esc(v.nombre)+': '+(v.estado==="OK"?"correcta":'<b class="error">'+esc(v.estado)+'</b>')+' · '+esc(v.detalle)+'</li>').join("");
  return '<div class="module-note" style="margin:8px 0">'+

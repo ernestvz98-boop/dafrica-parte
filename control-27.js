@@ -52,6 +52,14 @@ renderComprasLotePilot=function renderComprasTemporal(){
    }).join("")+'</tbody></table></div>';
  };
  const renderResult=(r,source,index)=>{
+  if(r.estado!=="DETERMINISTA"&&r.determinista?.tipo_pdf==="ESCANEADO_OCR"&&r.determinista.lineas?.length){
+   const det=r.determinista;
+   return '<details open style="border:1px solid #d6dee8;border-radius:8px;padding:12px;margin:9px 0">'+
+    '<summary>'+esc(det.numero?.valor||"Número pendiente")+' · '+esc(det.lineas.length)+
+    ' artículos leídos con OCR local · requiere revisión</summary>'+pcRenderDeterminista(det)+
+    '<details><summary>Comparar con la interpretación de IA (puede contener discrepancias)</summary>'+
+    renderResult({...r,determinista:null},source,index)+'</details></details>';
+  }
   if(r.estado==="DETERMINISTA")return '<details open style="border:1px solid #d6dee8;border-radius:8px;padding:12px;margin:9px 0">'+
     '<summary style="cursor:pointer;font-weight:bold">'+esc(r.determinista.numero?.valor||source?.numero||"Sin número")+' · '+
     esc(r.determinista.proveedor?.nombre||"")+' · '+esc(r.determinista.lineas.length)+' líneas · verificado sin IA</summary>'+
@@ -116,6 +124,13 @@ renderComprasLotePilot=function renderComprasTemporal(){
        catch(e){console.warn("Lectura OCR no disponible",String(e).slice(0,120))}
      }
      if(det?.estado==="AUTO_OK"){return {estado:"DETERMINISTA",determinista:det}}
+     // Las imágenes para geometría e IA también deben recibir la orientación
+     // que detectó el OCR. Antes se enviaba otra vez el escaneo de lado.
+     if(det?.tipo_pdf==="ESCANEADO_OCR"){
+       d.pdf_separado_b64=await window.DafricaAlbaranes.lotesPdf.enderezar(PDFDocument,d.pdf_separado_b64,det.orientacion);
+       if(det.numero?.estado==="OK"&&det.numero.confianza>=0.9)d.numero=det.numero.valor;
+       if(det.fecha?.estado==="OK"&&det.fecha.confianza>=0.9)d.fecha=det.fecha.valor;
+     }
      let n=null,rows=null,bands=null,columnHints=null,header=null,profile="",noRef=false,warning="";
      if((d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
        try{

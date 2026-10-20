@@ -248,6 +248,18 @@ function leerNumero(lineas){
   hallados=valoresEtiquetados(lineas,RE_NUMERO_GENERICO,EXCLUIR_GENERICO,aceptar);
   if(hallados.length)r.notas.push("Número tomado de una etiqueta genérica («Nº»/«Número»)");
  }
+ // El OCR separa «2026 /1234» en celdas: aceptar solo «2026» confundiría
+ // la serie/año con el número. Unir únicamente el sufijo impreso contiguo.
+ hallados=hallados.map(h=>{
+  if(!/^\d{2,4}$/.test(h.texto))return h;
+  const linea=lineas.find(l=>l.celdas.includes(h.celda)),i=linea?.celdas.indexOf(h.celda);
+  const siguiente=linea?.celdas[i+1];
+  if(!siguiente||!/^\/\s*\d{2,10}$/.test(siguiente.texto.trim())||
+     siguiente.x0-h.celda.x1>3*h.celda.alto)return h;
+  return {...h,texto:h.texto+siguiente.texto.replace(/\s/g,""),
+   celda:{...h.celda,x1:siguiente.x1,conf:h.celda.conf==null?siguiente.conf:
+    siguiente.conf==null?h.celda.conf:Math.min(h.celda.conf,siguiente.conf)}};
+ });
  const distintos=[...new Map(hallados.map(h=>[N().canon(h.texto),h])).values()];
  if(!distintos.length){r.motivos.push("No se encontró el número de albarán junto a su etiqueta");return r;}
  if(distintos.length>1){
@@ -409,12 +421,18 @@ function identificarProveedor(paginas,registro,limiteCabecera=null){
  r.nif=elegido.nif;r.caja=elegido.caja;r.conf_ocr=elegido.conf??null;
  const ficha=PROV().buscarPorNif(elegido.nif,registro);
  // Un CIF válido que contradice el nombre registrado impreso: no se decide.
- if(porNombre.length===1&&(!ficha||ficha.id!==porNombre[0].id)){
+ if(porNombre.length===1&&((ficha&&ficha.id!==porNombre[0].id)||(!ficha&&(porNombre[0].nifs||[]).length))){
   r.estado="AMBIGUO";r.nif=null;r.motivos.push("El CIF leído ("+elegido.nif+") no corresponde al proveedor cuyo nombre aparece impreso ("+porNombre[0].nombre+")");
   return r;
  }
  if(ficha){r.id=ficha.id;r.nombre=ficha.nombre;r.estado="OK";r.via="nif";}
- else{r.estado="NIF_NO_REGISTRADO";r.motivos.push("NIF "+elegido.nif+" leído correctamente pero no registrado como proveedor");}
+ else{
+  r.estado="NIF_NO_REGISTRADO";
+  // Un perfil público sin NIF no contradice el CIF impreso. Permite leer su
+  // formato de tabla/número, pero NO verifica la identidad ni permite AUTO_OK.
+  if(porNombre.length===1){r.id=porNombre[0].id;r.nombre=porNombre[0].nombre;r.via="perfil_nombre_no_verificado";}
+  r.motivos.push("NIF "+elegido.nif+" leído correctamente pero no registrado como proveedor");
+ }
  return r;
 }
 
