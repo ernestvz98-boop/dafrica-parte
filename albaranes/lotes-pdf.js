@@ -10,6 +10,16 @@
   let s="";for(let i=0;i<bytes.length;i+=32768)s+=String.fromCharCode(...bytes.subarray(i,i+32768));
   return btoa(s);
  }
+ // Reintentos acotados para lecturas temporales; nunca aplicar a escrituras.
+ async function reintentarLectura(tarea,{intentos=3,esperar=ms=>new Promise(r=>setTimeout(r,ms)),progreso=()=>{}}={}){
+  for(let i=0;i<intentos;i++){
+   try{return await tarea();}catch(e){
+    if(e?.noReintentar||i===intentos-1)throw e;
+    progreso(`Servicio temporalmente no disponible; reintento ${i+2} de ${intentos}`);
+    await esperar(1000*(i+1));
+   }
+  }
+ }
  async function procesar({PDFDocument,bytes,separar,interpretar,refinar=null,progreso=()=>{},alResultado=()=>{},liberar=async()=>{}}){
   const pdf=await PDFDocument.load(bytes),total=pdf.getPageCount(),grupos=[],fallos=[];
   const extraer=async paginas=>{
@@ -114,5 +124,5 @@
   }
   return grupos;
  }
- return {procesar,enderezar,dividirPorCabeceras};
+ return {procesar,enderezar,dividirPorCabeceras,reintentarLectura};
 });

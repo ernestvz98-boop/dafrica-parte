@@ -52,6 +52,9 @@ renderComprasLotePilot=function renderComprasTemporal(){
    }).join("")+'</tbody></table></div>';
  };
  const renderResult=(r,source,index)=>{
+  if(r.error)return '<div class="module-note sensitive-note"><b>'+esc(r.determinista?.numero?.valor||source?.numero||"Documento "+(index+1))+
+   ' · '+(r.determinista?.lineas?.length?'Lectura local conservada; comprobación pendiente':'No resuelto automáticamente')+
+   '</b><p>'+esc(r.error)+'</p>'+(r.determinista?pcRenderDeterminista(r.determinista):"")+'</div>';
   if(r.estado!=="DETERMINISTA"&&r.determinista?.tipo_pdf==="ESCANEADO_OCR"&&r.determinista.lineas?.length){
    const det=r.determinista;
    return '<details open style="border:1px solid #d6dee8;border-radius:8px;padding:12px;margin:9px 0">'+
@@ -110,15 +113,17 @@ renderComprasLotePilot=function renderComprasTemporal(){
    // el PDF a esta función y ningún catálogo se persiste en el navegador.
    const catalogoPromesa=window.DafricaAlbaranes.verificacion?
     sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(65000)}).catch(()=>null):Promise.resolve(null);
+   const reintentar=tarea=>window.DafricaAlbaranes.lotesPdf.reintentarLectura(tarea,{
+    progreso:t=>{if(run===currentRun)status.textContent=t}
+   });
    const split=await window.DafricaAlbaranes.lotesPdf.procesar({
     PDFDocument,bytes:new Uint8Array(await upload.arrayBuffer()),
     progreso:t=>{if(run===currentRun)status.textContent=t},
-    separar:(data)=>sb("/functions/v1/compras-lote-piloto",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name:upload.name,mime:"application/pdf",data:"data:application/pdf;base64,"+data})}),
+    separar:(data)=>reintentar(()=>sb("/functions/v1/compras-lote-piloto",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:upload.name,mime:"application/pdf",data:"data:application/pdf;base64,"+data})})),
     refinar:async d=>window.DafricaAlbaranes.lotesPdf.dividirPorCabeceras(d,await pcCabecerasPorPagina(d)),
     liberar:()=>window.DafricaAlbaranes.motorNavegador.cerrar(),
-    alResultado:(r,d,i)=>{if(run===currentRun)results.insertAdjacentHTML("beforeend",r?.error?
-      '<p class="error">'+esc(r.error)+'</p>':renderResult(r,d,i))},
+    alResultado:(r,d,i)=>{if(run===currentRun)results.insertAdjacentHTML("beforeend",renderResult(r,d,i))},
     interpretar:async(d,index,total)=>{
      let result;
      // PDF digital: lectura exacta del texto. Si todo cuadra no se usa la IA.
@@ -161,6 +166,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
        }catch(e){warning="No pudo delimitarse la tabla física: "+String(e?.message||e)}
      }
      try{
+       const value=await reintentar(async()=>{
        const res=await authFetch(SUPABASE_URL+"/functions/v1/compras-interpretar-v2",{
          method:"POST",headers:{"Content-Type":"application/json"},
          body:JSON.stringify({
@@ -171,8 +177,13 @@ renderComprasLotePilot=function renderComprasTemporal(){
          })
        });
        const value=await res.json().catch(()=>({error:"El servidor no devolvió una respuesta válida"}));
-       if(!res.ok)result={error:value.error||"La interpretación no está disponible",etapa:value.etapa,warning,determinista:det};
-       else{
+       if(!res.ok||value.error||value.estado!=="INTERPRETADO_SIN_GUARDAR"){
+        const e=Error(value.error||"El servicio no devolvió una interpretación válida");
+        e.noReintentar=[400,401,403,413,422].includes(res.status);throw e;
+       }
+       return value;
+       });
+       {
         const contrastado=pcContrastarLocal(det,value);
         result={...contrastado,lectura_completa:d.separacion_local_dudosa?false:contrastado.lectura_completa,warning,determinista:det};
        }
@@ -195,9 +206,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
      ' interpretados con IA, <b>'+esc(verifiedLines)+' de '+esc(totalLines)+' filas principales contrastadas físicamente</b>, '+
      esc(full)+' documentos con cabecera y líneas verificadas, '+esc(incomplete)+
      ' con datos pendientes, '+esc(failed)+' sin interpretación. <b>0 documentos archivados.</b></p>'+
-     out.map((r,i)=>r?.error?
-       '<div class="module-note sensitive-note"><b>'+esc(split.documentos[i]?.numero||"Documento "+(i+1))+
-       ' · Sin interpretación</b><p>'+esc(r.error)+'</p>'+(r.determinista?pcRenderDeterminista(r.determinista):"")+'</div>':renderResult(r,split.documentos[i],i)).join("")+
+     out.map((r,i)=>renderResult(r,split.documentos[i],i)).join("")+
     '<p class="muted"><b>Próxima etapa (no activada):</b> contrastar lectura con STEL, crear albarán autorizado y enlazarlo a una obra verificada.</p>';
    status.textContent=(split.fallos.length?"Interpretación parcial; hay bloques pendientes. ":"Interpretación temporal finalizada. ")+" No se han guardado archivos ni materiales en DAFRICA ni se ha modificado STEL.";
   }catch(e){status.textContent="No se pudo interpretar el lote: "+String(e?.message||e)}
