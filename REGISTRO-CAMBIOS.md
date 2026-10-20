@@ -25,7 +25,16 @@ tesseract.js (`--motor=tesseractjs`) un tercero. Reproducidos, corregidos y con 
   que la lee completa).
 - Medición tras los cambios (30 albaranes, 545 campos), 0 críticos en todas: nativo 495
   (90,8 %), nativo con perfiles públicos 493 (90,5 %), tesseract.js con perfiles públicos 491
-  (90,1 %; antes 489 y 1 crítico). Sintéticos: 224/240, 0 críticos. Pruebas: 193 superadas.
+  (90,1 %; antes 489 y 1 crítico). Sintéticos: 224/240, 0 críticos. Pruebas: 194 superadas.
+- Chromium real tras las correcciones, un PDF cada vez (sin bloqueos, sin errores de página, sin
+  procesos huérfanos; separación igual al manifiesto en los 4):
+
+  | PDF | Páginas | Documentos | Duración | Pico de memoria | AUTO_OK / REVISAR / ERROR | Críticos |
+  |---|---|---|---|---|---|---|
+  | e01 | 1 | 1 | 40 s | 1,1 GB | 0 / 1 / 0 | 0 |
+  | e10 | 10 | 10 | 211 s | 1,2 GB | 4 / 6 / 0 | 0 |
+  | e25 | 25 | 24 | 431 s | 1,4 GB | 1 / 23 / 0 | 0 |
+  | e54 | 54 | 52 | 932 s | 1,6 GB | 4 / 48 / 0 | 0 |
 
 ## 2026-10-21 · Lector PDF (Fase 1): validación final
 
@@ -61,7 +70,8 @@ no accede a STEL ni a la base de datos). `main` sin cambios. Catálogo STEL solo
   («Lectura de la web»).
 - Estrés (fuera de git): PDF de 1, 10, 25 y 54 páginas, mixtos (escaneados reales + digitales
   sintéticos), con un albarán de dos páginas y una página en blanco. En Node: separación igual al
-  manifiesto, páginas completas, resultados idénticos a la lectura por separado. Chromium: en curso al hacer este commit.
+  manifiesto, páginas completas, resultados idénticos a la lectura por separado. Chromium: ver la
+  entrada «fallos hallados en Chromium real».
 
 ## 2026-10-21 · Lector PDF (Fase 1): PDF grandes, separación, manuscritos y proveedores por huella
 
