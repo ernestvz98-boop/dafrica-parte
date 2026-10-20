@@ -88,3 +88,37 @@ Opciones de `npm run evaluar`: `--motor=nativo|tesseractjs|navegador` (motor OCR
 `--incluir-sin-revisar`. Un campo cuyo valor esperado no se puede confirmar en el papel va en
 `inciertos` del esperado y no cuenta en las métricas. `pruebas/lote-b.test.js` reproduce con
 datos ficticios cada fallo real del lote B (`pruebas/ayudas-ocr.js` construye las palabras).
+
+## PDF largos en la pantalla temporal
+
+`albaranes/lotes-pdf.js` prepara PDF internos de hasta 10 páginas con una página
+compartida (1–10, 10–19, 19–28…). La página compartida permite unir un documento
+que continúa al otro lado del corte. Se valida cobertura exacta por bloque antes
+de acumular nada. No se deduplica por número de albarán: se unen exclusivamente
+los documentos con una página física compartida; las identidades contradictorias
+bloquean la aceptación. Después se reconstruye cada documento con sus páginas
+originales una sola vez y se interpreta secuencialmente con el lector existente.
+
+Los fallos de separación quedan asociados a su rango de páginas. Los documentos
+cercanos a una frontera fallida no se aceptan como completos; los demás continúan.
+La pantalla muestra resultados incrementales y un resumen final único, con los
+fallos visibles. Los PDF separados se descartan después de interpretar cada
+documento y se cierra el trabajador OCR. El PDF original y las lecturas permanecen
+en RAM hasta abandonar la pantalla. No se añade persistencia ni operaciones STEL.
+
+`pruebas/lotes-pdf.test.js` genera PDF de 11, 20, 25 y 50 páginas, comprueba orden,
+cobertura sin duplicados, continuidad entre bloques, fallos parciales, separación
+inválida/contradictoria, liberación y conexión de la pantalla con los caminos
+digital y OCR (estos últimos con dobles de prueba). Las 100 pruebas anteriores
+permanecen intactas. Total: 111 pruebas; evaluación sintética: 0 fallos críticos.
+
+Límites de la comprobación: no se han invocado servicios de producción ni usado
+albaranes privados. El código de las Edge Functions no está en este repositorio;
+su restricción de 10 páginas se evita preparando las peticiones en el navegador.
+Un bloque con imágenes muy grandes puede superar límites de tamaño del servicio:
+se notifica como fallo parcial. Un único albarán muy largo se reconstruye entero
+para conservar sus validaciones y puede requerir más memoria que un bloque.
+La exactitud de la separación externa y de OCR/IA sobre documentos reales sigue
+necesitando validación con corpus autorizado. No se garantiza cero errores en
+producción a partir de pruebas sintéticas. La nueva carga de pdf-lib usa el CDN
+cdnjs permitido por la CSP; requiere conexión, igual que pdf.js.

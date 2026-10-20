@@ -10,7 +10,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
  root.innerHTML='<div class="card">'+
  '<h3>Interpretar albaranes de PDF · SIN GUARDAR</h3>'+
  '<p class="muted">Modo temporal: separa páginas, lee proveedor, número impreso, fecha, PRY y cada artículo. Conserva los números con coma decimal tal como se imprimen y muestra las lecturas originales si existen diferencias. <b>No archiva PDF, no guarda materiales, no registra costes, no crea albaranes en STEL y no asigna obras.</b></p>'+
- '<label for="pcPreviewFile">PDF a interpretar (máximo 6 MB y 10 páginas por lote)</label>'+
+ '<label for="pcPreviewFile">PDF a interpretar (sin límite de páginas; división automática en bloques)</label>'+
  '<input type="file" id="pcPreviewFile" accept=".pdf,application/pdf">'+
  '<label style="display:flex;align-items:center;gap:8px;margin:12px 0">'+
  '<input type="checkbox" style="width:auto" id="pcPreviewConsent">'+
@@ -90,39 +90,32 @@ renderComprasLotePilot=function renderComprasTemporal(){
  button.addEventListener("click",async()=>{
   const upload=file.files?.[0];
   if(!upload||!consent.checked){status.textContent="Selecciona un PDF y autoriza su análisis temporal.";return}
-  if(!/\.pdf$/i.test(upload.name)||upload.size>6000000||upload.size<100){
-    status.textContent="El archivo debe ser un PDF de hasta 6 MB.";return
+  if(!/\.pdf$/i.test(upload.name)||upload.size<100){
+    status.textContent="El archivo debe ser un PDF válido.";return
   }
   const run=++currentRun;
   button.disabled=true;results.textContent="";status.textContent="Separando páginas del PDF sin guardar archivos…";
   try{
-   const contents=await new Promise((resolve,reject)=>{
-    const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(Error("No se pudo leer el archivo"));reader.readAsDataURL(upload);
-   });
-   const split=await sb("/functions/v1/compras-lote-piloto",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name:upload.name,mime:"application/pdf",data:contents})});
-   if(!Array.isArray(split.documentos)||split.documentos.length<1)
-     throw Error("No se pudieron separar los documentos de este PDF");
-   const pageMap=split.documentos.flatMap(d=>d.paginas||[]);
-   if(new Set(pageMap).size!==pageMap.length||pageMap.length!==split.paginas_pdf)
-     throw Error("El separador encontró páginas repetidas o sin asignar; no se pueden interpretar como albaranes independientes");
-   const tasks=split.documentos.map((d,index)=>({d,index})),out=[];
-   const worker=async()=>{
-    while(tasks.length){
-     const item=tasks.shift();if(!item)break;
-     const {d,index}=item;
-     status.textContent="Interpretando "+(index+1)+" de "+split.documentos.length+
-       " · "+String(d.numero||"documento sin identificar");
-     if(!d.pdf_separado_b64){out[index]={error:"No se pudo separar el PDF de este documento"};continue}
+   const PDFDocument=await pcLoadPdfLib();
+   const split=await window.DafricaAlbaranes.lotesPdf.procesar({
+    PDFDocument,bytes:new Uint8Array(await upload.arrayBuffer()),
+    progreso:t=>{if(run===currentRun)status.textContent=t},
+    separar:(data)=>sb("/functions/v1/compras-lote-piloto",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:upload.name,mime:"application/pdf",data:"data:application/pdf;base64,"+data})}),
+    liberar:()=>window.DafricaAlbaranes.motorNavegador.cerrar(),
+    alResultado:(r,d,i)=>{if(run===currentRun)results.insertAdjacentHTML("beforeend",r?.error?
+      '<p class="error">'+esc(r.error)+'</p>':renderResult(r,d,i))},
+    interpretar:async(d,index,total)=>{
+     let result;
      // PDF digital: lectura exacta del texto. Si todo cuadra no se usa la IA.
      let det=null;
      try{det=await pcLecturaDeterminista(d)}catch(e){console.warn("Lectura determinista no disponible",String(e).slice(0,120))}
      // PDF escaneado: OCR local con el mismo lector (las cifras solo se aceptan si cuadran).
      if(det?.estado==="NO_DIGITAL"){
-       try{det=await pcLecturaOCR(d,t=>{if(run===currentRun)status.textContent="Documento "+(index+1)+" de "+split.documentos.length+" · "+t})}
+       try{det=await pcLecturaOCR(d,t=>{if(run===currentRun)status.textContent="Documento "+(index+1)+" de "+total+" · "+t})}
        catch(e){console.warn("Lectura OCR no disponible",String(e).slice(0,120))}
      }
-     if(det?.estado==="AUTO_OK"){out[index]={estado:"DETERMINISTA",determinista:det};continue}
+     if(det?.estado==="AUTO_OK"){return {estado:"DETERMINISTA",determinista:det}}
      let n=null,rows=null,bands=null,columnHints=null,header=null,profile="",noRef=false,warning="";
      if((d.lineas||[]).length<=5||String(d.proveedor||"").toUpperCase().includes("SALTOKI")){
        try{
@@ -148,12 +141,13 @@ renderComprasLotePilot=function renderComprasTemporal(){
          })
        });
        const value=await res.json().catch(()=>({error:"El servidor no devolvió una respuesta válida"}));
-       if(!res.ok)out[index]={error:value.error||"La interpretación no está disponible",etapa:value.etapa,warning,determinista:det};
-       else out[index]={...value,warning,determinista:det};
-     }catch(e){out[index]={error:String(e?.message||e),warning,determinista:det}}
+       if(!res.ok)result={error:value.error||"La interpretación no está disponible",etapa:value.etapa,warning,determinista:det};
+       else result={...value,warning,determinista:det};
+     }catch(e){result={error:String(e?.message||e),warning,determinista:det}}
+     return result;
     }
-   };
-   await Promise.all(Array.from({length:Math.min(2,tasks.length)},()=>worker()));
+   });
+   const out=split.out;
    if(run!==currentRun)return;
    const interpreted=out.filter(x=>x&&x.estado==="INTERPRETADO_SIN_GUARDAR");
    const full=interpreted.filter(x=>x.lectura_completa).length;
@@ -162,7 +156,7 @@ renderComprasLotePilot=function renderComprasTemporal(){
    const failed=out.length-interpreted.length-deterministic;
    const verifiedLines=interpreted.reduce((n,d)=>n+Number(d.filas_principales_comprobadas||0),0);
    const totalLines=interpreted.reduce((n,d)=>n+Number(d.lineas_detectadas||0),0);
-   results.innerHTML='<p><b>'+esc(split.documentos.length)+' documentos separados.</b> <b>'+esc(deterministic)+
+   results.innerHTML=(split.fallos.length?'<p class="error">Resultado parcial: '+esc(split.fallos.map(f=>'Páginas '+f.inicio+'–'+f.fin+': '+f.error).join(' · '))+'</p>':"")+'<p><b>'+esc(split.documentos.length)+' documentos separados.</b> <b>'+esc(deterministic)+
      ' verificados sin IA (PDF digital u OCR local)</b>, '+esc(interpreted.length)+
      ' interpretados con IA, <b>'+esc(verifiedLines)+' de '+esc(totalLines)+' filas principales contrastadas físicamente</b>, '+
      esc(full)+' documentos con cabecera y líneas verificadas, '+esc(incomplete)+
@@ -171,8 +165,14 @@ renderComprasLotePilot=function renderComprasTemporal(){
        '<div class="module-note sensitive-note"><b>'+esc(split.documentos[i]?.numero||"Documento "+(i+1))+
        ' · Sin interpretación</b><p>'+esc(r.error)+'</p>'+(r.determinista?pcRenderDeterminista(r.determinista):"")+'</div>':renderResult(r,split.documentos[i],i)).join("")+
     '<p class="muted"><b>Próxima etapa (no activada):</b> contrastar lectura con STEL, crear albarán autorizado y enlazarlo a una obra verificada.</p>';
-   status.textContent="Interpretación temporal finalizada. No se han guardado archivos ni materiales en DAFRICA ni se ha modificado STEL.";
+   status.textContent=(split.fallos.length?"Interpretación parcial; hay bloques pendientes. ":"Interpretación temporal finalizada. ")+" No se han guardado archivos ni materiales en DAFRICA ni se ha modificado STEL.";
   }catch(e){status.textContent="No se pudo interpretar el lote: "+String(e?.message||e)}
   finally{button.disabled=false}
  });
 };
+let pcPdfLibPromise=null;
+async function pcLoadPdfLib(){
+ if(!pcPdfLibPromise)pcPdfLibPromise=import("https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.esm.min.js")
+  .then(m=>m.PDFDocument).catch(e=>{pcPdfLibPromise=null;throw e});
+ return pcPdfLibPromise;
+}
