@@ -312,3 +312,61 @@ test("referencia solo de cifras con el formato del proveedor: la unanimidad de l
  const sinFormato=await extraerEscaneado(motorRecortes(pag,({region})=>region[0]<100?[["1300010015",56]]:null),{registro:registroCon(),hoy:HOY});
  assert.ok(sinFormato.lineas[0].referencia.confianza<0.9);
 });
+
+/* Un perfil de formato público no contiene NIF privados: no es un conflicto. */
+test("perfil público sin NIF: usa el formato sin verificar la identidad del proveedor",()=>{
+ const reg=registroCon({nifs:[],formato_numero:"^\\d{6}$"});
+ const r=leer([...cabeceraDoc(),...fila(120,["ALBARÁN",60],["AB26",110],["009876",140],["13/10/2026",190]),...titulos(),...filaPrecio(218)],{registro:reg});
+ assert.equal(r.proveedor.estado,"NIF_NO_REGISTRADO");
+ assert.equal(r.proveedor.id,reg.proveedores[0].id);
+ assert.equal(r.numero.valor,"009876");assert.equal(r.estado,"REVISAR");
+ assert.ok(r.proveedor.confianza<0.9);
+});
+test("NIF configurado que contradice el impreso sigue bloqueando al proveedor",()=>{
+ const reg=registroCon({nifs:['B24555559'],formato_numero:"^\\d{6}$"});
+ const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...filaPrecio(218)],{registro:reg});
+ assert.equal(r.proveedor.estado,"AMBIGUO");assert.equal(r.proveedor.nif,null);assert.equal(r.estado,"REVISAR");
+});
+test('número partido por OCR: une año/serie y sufijo impreso, sin tomar solo el año',()=>{
+ const r=leer([...cabeceraDoc(),...fila(120,['Albarán',400],['2026',450,95,{ancho:18}],['/9123',475,93,{ancho:25}]),...titulos(),...filaPrecio(218)]);
+ assert.equal(r.numero.valor,'2026/9123');assert.equal(r.numero.estado,'OK');
+});
+test('un sufijo lejano no se pega al número de albarán',()=>{
+ const r=leer([...cabeceraDoc(),...fila(120,['Albarán',60],['2026',120,95,{ancho:18}],['/9123',510,93,{ancho:25}]),...titulos(),...filaPrecio(218)]);
+ assert.equal(r.numero.valor,'2026');
+});
+test('nombre de perfil sin NIF y CIF registrado en otro proveedor: conserva el conflicto',()=>{
+ const reg=registroCon({nifs:[]});
+ reg.proveedores.push({id:'OTRO',nombre:'OTRO PROVEEDOR FICTICIO',nifs:[NIF]});
+ const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...filaPrecio(218)],{registro:reg});
+ assert.equal(r.proveedor.estado,'AMBIGUO');assert.equal(r.estado,'REVISAR');
+});
+
+function motorDescuentoAmpliado({desplazamiento=0,cantidad='2,00',descuento='20',sinDescuento=false}={}){
+ const base=[...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,['R-0',60,60],['TUBO',120],['MULTICAPA',150],['2,00',420],['10,00',462],['16,00',560])];
+ const nueva=[...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218+desplazamiento,['R-O',60,60],['TUBO',120],['MULTICAPA',150],[cantidad,420],['10,00',462],...(!sinDescuento?[[descuento,510]]:[]),['16,00',560])];
+ return [{numero:1,anchoPx:595,altoPx:842,dpi:72,async ocr({region=null,escala=1}={}){
+  const ps=region&&region[2]===595&&escala===2?nueva:base;
+  if(!region)return ps;
+  const [x,y,w,h]=region;
+  return ps.filter(p=>p.x0>=x&&p.x1<=x+w&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+ }}];
+}
+test('descuento perdido por rasterización: relectura ampliada rescata el literal sin corregir el código dudoso',async()=>{
+ const r=await extraerEscaneado(motorDescuentoAmpliado(),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].descuento.valor,20);assert.equal(r.lineas[0].cuadre.estado,'VERIFICADO');
+ assert.equal(r.lineas[0].referencia.literal,'R-0');assert.ok(r.lineas[0].referencia.confianza<0.9);
+ assert.equal(r.estado,'REVISAR');
+});
+test('un descuento de otra fila física no se traslada aunque los importes coincidan',async()=>{
+ const r=await extraerEscaneado(motorDescuentoAmpliado({desplazamiento:12}),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].descuento.valor,null);assert.equal(r.lineas[0].cuadre.estado,'DESCUADRE');
+});
+test('la relectura con cantidad distinta no corrige una referencia diferente',async()=>{
+ const r=await extraerEscaneado(motorDescuentoAmpliado({cantidad:'4,00',descuento:'60'}),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].cantidad.valor,2);assert.equal(r.lineas[0].descuento.valor,null);
+});
+test('sin porcentaje impreso en ninguna lectura no se deduce descuento a partir del cuadre',async()=>{
+ const r=await extraerEscaneado(motorDescuentoAmpliado({sinDescuento:true}),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].descuento.valor,null);assert.equal(r.lineas[0].cuadre.estado,'DESCUADRE');
+});

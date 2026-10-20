@@ -88,3 +88,107 @@ Opciones de `npm run evaluar`: `--motor=nativo|tesseractjs|navegador` (motor OCR
 `--incluir-sin-revisar`. Un campo cuyo valor esperado no se puede confirmar en el papel va en
 `inciertos` del esperado y no cuenta en las métricas. `pruebas/lote-b.test.js` reproduce con
 datos ficticios cada fallo real del lote B (`pruebas/ayudas-ocr.js` construye las palabras).
+
+## PDF largos en la pantalla temporal
+
+`albaranes/lotes-pdf.js` prepara PDF internos de hasta 10 páginas con una página
+compartida (1–10, 10–19, 19–28…). La página compartida permite unir un documento
+que continúa al otro lado del corte. Se valida cobertura exacta por bloque antes
+de acumular nada. No se deduplica por número de albarán: se unen exclusivamente
+los documentos con una página física compartida; las identidades contradictorias
+bloquean la aceptación. Después se reconstruye cada documento con sus páginas
+originales una sola vez y se interpreta secuencialmente con el lector existente.
+
+Los fallos de separación quedan asociados a su rango de páginas. Los documentos
+cercanos a una frontera fallida no se aceptan como completos; los demás continúan.
+La pantalla muestra resultados incrementales y un resumen final único, con los
+fallos visibles. Los PDF separados se descartan después de interpretar cada
+documento y se cierra el trabajador OCR. El PDF original y las lecturas permanecen
+en RAM hasta abandonar la pantalla. No se añade persistencia ni operaciones STEL.
+
+`pruebas/lotes-pdf.test.js` genera PDF de 11, 20, 25 y 50 páginas, comprueba orden,
+cobertura sin duplicados, continuidad entre bloques, fallos parciales, separación
+inválida/contradictoria, liberación y conexión de la pantalla con los caminos
+digital y OCR (estos últimos con dobles de prueba). Las 100 pruebas anteriores
+permanecen intactas. Total: 111 pruebas; evaluación sintética: 0 fallos críticos.
+
+Límites de la comprobación: no se han invocado servicios de producción ni usado
+albaranes privados. El código de las Edge Functions no está en este repositorio;
+su restricción de 10 páginas se evita preparando las peticiones en el navegador.
+Un bloque con imágenes muy grandes puede superar límites de tamaño del servicio:
+se notifica como fallo parcial. Un único albarán muy largo se reconstruye entero
+para conservar sus validaciones y puede requerir más memoria que un bloque.
+La exactitud de la separación externa y de OCR/IA sobre documentos reales sigue
+necesitando validación con corpus autorizado. No se garantiza cero errores en
+producción a partir de pruebas sintéticas. La nueva carga de pdf-lib usa el CDN
+cdnjs permitido por la CSP; requiere conexión, igual que pdf.js.
+
+## Regresión de escaneos girados y perfiles sin NIF privado
+
+Corrección posterior al ensayo con un PDF autorizado de 11 páginas escaneadas de
+lado (el archivo, imágenes y lecturas quedan fuera del repositorio):
+
+- Un perfil público sin NIF no se confunde con un CIF contradictorio. Se utiliza
+  su formato, conservando `NIF_NO_REGISTRADO`, confianza inferior a 0,9 y bloqueo
+  de `AUTO_OK`. Un CIF configurado contradictorio o registrado en otro proveedor
+  sigue bloqueado.
+- Un número partido por OCR como `2026 /1234` conserva el sufijo contiguo; no se
+  unen cifras alejadas. Se conserva la confianza más baja de ambas partes.
+- La copia enviada a geometría/IA recibe la orientación detectada por OCR. Solo
+  se usan número/fecha locales como pistas si están OK con confianza >= 0,9.
+- La lectura OCR local parcial se muestra abierta con sus advertencias; la IA
+  queda como comparación. Una fila de baja confianza deja de llamarse «Correcta».
+
+Verificación local del PDF real: 19 líneas recuperadas en las páginas con tabla,
+18 con cuadre y una sin precios. La página manuscrita no produce una tabla local
+fiable; códigos y descripciones de baja confianza siguen marcados. Esto no es una
+certificación de exactitud completa ni una prueba del proveedor externo de IA.
+Se utiliza el motor Tesseract.js y modelo de la web, con rasterización Poppler;
+la rasterización del navegador puede generar diferencias y requiere una nueva
+prueba de extremo a extremo en la web publicada.
+
+Total tras estas regresiones: 118 pruebas aprobadas; evaluación sintética: cero
+fallos críticos aceptados. Los casos públicos usan valores ficticios. No se
+invocan servicios de producción durante las pruebas automáticas.
+
+## Comprobación automática sin intervención por documento
+
+El botón ejecuta separación, orientación, relecturas dirigidas y ampliadas,
+cuadres y contraste de lectura local/IA. Cuando el separador agrupa varias
+páginas, se revisan sus cabeceras: distinto número/fecha/CIF separa documentos;
+continuidad sin prueba suficiente impide aceptar automáticamente el grupo.
+
+`albaranes/verificacion.js` contrasta CIF y referencia/descripción contra
+catálogos completos recibidos de `compras-catalogo-lectura`. Esta función nueva
+solo permite GET sobre `suppliers` y `products` de STEL; exige sesión válida y
+permiso `costes.ver`. La única llamada POST a Supabase es la consulta de permisos
+existente `mis_permisos`. No usa service-role, no recibe PDF y no guarda nada.
+Devuelve únicamente id, CIF/nombre y referencia/descripción, sin precios.
+
+La paginación continúa hasta una respuesta vacía (no presupone que una página
+corta sea el final). Páginas repetidas, errores y límites se declaran incompletos.
+El catálogo se consulta una vez por ejecución y solo existe en memoria.
+
+Una referencia se valida si el código fue observado en OCR y existe una única
+coincidencia con descripción equivalente en el catálogo completo. No se crean
+variantes por sustituciones O/0 inventadas. No se rellenan precios o cantidades
+a partir del catálogo ni se elimina ningún descuadre. Un dato no resuelto tras
+las comprobaciones termina como «No resuelto automáticamente», sin aprobación
+manual ni creación en STEL. La anotación PRY se muestra como candidato literal;
+no confirma ni asigna una obra.
+
+Regresión real con pdf.js 4.10.38 + Tesseract.js y el modelo de la web: se
+reproduce el descuento omitido de un escaneo y se recupera el porcentaje impreso
+por relectura ampliada. El ensayo de las 11 páginas recupera 19 artículos (18 con
+cuadre, uno sin precios); sigue sin haber una tabla fiable en la página manuscrita.
+Se confirma por cabeceras la separación de los dos últimos albaranes. Las imágenes
+se generan con pdf.js y canvas de Node: los resultados deben contrastarse también
+con el navegador del usuario. No se han enviado documentos privados a los tests
+públicos ni a nuevos servicios.
+
+Validación: 143 pruebas aprobadas y evaluación sintética con cero fallos críticos.
+Incluye autorización, ausencia de escrituras, paginación incompleta, CIF duplicado,
+artículos ambiguos, descuadres, discrepancias IA/OCR, separación y conservación de
+ceros del PRY. El contraste con los catálogos REALES requiere la sesión autorizada
+de la aplicación; las pruebas de esta fase usan catálogos ficticios. No se afirma
+haber verificado el catálogo real ni haber conseguido lectura perfecta del manuscrito.

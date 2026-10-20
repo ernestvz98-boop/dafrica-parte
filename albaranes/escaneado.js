@@ -87,11 +87,25 @@ function combinarLineas(principal,lecturas){
  const parejas=otras.map(r=>emparejar(principal.lineas,r.lineas));
  principal.lineas.forEach((l,i)=>{
   const alternativas=parejas.map(p=>p[i]).filter(Boolean);
+  const a=l.cantidad?.caja;
+  if(l.referencia)l.referencia.alternativas_ocr=[...new Set(alternativas.filter(o=>{
+   const b=o.cantidad?.caja;
+   return a&&b&&l.pagina===o.pagina&&Math.abs(a[1]-b[1])<=0.6*Math.min(a[3],b[3]);
+  }).map(o=>o.referencia?.literal).filter(Boolean))];
   l.lecturas_coincidentes=1+alternativas.filter(o=>claveLinea(o)===claveLinea(l)&&o.cantidad?.valor===l.cantidad?.valor).length;
   // Cifras que cuadran en otra lectura de la misma línea.
   if(l.cuadre?.estado!=="VERIFICADO"){
+   const mismaFilaParaDescuento=o=>{
+    // Un código O/0 dudoso no debe impedir recuperar un descuento IMPRESO de
+    // la misma fila física. No se corrige ese código ni se eleva su confianza.
+    const a=l.cantidad?.caja,b=o.cantidad?.caja;
+    return l.descuento?.estado==="VACIO"&&a&&b&&l.pagina===o.pagina&&
+     Math.abs(a[1]-b[1])<=0.6*Math.min(a[3],b[3])&&
+     M("normalizar").canon(l.descripcion?.literal)===M("normalizar").canon(o.descripcion?.literal)&&
+     ["cantidad","precio","importe"].every(k=>l[k]?.valor!=null&&l[k].valor===o[k]?.valor);
+   };
    const verificada=alternativas.find(o=>o.cuadre?.estado==="VERIFICADO"&&
-    (!M("normalizar").canon(l.referencia?.literal)||M("normalizar").canon(o.referencia?.literal)===M("normalizar").canon(l.referencia?.literal)));
+    (!M("normalizar").canon(l.referencia?.literal)||M("normalizar").canon(o.referencia?.literal)===M("normalizar").canon(l.referencia?.literal)||mismaFilaParaDescuento(o)));
    if(verificada){
     for(const k of ["cantidad","precio","descuento","subtotal","importe","cuadre"])l[k]=verificada[k];
     if(l.referencia?.estado==="VACIO"&&verificada.referencia?.estado!=="VACIO")l.referencia=verificada.referencia;
@@ -372,6 +386,15 @@ async function extraerEscaneado(paginas,opciones={}){
   const banda=paginaDesdePalabras(palabras,{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi,desplazamiento:[0,y0]});
   const r=extraerDePaginas([banda],opciones);r._lectura="banda_tabla_psm6";
   lecturas.push(r);
+  // pdf.js puede rasterizar una cifra pequeña de forma distinta a Poppler.
+  // Si falta un descuento y la fila no cuadra, releer la tinta ampliada;
+  // nunca deducir ni asignar el porcentaje a partir del importe.
+  if(principal.lineas.some(l=>l.cuadre?.estado==="DESCUADRE"&&l.descuento?.estado==="VACIO")){
+   const palabras2=await p.ocr({psm:6,region,escala:2});
+   const ampliada=paginaDesdePalabras(palabras2,{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi,desplazamiento:[0,y0]});
+   const r2=extraerDePaginas([ampliada],opciones);r2._lectura="banda_tabla_psm6_x2";
+   lecturas.push(r2);
+  }
  }
  // Relecturas de cabecera (sobre la tabla) y pie (bajo la tabla): ahí están CIF, número y
  // fecha; leídos por zonas, el OCR no se mezcla con el resto de la página.
@@ -493,5 +516,18 @@ async function extraerEscaneado(paginas,opciones={}){
  return principal;
 }
 
-return {extraerEscaneado,LECTURAS};
+// Prelectura de cabecera para comprobar agrupaciones multipágina del separador.
+// No acepta documentos ni sustituye las lecturas completas de extraerEscaneado.
+async function leerCabeceras(paginas,opciones={}){
+ const {extraerDePaginas}=M("extraer"),{paginaDesdePalabras}=M("ocr"),out=[];
+ for(const p of paginas){
+  const o=await orientar(p),pg=o.pagina;
+  const pagina=paginaDesdePalabras(await pg.ocr({psm:4}),{numero:p.numero,anchoPx:pg.anchoPx,altoPx:pg.altoPx,dpi:pg.dpi});
+  const r=extraerDePaginas([pagina],opciones);
+  out.push({pagina:p.numero,numero:r.numero,fecha:r.fecha,proveedor:r.proveedor,
+   titulo:pagina.lineas.some(l=>/ALBAR[AÁ]N/i.test(l.texto))});
+ }
+ return out;
+}
+return {extraerEscaneado,leerCabeceras,LECTURAS};
 });

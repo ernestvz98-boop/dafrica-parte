@@ -23,13 +23,14 @@ test("con solo la huella del NIF (sin NIF en claro) se reconoce al proveedor y a
  assert.equal(r.proveedor.nif_propio_detectado,NIF_PROPIO);
 });
 
-test("sin NIF ni huella: el CIF junto al nombre del proveedor se acepta; el CIF del cliente nunca",()=>{
- const ok=leer([...membrete(),...cliente(),...etiquetas(),...titulos(),...linea(218)],{registro:publico({conHuella:false,propio:false})});
- assert.equal(ok.proveedor.nif,NIF);assert.equal(ok.proveedor.via,"nombre_y_cif_leido");
- // El CIF del proveedor no se lee: solo queda el de DAFRICA, lejos del nombre → no se acepta.
- const sinCif=leer([...fila(40,["PROVEEDOR",60],["FICTICIO,",115],["S.L.",165]),...cliente(),...etiquetas(),...titulos(),...linea(218)],{registro:publico({conHuella:false,propio:false})});
- assert.notEqual(sinCif.proveedor.nif,NIF_PROPIO);
- assert.ok(!(sinCif.proveedor.confianza>=0.9&&sinCif.proveedor.nif));
+test("sin NIF ni huella: el CIF junto al nombre se toma como leído pero sin verificar; el CIF del cliente nunca",()=>{
+ const reg=publico({conHuella:false,propio:false});
+ const r=leer([...membrete(),...cliente(),...etiquetas(),...titulos(),...linea(218)],{registro:reg});
+ // Dos CIF en el encabezado: se elige el que está junto al nombre del proveedor, sin darlo por verificado.
+ assert.equal(r.proveedor.nif,NIF);assert.equal(r.proveedor.estado,"NIF_NO_REGISTRADO");assert.ok(r.proveedor.confianza<0.9);
+ // El CIF del proveedor no se lee: solo queda el de DAFRICA → nunca aceptado como emisor.
+ const sinCif=leer([...fila(40,["PROVEEDOR",60],["FICTICIO,",115],["S.L.",165]),...cliente(),...etiquetas(),...titulos(),...linea(218)],{registro:reg});
+ assert.ok(!(sinCif.proveedor.confianza>=0.9&&sinCif.proveedor.nif===NIF_PROPIO));
 });
 
 test("NIF válido no registrado: se conserva pero queda en revisión (no se acepta solo)",()=>{
