@@ -3,6 +3,19 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Publicación en producción del lector de albaranes
+
+**Producción:** publicado en `main` con autorización expresa del usuario (commit de fusión
+`c66a4a0`; despliegue de GitHub Pages correcto). Copias previas del `main` anterior:
+`respaldo/main-antes-lector-20261021` y `respaldo/main-antes-publicacion-20261021`.
+Reversión: `git revert -m 1 c66a4a0` y `git push origin HEAD:main`. Sin cambios en STEL, en la
+base de datos ni en las funciones Edge.
+
+- `.claude/settings.json`: permiso `Bash(git push origin HEAD:main)` para publicar sin
+  confirmación. Antes de cada publicación: rama de respaldo y pruebas completas.
+- Antes de publicar: 195 pruebas superadas y contenido idéntico al de la rama validada.
+- Versión visible: «Versión 20261021lector5» bajo el título del módulo «📄 Lector de albaranes».
+
 ## 2026-10-21 · Lector de albaranes como módulo de DAFRICA Control
 
 **Producción:** sin cambios. Todo sigue en la rama de desarrollo hasta la revisión del usuario
