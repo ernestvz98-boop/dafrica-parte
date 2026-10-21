@@ -15,7 +15,7 @@ respuestas de visión y de STEL) se han medido aquí, sin pedir lecturas nuevas:
 - El catálogo de STEL **no contiene las referencias de los proveedores** (0 de 27): son artículos
   propios de DAFRICA. No sirve para validar códigos impresos por el proveedor.
 - Visión ↔ OCR (`escaneado.coincidenciaVision`, común a cabecera y líneas): igualdad exacta
-  antes que sin puntuación («7.899,9000» frente a «7,899,9000»); descripciones con las mismas
+  antes que sin puntuación («1.234,5600» frente a «1,234,5600», ejemplo ficticio); descripciones con las mismas
   letras y cifras salvo espacios o signos sueltos en los extremos; número «2026 /9294» unido.
   Reproducido sobre la lectura del usuario: 6 aceptaciones nuevas, las 6 correctas.
 - CIF impreso ilegible con proveedor identificado por su nombre registrado: se completa si la
