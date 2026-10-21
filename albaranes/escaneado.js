@@ -22,7 +22,7 @@
  else{root.DafricaAlbaranes=root.DafricaAlbaranes||{};root.DafricaAlbaranes.escaneado=api;}
 })(typeof globalThis!=="undefined"?globalThis:this,function(root,req){
 
-const M=k=>req?req("./"+{extraer:"extraer.js",ocr:"ocr.js",normalizar:"normalizar.js"}[k]):root.DafricaAlbaranes[k];
+const M=k=>req?req("./"+{extraer:"extraer.js",ocr:"ocr.js",normalizar:"normalizar.js",manuscritos:"manuscritos.js"}[k]):root.DafricaAlbaranes[k];
 // La binarización adaptativa (Sauvola) rescata rótulos y cifras sobre fondos grises.
 const LECTURAS=[{psm:4},{psm:6},{psm:3},{psm:4,umbral:"sauvola"}];
 
@@ -93,6 +93,14 @@ function combinarLineas(principal,lecturas){
    return a&&b&&l.pagina===o.pagina&&Math.abs(a[1]-b[1])<=0.6*Math.min(a[3],b[3]);
   }).map(o=>o.referencia?.literal).filter(Boolean))];
   l.lecturas_coincidentes=1+alternativas.filter(o=>claveLinea(o)===claveLinea(l)&&o.cantidad?.valor===l.cantidad?.valor).length;
+  // Unidad impresa que esta lectura no ve («ml» leído «mi») y otras lecturas de la MISMA fila física
+  // (misma cantidad, misma altura) sí: se toma si todas las que la leen coinciden. Nunca se deduce.
+  if(l.unidad?.estado==="VACIO"&&l.cantidad?.valor!=null&&a){
+   const vistas=alternativas.filter(o=>o.unidad?.estado==="OK"&&o.unidad.valor&&o.cantidad?.valor===l.cantidad.valor&&o.pagina===l.pagina&&
+    o.cantidad?.caja&&Math.abs(a[1]-o.cantidad.caja[1])<=0.6*Math.min(a[3],o.cantidad.caja[3]));
+   const distintas=[...new Set(vistas.map(o=>String(o.unidad.valor).toLowerCase()))];
+   if(distintas.length===1)l.unidad={...vistas[0].unidad,notas:[...(vistas[0].unidad.notas||[]),"Unidad leída en otra lectura OCR de la misma fila ("+vistas.length+")"]};
+  }
   // Cifras que cuadran en otra lectura de la misma línea.
   if(l.cuadre?.estado!=="VERIFICADO"){
    const mismaFilaParaDescuento=o=>{
@@ -194,7 +202,7 @@ function candidatoDe(campo,texto,ctx){
   const orden=[...tokens].sort((a,b)=>d(a,ctx.literal)-d(b,ctx.literal));
   return d(orden[0],ctx.literal)<d(orden[1],ctx.literal)?orden[0]:null;
  }
- const t=tokens.join(" ");
+ const t=campo==="descripcion"?M("extraer").restituirGlifos(tokens.join(" "),perfil):tokens.join(" ");
  return t||null;
 }
 async function resolverCampo(p,campo,cajas,ctx){
@@ -202,7 +210,16 @@ async function resolverCampo(p,campo,cajas,ctx){
  for(const caja of cajas){
   for(const r of await releerCaja(p,caja,LISTAS[campo])){
    const v=candidatoDe(campo,r.texto,ctx);
-   if(v)validas.push({...r,valor:v,caja});
+   if(!v)continue;
+   // La palabra con un símbolo que el OCR no conoce (Ø) tiene confianza baja por definición:
+   // si el perfil del proveedor lo explica, su confianza no cuenta (el resto de palabras sí).
+   let conf=r.conf;
+   if(campo==="descripcion"&&ctx.perfil?.glifos_ocr&&r.palabras){
+    const R=M("extraer").restituirGlifos;
+    const otras=r.palabras.filter((w,i)=>R((i?r.palabras[i-1].texto+" ":"")+w.texto,ctx.perfil)===(i?r.palabras[i-1].texto+" ":"")+w.texto);
+    if(otras.length&&otras.length<r.palabras.length)conf=Math.min(...otras.map(w=>w.conf));
+   }
+   validas.push({...r,conf,valor:v,caja});
   }
  }
 
@@ -217,7 +234,9 @@ async function resolverCampo(p,campo,cajas,ctx){
  const distintos=[...new Set(validas.map(v=>v.valor))];
  if(distintos.length>1)return {conflicto:distintos};
  const mediana=[...validas.map(v=>v.conf)].sort((a,b)=>a-b)[Math.floor(validas.length/2)];
- if(ctx.validacionEstructural&&validas.length>=8&&mediana>=40)return resultado(validas,mediana);
+ // Referencia solo de cifras con el formato del proveedor: unanimidad de las 6 estrategias.
+ const formatoRef=campo==="referencia"&&ctx.perfil?.formato_referencia&&new RegExp(ctx.perfil.formato_referencia).test(distintos[0]||"")&&/^\d+$/.test(distintos[0]||"");
+ if((ctx.validacionEstructural&&validas.length>=8||formatoRef&&validas.length>=6)&&mediana>=40)return resultado(validas,mediana);
  return null;
 }
 async function segundaFase(principal,paginas,lecturas,opciones){
@@ -227,6 +246,7 @@ async function segundaFase(principal,paginas,lecturas,opciones){
  const N=M("normalizar");
  const resueltos=[];
  // Cabecera: número y fecha. Cajas: las de todas las lecturas que vieron algo en ese campo.
+ const pendientesCabecera=[];
  for(const campo of ["numero","fecha"]){
   const actual=principal[campo];
   if(actual?.estado==="OK"&&(actual.confianza??0)>=0.9)continue;
@@ -241,9 +261,17 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   const cajas=[...new Map(conCaja.map(c=>[c.map(v=>Math.round(v/4)).join(","),c])).values()].slice(0,4);
   if(!cajas.length)continue;
   const r=await resolverCampo(pag,campo,cajas,{perfil,opcionesFecha,validacionEstructural:campo==="fecha"||!!perfil?.formato_numero});
-  if(!r||r.conflicto){if(r?.conflicto)actual.motivos=[...(actual.motivos||[]),"Relecturas con valores distintos: "+r.conflicto.join(" | ")];continue;}
+  const valida=v=>v!=null&&v!=="";
+  if(!r||r.conflicto){
+   if(r?.conflicto)actual.motivos=[...(actual.motivos||[]),"Relecturas con valores distintos: "+r.conflicto.join(" | ")];
+   const cand=[actual?.estado==="OK"?actual.valor:null,...(r?.conflicto||[])].filter(valida);
+   if(cand.length)pendientesCabecera.push({campo,candidatos:cand,caja:actual?.caja||cajas[0]});
+   continue;
+  }
   if(actual?.estado==="OK"&&N.canon(actual.valor)!==N.canon(r.valor)){
-   actual.motivos=[...(actual.motivos||[]),"La relectura dirigida da «"+r.valor+"»"];continue;
+   actual.motivos=[...(actual.motivos||[]),"La relectura dirigida da «"+r.valor+"»"];
+   pendientesCabecera.push({campo,candidatos:[actual.valor,r.valor],caja:actual.caja||cajas[0]});
+   continue;
   }
   const valor=campo==="fecha"?r.valor:r.valor.replace(/\s*\/\s*/g,"/");
   principal[campo]={...(actual||{}),literal:r.textos[0],valor,estado:"OK",caja:r.caja,motivos:[],
@@ -254,11 +282,14 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   resueltos.push(campo);
  }
  // Líneas: código y descripción leídos con poca confianza (no hay cuadre que los confirme).
+ const pendientes=[];
  for(const l of principal.lineas){
   for(const campo of ["referencia","descripcion"]){
    const c=l[campo];
    if(!c||c.estado!=="OK"||(c.confianza??1)>=0.9||!c.caja)continue;
    const r=await resolverCampo(pag,campo,[c.caja],{perfil,opcionesFecha,literal:c.literal});
+   // Sin resolver: candidato a la comprobación por un segundo motor (visión del recorte).
+   if(!r||r.conflicto)pendientes.push({l,campo,candidatos:[c.valor??c.literal,...(r?.conflicto||[]),...(campo==="referencia"?c.alternativas_ocr||[]:[])].filter(Boolean)});
    if(!r)continue;
    if(r.conflicto){l[campo]={...c,motivos:[...(c.motivos||[]),"Relecturas fiables distintas: "+r.conflicto.join(" | ")]};continue;}
    // Una referencia no cambia de número de palabras (la relectura no debe arrastrar la celda vecina).
@@ -267,10 +298,56 @@ async function segundaFase(principal,paginas,lecturas,opciones){
    l[campo]={...c,literal:r.valor,valor:r.valor,
     notas:[...(c.notas||[]),...(corregido?["Corregido por relectura dirigida (lectura inicial «"+c.literal+"»)"]:[])],
     resolucion:{metodo:"relectura_dirigida",confianza:0.93,estrategias:r.estrategias,conf_ocr_min:r.conf,lectura_inicial:c.literal,
-     evidencias:["Mismo texto en "+r.estrategias.length+" relecturas fiables (confianza ≥ 80) de la celda",
+     evidencias:[r.conf>=80?"Mismo texto en "+r.estrategias.length+" relecturas fiables (confianza ≥ 80) de la celda":
+       "Unanimidad de las "+r.estrategias.length+" relecturas de la celda y formato de referencia del proveedor ("+perfil?.formato_referencia+")",
       ...(r.descartadas.length?["Relecturas de baja confianza ignoradas: "+r.descartadas.join(", ")]:[])]}};
    resueltos.push("linea "+l.fila+" "+campo+(corregido?" (corregido)":""));
   }
+ }
+ // Segundo motor independiente (visión del RECORTE de la celda, nunca la página): se acepta un
+ // texto solo si coincide exactamente con alguna lectura OCR de esa celda. Nunca cifras
+ // económicas; nunca una variante O/0, S/5… que el OCR no haya visto.
+ // Número y fecha en conflicto (p. ej. «3504» / «3904»): la visión del recorte decide solo entre
+ // los candidatos del OCR y su lectura debe cumplir el formato del proveedor o ser una fecha válida.
+ for(const x of pendientesCabecera)pendientes.push({...x,cabecera:true,l:{[x.campo]:{caja:x.caja},fila:"cabecera"}});
+ if(typeof opciones.vision==="function"&&pendientes.length&&typeof pag.recortePng==="function"){
+  const k=pag.dpi/72,recortes=pendientes.map(x=>{
+   const [x0,y,x1,alto]=x.l[x.campo].caja;
+   const rx0=Math.max(0,Math.floor((x0-0.6*alto)*k)),rx1=Math.min(pag.anchoPx,Math.ceil((x1+0.6*alto)*k));
+   const ry0=Math.max(0,Math.floor((y-1.3*alto)*k)),ry1=Math.min(pag.altoPx,Math.ceil((y+0.45*alto)*k));
+   return pag.recortePng([rx0,ry0,rx1-rx0,ry1-ry0]);
+  });
+  const lecturas=[];
+  try{for(let i=0;i<recortes.length;i+=8)for(const v of await opciones.vision(recortes.slice(i,i+8),{modo:"impreso"})||[])
+   if(Number.isInteger(v.indice))lecturas[i+v.indice]=String(v.texto||"");}
+  catch(e){principal.incidencias=[...(principal.incidencias||[]),"Visión de campos dudosos no disponible: "+String(e?.message||e).slice(0,100)];}
+  const igual=(campo,a,b)=>campo==="referencia"?N.canon(a)===N.canon(b)&&N.canon(a)!=="":
+   String(a).replace(/\s+/g," ").trim()===String(b).replace(/\s+/g," ").trim()&&String(a).trim()!=="";
+  pendientes.forEach((x,i)=>{
+   let v=lecturas[i];if(v==null)return;
+   if(x.cabecera){
+    // Valor de la visión normalizado y validado igual que el OCR; debe ser uno de los candidatos.
+    const cv=candidatoDe(x.campo,v,{perfil,opcionesFecha});
+    const iguales=[...new Set(x.candidatos)].filter(c=>cv&&(x.campo==="fecha"?c===cv:N.canon(c)===N.canon(cv)));
+    if(iguales.length!==1)return;
+    const actual=principal[x.campo]||{};
+    principal[x.campo]={...actual,valor:x.campo==="fecha"?iguales[0]:String(iguales[0]).replace(/\s*\/\s*/g,"/"),literal:actual.literal||v,estado:"OK",
+     motivos:[],caja:x.caja,resolucion:{metodo:"vision_coincide_ocr",confianza:0.95,
+      evidencias:["Visión del recorte de la casilla: «"+v+"»","Coincide con una lectura OCR: «"+iguales[0]+"»",
+       "Lecturas OCR en conflicto: "+[...new Set(x.candidatos)].join(" | "),
+       x.campo==="fecha"?"Fecha válida":perfil?.formato_numero?"Cumple el formato de número del proveedor ("+perfil.formato_numero+")":"Valor con forma de número de albarán"]}};
+    resueltos.push(x.campo+" (visión = OCR)");
+    return;
+   }
+   const coincide=[...new Set(x.candidatos)].filter(cand=>igual(x.campo,cand,v));
+   if(coincide.length!==1)return;
+   const c=x.l[x.campo];
+   x.l[x.campo]={...c,literal:coincide[0],valor:coincide[0],motivos:(c.motivos||[]).filter(m=>!/^Relecturas fiables distintas/.test(m)),
+    resolucion:{metodo:"vision_coincide_ocr",confianza:0.95,lectura_inicial:c.literal,
+     evidencias:["Visión del recorte de la celda: «"+v+"»","Coincide exactamente con una lectura OCR independiente de la misma celda",
+      ...(x.candidatos.length>1?["Lecturas OCR consideradas: "+[...new Set(x.candidatos)].join(" | ")]:[])]}};
+   resueltos.push("linea "+x.l.fila+" "+x.campo+" (visión = OCR)");
+  });
  }
  return resueltos;
 }
@@ -312,6 +389,18 @@ async function extraerEscaneado(paginas,opciones={}){
   const r=extraerDePaginas(pags,opciones);r._lectura="pagina_psm"+conf.psm+(conf.umbral?"_"+conf.umbral:"");
   Object.defineProperty(r,"_pags",{value:pags,enumerable:false});
   lecturas.push(r);
+ }
+ // CIF de DAFRICA reconocido en alguna lectura (junto a su nombre o en el bloque del cliente):
+ // se descarta como emisor en todas las lecturas de este albarán.
+ const propios=[...new Set(lecturas.map(r=>r.proveedor?.nif_propio_detectado).filter(n=>n&&/^[A-HJ-NP-SUVW]\d{7}[0-9A-J]$/.test(n)))];
+ if(propios.length){
+  opciones={...opciones,nifsPropios:propios};
+  lecturas.forEach((r,i)=>{
+   if(!r._pags||!(r.proveedor?.candidatos||[]).some(n=>propios.includes(n)))return;
+   const r2=M("extraer").extraerDePaginas(r._pags,opciones);r2._lectura=r._lectura;
+   Object.defineProperty(r2,"_pags",{value:r._pags,enumerable:false});
+   lecturas[i]=r2;
+  });
  }
  // Cabecera de tabla ilegible en una lectura (banda gris) pero leída en otra: se trasladan
  // los títulos (posición incluida) a la lectura que no la tiene y se vuelve a extraer.
@@ -478,6 +567,12 @@ async function extraerEscaneado(paginas,opciones={}){
  const resueltos=await segundaFase(principal,paginas,lecturas,opciones);
  if(resueltos.length){principal.validaciones_extra=principal.validaciones_extra||[];finalizar(principal);}
  principal.segunda_fase=resueltos;
+ // Anotaciones manuscritas (códigos de obra y de STEL): solo con un motor de visión de recortes.
+ if(opciones.vision){
+  try{principal.manuscritos=await M("manuscritos").leerManuscritos(paginas,principal,opciones.vision,
+   {catalogoObras:opciones.catalogoObras||null,albaranStel:opciones.albaranStel||null});}
+  catch(e){principal.manuscritos=null;principal.incidencias=[...(principal.incidencias||[]),"No se han podido leer los manuscritos: "+String(e?.message||e).slice(0,120)];}
+ }
  principal.orientacion=orientacion;
  const giradas=orientacion.filter(o=>o.grados);
  if(giradas.length)principal.incidencias.push("Página(s) escaneada(s) girada(s) y enderezada(s): "+giradas.map(o=>o.pagina+" ("+o.grados+"°)").join(", "));

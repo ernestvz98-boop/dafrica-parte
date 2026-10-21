@@ -44,6 +44,8 @@ for t in tramos:
   if unidos and t[0]-unidos[-1][1]<=15:unidos[-1][1]=t[1]
   else:unidos.append(t)
 print(json.dumps([t for t in unidos if 12<=t[1]-t[0]<=150]))`;
+const PIL_GRIS="import sys\nfrom PIL import Image\nim=Image.open(sys.argv[1]).convert('L');f=int(sys.argv[2]);im=im.resize((im.width//f,im.height//f),Image.BOX)\nsys.stdout.buffer.write(im.width.to_bytes(4,'big')+im.height.to_bytes(4,'big')+im.tobytes())";
+const PIL_RECORTE_PNG="import sys,io\nfrom PIL import Image\nb=io.BytesIO();Image.open(sys.argv[1]).crop(tuple(map(int,sys.argv[2:6]))).save(b,'PNG');sys.stdout.buffer.write(b.getvalue())";
 function tamPng(archivo){const b=fs.readFileSync(archivo);return {ancho:b.readUInt32BE(16),alto:b.readUInt32BE(20)};}
 function numeroPaginas(pdf){return +String(execFileSync("pdfinfo",[pdf])).match(/Pages:\s+(\d+)/)[1];}
 
@@ -59,7 +61,17 @@ function crearPaginas(pdf,leer,{cache=path.join(path.dirname(pdf),".cache"),rend
   const png=render==="navegador"?path.join(cache,"navegador","nav-p"+n+".png"):path.join(cache,`${huella}-p${n}.png`);
   if(render==="navegador"&&!fs.existsSync(png))throw Error("Falta "+png+": exporta antes las páginas desde el navegador");
   if(!fs.existsSync(png))execFileSync("pdftoppm",["-r",String(DPI),"-gray","-png","-f",String(n),"-l",String(n),"-singlefile",pdf,png.replace(/\.png$/,"")]);
-  paginas.push(pagina(n,png,`${huella}-p${n}`,0));
+  // Una página con la MISMA imagen que otra ya leída (copiada a otro PDF) reutiliza sus lecturas
+  // en caché: el OCR depende solo de la imagen.
+  let id=`${huella}-p${n}`;
+  if(render!=="navegador"){
+   const indice=path.join(cache,"indice-imagenes.json");
+   const mapa=fs.existsSync(indice)?JSON.parse(fs.readFileSync(indice,"utf8")):{};
+   const clave=crypto.createHash("sha256").update(fs.readFileSync(png)).digest("hex").slice(0,24);
+   if(mapa[clave]&&fs.existsSync(path.join(cache,mapa[clave]+".png")))id=mapa[clave];
+   else if(mapa[clave]!==id){mapa[clave]=id;fs.writeFileSync(indice,JSON.stringify(mapa));}
+  }
+  paginas.push(pagina(n,id===`${huella}-p${n}`?png:path.join(cache,id+".png"),id,0));
  }
  function pagina(n,png,id,rotacion){
   const {ancho,alto}=tamPng(png);
@@ -71,6 +83,17 @@ function crearPaginas(pdf,leer,{cache=path.join(path.dirname(pdf),".cache"),rend
     const f=path.join(cache,id+"-bandas.json");
     if(!fs.existsSync(f))fs.writeFileSync(f,execFileSync("python3",["-c",PIL_BANDAS,png]));
     return JSON.parse(fs.readFileSync(f,"utf8"));
+   },
+   // Imagen en grises reducida (detección de manuscritos): {ancho, alto, datos, dpi}.
+   gris(factor=4){
+    const f=path.join(cache,id+"-gris"+factor+".raw");
+    if(!fs.existsSync(f))fs.writeFileSync(f,execFileSync("python3",["-c",PIL_GRIS,png,String(factor)],{maxBuffer:1e8}));
+    const b=fs.readFileSync(f);
+    return {ancho:b.readUInt32BE(0),alto:b.readUInt32BE(4),datos:new Uint8Array(b.subarray(8)),dpi:DPI/factor};
+   },
+   // Recorte en PNG (data URL) para el motor de visión de manuscritos.
+   recortePng([x,y,w,h]){
+    return "data:image/png;base64,"+execFileSync("python3",["-c",PIL_RECORTE_PNG,png,String(x),String(y),String(x+w),String(y+h)],{maxBuffer:1e8}).toString("base64");
    },
    // tratamiento "invertir": texto claro sobre banda oscura (las coordenadas descuentan el margen añadido).
    async ocr({psm=4,region=null,umbral=null,escala=1,lista=null,tratamiento=null}={}){

@@ -88,29 +88,36 @@ function recortar(lienzo,[x,y,w,h]){
 }
 
 /*
- * pdfjs: el módulo de pdf.js ya cargado · bytes: Uint8Array del PDF.
- * alProgresar(texto): opcional, para mostrar el avance (el OCR tarda varios segundos por lectura).
- * Devuelve {paginas, liberar}; llamar a liberar() al terminar.
+ * Página OCR sobre un lienzo ya renderizado. Las lecturas se guardan en memoria mientras la
+ * página está abierta (releer un albarán de varias páginas no repite el OCR).
  */
-async function paginasEscaneadas(pdfjs,bytes,{alProgresar=null}={}){
- const pdf=await pdfjs.getDocument({data:bytes,verbosity:0}).promise;
- const {palabrasDesdeTesseractJs}=root.DafricaAlbaranes.ocr;
- const lienzos=new Map(),paginas=[];
- let lecturas=0;
- const pagina=(n,clave,rotacion)=>{
-  const lienzo=lienzos.get(clave);
-  return {numero:n,anchoPx:lienzo.width,altoPx:lienzo.height,dpi:DPI,rotacion,
-   // escala: amplía el recorte (relectura de un campo); lista: caracteres permitidos.
-   bandasOscuras:()=>bandasOscuras(lienzos.get(clave)),
-   ocr:({psm=4,region=null,umbral=null,escala=1,lista=null,tratamiento=null}={})=>enCola(async()=>{
+function paginaOcr(n,lienzos,clave,rotacion,alProgresar,contador,base){
+ const lienzo=lienzos.get(clave),cache=new Map();
+ const yo={numero:n,anchoPx:lienzo.width,altoPx:lienzo.height,dpi:DPI,rotacion,
+  bandasOscuras:()=>bandasOscuras(lienzos.get(clave)),
+  // Imagen en grises reducida (detección de manuscritos): {ancho, alto, datos}.
+  gris:(factor=4)=>{
+   const l=lienzos.get(clave),w=Math.floor(l.width/factor),h=Math.floor(l.height/factor);
+   const c=document.createElement("canvas");c.width=w;c.height=h;
+   const x=c.getContext("2d",{alpha:false,willReadFrequently:true});x.drawImage(l,0,0,w,h);
+   const d=x.getImageData(0,0,w,h).data,g=new Uint8Array(w*h);
+   for(let i=0;i<w*h;i++)g[i]=Math.round(0.299*d[4*i]+0.587*d[4*i+1]+0.114*d[4*i+2]);
+   c.width=0;c.height=0;
+   return {ancho:w,alto:h,datos:g,dpi:DPI/factor};
+  },
+  // Recorte en PNG (data URL) para el motor de visión de manuscritos.
+  recortePng:([x0,y0,w,h])=>{const c=recortar(lienzos.get(clave),[x0,y0,w,h]);const url=c.toDataURL("image/png");c.width=0;c.height=0;return url;},
+  ocr:({psm=4,region=null,umbral=null,escala=1,lista=null,tratamiento=null}={})=>{
+   const k=JSON.stringify([psm,region,umbral,escala,lista,tratamiento]);
+   if(!cache.has(k))cache.set(k,enCola(async()=>{
     const w=await worker();
-    alProgresar?.("Página "+n+" · lectura OCR "+(++lecturas)+(region?" (zona)":""));
+    alProgresar?.("Página "+n+" · lectura OCR "+(++contador.n)+(region?" (zona)":""));
     await w.setParameters({tessedit_pageseg_mode:String(psm),thresholding_method:umbral==="sauvola"?"2":"0",tessedit_char_whitelist:lista||""});
     let imagen=region?recortar(lienzos.get(clave),region):lienzos.get(clave);
     if(tratamiento==="invertir"){
      const t=invertirBanda(imagen);if(region){imagen.width=0;imagen.height=0;}
      const {data}=await w.recognize(t,{},{blocks:true,text:false});t.width=0;t.height=0;
-     return palabrasDesdeTesseractJs(data).map(p=>({...p,x0:p.x0-MARGEN_INVERTIDA,x1:p.x1-MARGEN_INVERTIDA,y0:p.y0-MARGEN_INVERTIDA,y1:p.y1-MARGEN_INVERTIDA}));
+     return root.DafricaAlbaranes.ocr.palabrasDesdeTesseractJs(data).map(p=>({...p,x0:p.x0-MARGEN_INVERTIDA,x1:p.x1-MARGEN_INVERTIDA,y0:p.y0-MARGEN_INVERTIDA,y1:p.y1-MARGEN_INVERTIDA}));
     }
     if(escala!==1){
      const c=document.createElement("canvas");c.width=Math.round(imagen.width*escala);c.height=Math.round(imagen.height*escala);
@@ -120,28 +127,60 @@ async function paginasEscaneadas(pdfjs,bytes,{alProgresar=null}={}){
     }
     const {data}=await w.recognize(imagen,{},{blocks:true,text:false});
     if(region||escala!==1){imagen.width=0;imagen.height=0;}
-    const palabras=palabrasDesdeTesseractJs(data);
+    const palabras=root.DafricaAlbaranes.ocr.palabrasDesdeTesseractJs(data);
     return escala===1?palabras:palabras.map(p=>({...p,x0:p.x0/escala,x1:p.x1/escala,y0:p.y0/escala,y1:p.y1/escala}));
-   }),
-   // Página escaneada de lado o del revés: misma página girada en sentido horario.
-   rotada(grados){
-    const g=((grados%360)+360)%360;
-    if(!g)return paginas[n-1];
-    const k=n+"@"+g;
-    if(!lienzos.has(k))lienzos.set(k,girar(lienzos.get(n),g));
-    return pagina(n,k,g);
-   }};
+   }));
+   return cache.get(k);
+  },
+  // Página escaneada de lado o del revés: misma página girada en sentido horario.
+  rotada(grados){
+   const g=((grados%360)+360)%360;
+   if(!g)return base();
+   const kk=n+"@"+g;
+   if(!lienzos.has(kk))lienzos.set(kk,girar(lienzos.get(n),g));
+   return paginaOcr(n,lienzos,kk,g,alProgresar,contador,base);
+  }};
+ return yo;
+}
+
+/*
+ * Fuente de páginas para albaranes/lector.js: capa de texto con pdf.js y OCR con
+ * tesseract.js. Cada página se renderiza solo si hace falta OCR y se libera al terminar
+ * su albarán: el consumo de memoria no depende del número de páginas del PDF.
+ */
+async function abrirFuente(pdfjs,bytes,{alProgresar=null}={}){
+ const pdf=await pdfjs.getDocument({data:bytes,verbosity:0,isEvalSupported:false}).promise;
+ const texto=root.DafricaAlbaranes.textoPdf;
+ const lienzos=new Map(),paginas=new Map(),contador={n:0};
+ return {
+  numPaginas:pdf.numPages,
+  async texto(n){const page=await pdf.getPage(n);try{return await texto.leerPagina(pdfjs,page,n);}finally{page.cleanup();}},
+  async ocr(n){
+   if(!paginas.has(n)){
+    lienzos.set(n,await renderizar(pdf,n));
+    const base=()=>paginas.get(n);
+    paginas.set(n,paginaOcr(n,lienzos,n,0,alProgresar,contador,base));
+   }
+   return paginas.get(n);
+  },
+  liberar(n){
+   for(const [k,c] of [...lienzos])if(k===n||String(k).startsWith(n+"@")){c.width=0;c.height=0;lienzos.delete(k);}
+   paginas.delete(n);
+  },
+  async cerrar(){for(const c of lienzos.values()){c.width=0;c.height=0;}lienzos.clear();paginas.clear();await pdf.destroy().catch(()=>{});}
  };
- for(let n=1;n<=pdf.numPages;n++){
-  lienzos.set(n,await renderizar(pdf,n));
-  paginas.push(pagina(n,n,0));
- }
- return {paginas,liberar:async()=>{
-  for(const c of lienzos.values()){c.width=0;c.height=0;}
-  lienzos.clear();await pdf.destroy().catch(()=>{});
- }};
+}
+
+/*
+ * Compatibilidad: todas las páginas de un PDF escaneado como páginas OCR (un solo albarán).
+ * Devuelve {paginas, liberar}; llamar a liberar() al terminar.
+ */
+async function paginasEscaneadas(pdfjs,bytes,{alProgresar=null}={}){
+ const fuente=await abrirFuente(pdfjs,bytes,{alProgresar}),paginas=[];
+ for(let n=1;n<=fuente.numPaginas;n++)paginas.push(await fuente.ocr(n));
+ return {paginas,liberar:()=>fuente.cerrar()};
 }
 
 root.DafricaAlbaranes=root.DafricaAlbaranes||{};
-root.DafricaAlbaranes.motorNavegador={paginasEscaneadas,cerrar,DPI};
+root.DafricaAlbaranes.motorNavegador={abrirFuente,paginasEscaneadas,cerrar,DPI};
 })(typeof globalThis!=="undefined"?globalThis:this);

@@ -192,3 +192,41 @@ artículos ambiguos, descuadres, discrepancias IA/OCR, separación y conservaci�
 ceros del PRY. El contraste con los catálogos REALES requiere la sesión autorizada
 de la aplicación; las pruebas de esta fase usan catálogos ficticios. No se afirma
 haber verificado el catálogo real ni haber conseguido lectura perfecta del manuscrito.
+
+## Lector completo, manuscritos y registro público
+
+- `node pruebas/evaluar.js --incluir-sin-revisar` lee cada PDF del corpus con
+  `albaranes/lector.js` (separación automática incluida) y compara cada albarán esperado con el
+  documento leído en sus mismas páginas; una separación distinta cuenta como error.
+- `--sin-registro-privado`: evalúa solo con los perfiles públicos (huellas del CIF, sin NIF en
+  claro), que es lo que tiene la web. Debe dar también 0 errores críticos.
+- Manuscritos: `"manuscritos": {"obra": "PRY…", "stel": "ABP26-…"}` en cada albarán esperado.
+  Sin motor de visión se informan aparte («sin evaluar»). Diseño en `docs/lector-manuscritos.md`.
+- `pruebas/lector.test.js` (separación, PDF de 120 páginas, errores, cancelación, mixtos),
+  `pruebas/manuscritos.test.js` y `pruebas/proveedor.test.js` usan datos ficticios.
+
+## Lectura de la web (con visión y catálogo)
+
+La visión de recortes y el catálogo STEL de solo lectura exigen la sesión de un usuario con
+permiso `costes.ver`, así que se miden desde la web: módulo «Lector de albaranes» del menú →
+leer los PDF del corpus → «Descargar resultado (JSON)» → `node pruebas/evaluar-web.js
+albaranes.json`. Mismo informe que `evaluar.js` (`pruebas/informes-reales/precision-web.md`).
+
+Cada documento leído lleva `estado_documento`: **AUTO_OK** (todo verificado), **REVISAR** (algún
+campo para revisión) o **ERROR_DOCUMENTO** (página dañada o nada reconocible, en su posición del
+PDF). `resumen.paginas_completas` comprueba que cada página está en exactamente un documento, en
+orden (sin pérdidas, duplicados ni desorden entre bloques).
+
+## PDF de estrés (1, 10, 25 y 54 páginas)
+
+Fuera de git, en `pruebas/corpus-real/estres/`: PDF montados con páginas escaneadas reales del
+corpus y PDF digitales sintéticos intercalados (mixtos), con un albarán de dos páginas, una página
+escaneada en blanco y páginas repetidas en orden inverso. `manifiesto.json` indica qué páginas
+forman cada albarán. Se comprueba, con el lector completo:
+
+- en Node, que la separación coincide con el manifiesto, que cada página está en exactamente un
+  documento y en orden (`resumen.paginas_completas`), y que cada albarán da el mismo resultado
+  que leído por separado;
+- en Chromium real (pdf.js + tesseract.js), cargando los 4 PDF a la vez en la pantalla «Lector
+  local de albaranes» y descargando el JSON: misma separación, mismos estados AUTO_OK /
+  REVISAR / ERROR_DOCUMENTO y precisión de los albaranes reales con `evaluar-web.js`.

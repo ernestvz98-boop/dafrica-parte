@@ -287,6 +287,32 @@ test("títulos de tabla en blanco sobre banda oscura: se leen invertidos y se tr
  assert.equal(r.lineas[0].cantidad.valor,5);
 });
 
+/* ------------- Símbolos que el OCR no conoce y formato de referencia ------------- */
+test("Ø leído como M/Y/W tras «PRENSAR» se restituye solo con el perfil del proveedor y solo en escaneados",()=>{
+ const {restituirGlifos}=require("../albaranes/extraer.js");
+ const perfil={glifos_ocr:[["(\\bPRENSAR )(?:[MYWH]{1,2}9?)(?=\\d{2}X\\d)","$1Ø"]]};
+ assert.equal(restituirGlifos("TE REDUCIDA PRENSAR M54X28X54 INOX",perfil),"TE REDUCIDA PRENSAR Ø54X28X54 INOX");
+ assert.equal(restituirGlifos("REDUCCION PRENSAR Y922X15 INOX",perfil),"REDUCCION PRENSAR Ø22X15 INOX");
+ assert.equal(restituirGlifos("ENTRONQUE MACHO PRENSAR WH28X1 INOX",perfil),"ENTRONQUE MACHO PRENSAR Ø28X1 INOX");
+ // Una métrica real («TORNILLO CARRIL M8X30») no se toca; sin perfil, tampoco.
+ assert.equal(restituirGlifos("TORNILLO CARRIL M8X30 38/40",perfil),"TORNILLO CARRIL M8X30 38/40");
+ assert.equal(restituirGlifos("REDUCCION PRENSAR M22X15",null),"REDUCCION PRENSAR M22X15");
+ const reg=registroCon({glifos_ocr:perfil.glifos_ocr});
+ const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300000001",60],["REDUCCION",120],["PRENSAR",170],["M22X15",210],["2,00",420],["10,000",462],["50",510],["10,00",560])],{registro:reg});
+ assert.equal(r.lineas[0].descripcion.valor,"REDUCCION PRENSAR Ø22X15");
+ assert.equal(r.lineas[0].descripcion.literal,"REDUCCION PRENSAR M22X15");
+});
+
+test("referencia solo de cifras con el formato del proveedor: la unanimidad de las 6 relecturas la acepta; sin formato, no",async()=>{
+ const pag=[...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300010015",60,55],["TUBO",120],["MULTICAPA",150],["2,00",420],["10,000",462],["50",510],["10,00",560])];
+ const conFormato=await extraerEscaneado(motorRecortes(pag,({region})=>region[0]<100?[["1300010015",56]]:null),{registro:registroCon({formato_referencia:"^\\d{10}$"}),hoy:HOY});
+ assert.equal(conFormato.lineas[0].referencia.valor,"1300010015");
+ assert.ok(conFormato.lineas[0].referencia.confianza>=0.9);
+ assert.match(conFormato.lineas[0].referencia.resolucion.evidencias[0],/formato de referencia/);
+ const sinFormato=await extraerEscaneado(motorRecortes(pag,({region})=>region[0]<100?[["1300010015",56]]:null),{registro:registroCon(),hoy:HOY});
+ assert.ok(sinFormato.lineas[0].referencia.confianza<0.9);
+});
+
 /* Un perfil de formato público no contiene NIF privados: no es un conflicto. */
 test("perfil público sin NIF: usa el formato sin verificar la identidad del proveedor",()=>{
  const reg=registroCon({nifs:[],formato_numero:"^\\d{6}$"});
@@ -343,4 +369,20 @@ test('la relectura con cantidad distinta no corrige una referencia diferente',as
 test('sin porcentaje impreso en ninguna lectura no se deduce descuento a partir del cuadre',async()=>{
  const r=await extraerEscaneado(motorDescuentoAmpliado({sinDescuento:true}),{registro:registroCon(),hoy:HOY});
  assert.equal(r.lineas[0].descuento.valor,null);assert.equal(r.lineas[0].cuadre.estado,'DESCUADRE');
+});
+
+test("unidad «ml» que una lectura OCR lee «mi»: se toma de otra lectura de la misma fila; si discrepan, no",async()=>{
+ const tit=fila(200,["CÓDIGO",60],["CONCEPTO",120],["CANTIDAD",400],["PRECIO",460],["DTO%",500],["IMPORTE",545]);
+ const linea=u=>fila(218,["1300000001",60],["TUBO",120],["MULTICAPA",150],["2,00",420],[u,432],["10,000",462],["50",510],["10,00",560]);
+ const motor=porPsm=>[{numero:1,anchoPx:595,altoPx:842,dpi:72,async ocr({psm=4,region=null}={}){
+  const ps=[...cabeceraDoc(),...etiquetas(),...tit,...linea(porPsm[psm]||"mi")];
+  if(!region)return ps;
+  const [x,y,ww,h]=region;
+  return ps.filter(p=>p.x0>=x&&p.x1<=x+ww&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+ }}];
+ const r=await extraerEscaneado(motor({6:"ml",3:"ml"}),{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas[0].unidad.valor,"ml");
+ // Todas las lecturas dicen «mi»: no se acepta «m» (resto de raya) ni se deduce «ml».
+ const s=await extraerEscaneado(motor({}),{registro:registroCon(),hoy:HOY});
+ assert.ok(!["m","ml"].includes(s.lineas[0]?.unidad?.valor));
 });

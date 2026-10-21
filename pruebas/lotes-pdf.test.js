@@ -75,7 +75,7 @@ test('pantalla integrada: 25 páginas digitales y escaneadas, sin escrituras ni 
   els.pcPreviewFile.files=[{name:'25.pdf',size:7000000,arrayBuffer:async()=>bytes}];
   els.pcPreviewConsent.checked=true;
   const det={estado:'AUTO_OK',numero:{valor:'TEST'},proveedor:{nombre:'Ficticio'},lineas:[]};
-  const ctx={console,Uint8Array,window:{DafricaAlbaranes:{lotesPdf:{procesar},motorNavegador:{cerrar:async()=>{}}}},
+  const ctx={console,Uint8Array,window:{DafricaAlbaranes:{lotesPdf:require('../albaranes/lotes-pdf'),motorNavegador:{cerrar:async()=>{}}}},
    $:id=>els[id],has:()=>true,esc:x=>String(x),renderComprasLotePilot:null,
    pcLecturaDeterminista:async()=>escaneado?{estado:'NO_DIGITAL'}:det,
    pcLecturaOCR:async()=>{ocr++;return det},pcRenderDeterminista:()=>'<p>verificado</p>',
@@ -134,6 +134,16 @@ test('pantalla: OCR parcial visible, IA enderezada y cabecera fiable como pista,
  assert.match(html,/3 artículos leídos con OCR local · no resuelto automáticamente/);
  assert.match(html,/Proveedor no verificado/);assert.match(html,/Confianza insuficiente/);
  assert.match(html,/Comparar con la interpretación de IA/);assert.doesNotMatch(html,/Todos los campos verificados/);
+ // Tras agotarse los reintentos, el OCR debe verse también durante el avance.
+ let llamadas=0,incremental='';
+ ctx.window.DafricaAlbaranes.lotesPdf={...lotesPdf,reintentarLectura:(f,o)=>lotesPdf.reintentarLectura(f,{...o,esperar:async()=>{}})};
+ ctx.authFetch=async()=>{llamadas++;return {ok:false,status:503,json:async()=>({error:'IA temporalmente caída'})}};
+ els.pcPreviewResults.insertAdjacentHTML=function(_,s){incremental+=s;this.innerHTML+=s};
+ await els.pcPreviewStart.click();
+ assert.equal(llamadas,3);
+ assert.match(incremental,/Lectura local conservada/);assert.match(incremental,/009999/);
+ assert.match(els.pcPreviewResults.innerHTML,/Lectura local conservada/);
+ assert.doesNotMatch(els.pcPreviewResults.innerHTML,/Todos los campos verificados/);
 });
 test('cabeceras multipágina: separa números distintos y conserva continuaciones con mismo número/fecha',()=>{
  const {dividirPorCabeceras}=require('../albaranes/lotes-pdf');
@@ -167,9 +177,9 @@ test('contraste automático bloquea cantidades IA confundidas con bultos y conse
 });
 test('PRY candidato conserva ceros, no asigna obra y no resuelve códigos contradictorios',()=>{
  const vm=require('node:vm'),fs=require('node:fs'),ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync('control-28.js','utf8'),ctx);
- assert.equal(ctx.pcPryCandidato({anotacion_manual:'PRY 00111'}),'00111');
- assert.equal(ctx.pcPryCandidato({pry_codigo:'PRY00111'}),'00111');
- assert.equal(ctx.pcPryCandidato({pry_codigo:'00111',anotacion_manual:'PRY 00222'}),null);
+ assert.equal(ctx.pcPryCandidato({anotacion_manual:'PRY 00999'}),'00999');
+ assert.equal(ctx.pcPryCandidato({pry_codigo:'PRY00999'}),'00999');
+ assert.equal(ctx.pcPryCandidato({pry_codigo:'00999',anotacion_manual:'PRY 00222'}),null);
  assert.equal(ctx.pcPryCandidato({anotacion_manual:'obra 111'}),null);
 });
 test('mismo número y fecha en proveedores distintos no fusiona dos albaranes',()=>{
@@ -177,4 +187,27 @@ test('mismo número y fecha en proveedores distintos no fusiona dos albaranes',(
  const cab=(pagina,nif)=>({pagina,titulo:true,numero:{valor:'009999',estado:'OK',confianza:0.95},fecha:{valor:'2026-10-15'},proveedor:{nif}});
  const r=dividirPorCabeceras({paginas:[1,2]},[cab(1,'B24123457'),cab(2,'B24555559')]);
  assert.deepEqual(r.map(d=>d.paginas),[[1],[2]]);
+});
+test('lectura temporal: reintenta fallos transitorios y conserva el resultado recuperado',async()=>{
+ const {reintentarLectura}=require('../albaranes/lotes-pdf');let n=0;const pausas=[],avance=[];
+ const r=await reintentarLectura(async()=>{if(++n<3)throw Error('IA no disponible');return {numero:'A'}},
+  {esperar:async ms=>pausas.push(ms),progreso:t=>avance.push(t)});
+ assert.equal(n,3);assert.equal(r.numero,'A');assert.deepEqual(pausas,[1000,2000]);assert.equal(avance.length,2);
+});
+test('lectura temporal: límite de intentos y rechazo definitivo sin bucle',async()=>{
+ const {reintentarLectura}=require('../albaranes/lotes-pdf');let n=0;
+ await assert.rejects(()=>reintentarLectura(async()=>{n++;throw Error('Caído')},{esperar:async()=>{}}),/Caído/);
+ assert.equal(n,3);n=0;
+ await assert.rejects(()=>reintentarLectura(async()=>{n++;throw Object.assign(Error('Sin permiso'),{noReintentar:true})},{esperar:async()=>assert.fail()}),/Sin permiso/);
+ assert.equal(n,1);
+});
+test('bloque recuperado automáticamente: páginas 10–11 conservadas sin duplicar la compartida',async()=>{
+ const {reintentarLectura}=require('../albaranes/lotes-pdf');let intentos=0;
+ const r=await procesar({PDFDocument,bytes:await documento(11),
+ separar:async(_,rango)=>reintentarLectura(async()=>{
+  if(rango.inicio===10&&++intentos===1)throw Error('Análisis IA no disponible');
+  return {paginas_pdf:rango.fin-rango.inicio+1,documentos:Array.from({length:rango.fin-rango.inicio+1},(_,i)=>({numero:String(rango.inicio+i),paginas:[i+1]}))};
+ },{esperar:async()=>{}}),interpretar:async d=>({numero:d.numero})});
+ assert.equal(intentos,2);assert.equal(r.fallos.length,0);assert.deepEqual(r.paginas_pendientes,[]);
+ assert.deepEqual(r.out.map(d=>d.numero),Array.from({length:11},(_,i)=>String(i+1)));
 });

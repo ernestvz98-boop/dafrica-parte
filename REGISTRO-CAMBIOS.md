@@ -3,6 +3,135 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Lector de albaranes como módulo de DAFRICA Control
+
+**Producción:** sin cambios. Todo sigue en la rama de desarrollo hasta la revisión del usuario
+(se intentó fusionar en `main` y el sistema de permisos lo impidió; solo se creó la rama de
+copia `respaldo/main-antes-lector-20261021` con el `main` actual). Sin cambios en STEL, en la
+base de datos ni en las funciones Edge.
+
+- `control-29.js`: el lector deja de ser una tarjeta dentro de «Pedidos y alertas» y pasa a ser
+  el módulo **«📄 Lector de albaranes»** del menú lateral (permiso `costes.ver`, después de
+  «Costes / Consumos»; enlace directo `?mod=lector-albaranes`). Texto actualizado: visión solo
+  de recortes y siempre validada; catálogo STEL solo lectura.
+- `index.html`: versión de los scripts `20261021lector5` (el navegador no reutiliza copias
+  antiguas); la misma versión se ve en el subtítulo del módulo («Versión 20261021lector5»).
+- La pantalla, el JSON y `evaluar-web.js` indican si el catálogo STEL y la visión estuvieron
+  disponibles en cada lectura (sin ellos, los campos dudosos quedan en REVISAR).
+- Fallo hallado en el navegador (pdf.js desplaza el límite entre DTO e IMPORTE): «50 3,30» se
+  leía como descuentos en cascada con el importe vacío (en revisión, no crítico). El último
+  valor pasa a importe solo si tiene forma de importe y la línea cuadra exactamente. Regresión.
+- Probado en Chromium con la aplicación completa: inicio de sesión (Supabase simulado en la
+  prueba; pdf.js servido localmente porque este Chromium no sale a Internet), menú, recarga
+  directa al módulo, lectura de los 3 PDF reales a la vez (30 páginas, 666 s), descarga del
+  JSON y medición con `pruebas/evaluar-web.js`: separación 30/30, **484/545 campos correctos y
+  automáticos (88,8 %), 0 errores críticos**, 6 AUTO_OK sin ningún error, sin errores de
+  JavaScript. Sin sesión real, catálogo y visión no participan (48 consultas de visión que con
+  sesión se harían). Node, con los mismos cambios: nativo 495 (90,8 %), perfiles públicos 493
+  (90,5 %), tesseract.js 491 (90,1 %); 0 críticos en todos. 195 pruebas superadas.
+
+## 2026-10-21 · Lector PDF: fallos hallados en Chromium real (motor de la web, tesseract.js)
+
+**Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos).
+
+La prueba de estrés en Chromium (4 PDF a la vez, 90 páginas, 87 albaranes, 25 min, pico de
+memoria ≈ 1,2 GB del renderizador; sin bloqueos ni errores de página; separación perfecta) dio
+**2 fallos críticos reales** que el Tesseract nativo no produce, y la medición del corpus con
+tesseract.js (`--motor=tesseractjs`) un tercero. Reproducidos, corregidos y con regresión:
+
+- Aviso legal vertical del margen leído como una sola palabra de confianza alta
+  («personaldatostratamiento.»): ocupaba la columna de código y el código real pasaba a la
+  descripción. Una palabra cuya caja es imposible para texto horizontal (estrecha y alta) queda
+  fuera de las líneas, en `lineas_giradas`, donde solo se busca el CIF del emisor (algunos
+  proveedores lo imprimen únicamente ahí: sin esto, 3 albaranes perdían su CIF).
+- «ml» leído «mil» (unidad válida, millar) y aceptado: el cuadre no depende de la unidad. En
+  OCR la unidad «mil» queda en revisión.
+- Descripción partida por un trazo a mano («CODO 92 M-H» + fila sin código «LATON 2»): la línea
+  anterior quedaba aceptada con la descripción cortada. Una fila sin código justo debajo, en la
+  columna de descripción, deja la anterior en revisión (y la combinación elige la lectura OCR
+  que la lee completa).
+- Medición tras los cambios (30 albaranes, 545 campos), 0 críticos en todas: nativo 495
+  (90,8 %), nativo con perfiles públicos 493 (90,5 %), tesseract.js con perfiles públicos 491
+  (90,1 %; antes 489 y 1 crítico). Sintéticos: 224/240, 0 críticos. Pruebas: 194 superadas.
+- Chromium real tras las correcciones, un PDF cada vez (sin bloqueos, sin errores de página, sin
+  procesos huérfanos; separación igual al manifiesto en los 4):
+
+  | PDF | Páginas | Documentos | Duración | Pico de memoria | AUTO_OK / REVISAR / ERROR | Críticos |
+  |---|---|---|---|---|---|---|
+  | e01 | 1 | 1 | 40 s | 1,1 GB | 0 / 1 / 0 | 0 |
+  | e10 | 10 | 10 | 211 s | 1,2 GB | 4 / 6 / 0 | 0 |
+  | e25 | 25 | 24 | 431 s | 1,4 GB | 1 / 23 / 0 | 0 |
+  | e54 | 54 | 52 | 902 s | 1,7 GB | 5 / 47 / 0 | 0 |
+
+## 2026-10-21 · Lector PDF (Fase 1): validación final
+
+**Producción:** desplegada, con autorización expresa del usuario, la función Edge
+`albaranes-manuscritos` (visión solo de RECORTES; exige sesión con `costes.ver`; no guarda nada;
+no accede a STEL ni a la base de datos). `main` sin cambios. Catálogo STEL solo en lectura
+(`compras-catalogo-lectura`); ninguna escritura en STEL.
+
+- Segunda fase con visión, siempre validada: una celda dudosa (código, descripción, número o
+  fecha) se acepta solo si la lectura de visión del recorte coincide exactamente con una de las
+  lecturas OCR de esa celda; número y fecha además deben cumplir el formato del proveedor o ser
+  una fecha válida. Nunca precios, cantidades ni importes.
+- Catálogo STEL (solo lectura): un código con caracteres confundibles (O/0, S/5, I/1, B/8, Z/2,
+  G/6) se resuelve si su clase de equivalencia tiene un único artículo del proveedor, el
+  proveedor está verificado (cuenta del catálogo o huella del CIF) y la descripción es
+  compatible (mismas cifras y ≥ 60 % de palabras).
+- Separación de albaranes: continuación por «Página 2» sin «de N» y por «SUMA Y SIGUE»; una
+  página escaneada en blanco se adjunta al albarán anterior y se informa; una página con tinta
+  pero ilegible es un ERROR_DOCUMENTO propio, nunca se une a otro albarán.
+- Estados de documento separados: AUTO_OK, REVISAR y ERROR_DOCUMENTO; `paginas_completas`
+  comprueba que no hay pérdidas, duplicados ni desorden entre bloques.
+- Unidades: «mi» ya no se lee como «m» (clase de letras por mayúscula/minúscula); una unidad
+  ausente en la lectura principal se toma de las otras lecturas de la misma fila solo si todas
+  coinciden.
+- Eliminados de comentarios y del registro dos números de albarán reales que quedaban de
+  sesiones anteriores.
+- Pruebas: 190 superadas (regresiones nuevas: visión de cabecera, página en blanco o ilegible,
+  continuación, unidades, códigos confundibles por catálogo).
+- Medición (30 albaranes reales, 545 campos): **495 correctos y automáticos (90,8 %)**,
+  520 con el valor correcto (95,4 %), **0 errores críticos**; solo con perfiles públicos
+  90,5 % y 0 críticos; separación 30/30. Sintéticos: 0 críticos. El efecto de la visión y del
+  catálogo no se puede medir sin la sesión de un usuario: ver `pruebas/LEEME.md`
+  («Lectura de la web»).
+- Estrés (fuera de git): PDF de 1, 10, 25 y 54 páginas, mixtos (escaneados reales + digitales
+  sintéticos), con un albarán de dos páginas y una página en blanco. En Node: separación igual al
+  manifiesto, páginas completas, resultados idénticos a la lectura por separado. Chromium: ver la
+  entrada «fallos hallados en Chromium real».
+
+## 2026-10-21 · Lector PDF (Fase 1): PDF grandes, separación, manuscritos y proveedores por huella
+
+**Producción:** sin cambios en `main`; sin escrituras en STEL ni en la base de datos; solo
+lecturas de metadatos en Supabase. La función `supabase/functions/albaranes-manuscritos` se
+desplegó después, con autorización expresa (ver la entrada «validación final»).
+Incluye la fusión del trabajo paralelo de la rama (bloques PDF, `verificacion.js`,
+`compras-catalogo-lectura`, ya desplegada por esa sesión).
+
+- `albaranes/lector.js`: PDF de cualquier tamaño leído página a página (digital, escaneado o
+  mixto), separación automática de albaranes (número, CIF, «Página k de n», continuación sin
+  totales), errores por página sin detener el resto, cancelación, resumen.
+- `motor-navegador.js`: cada página se renderiza solo si necesita OCR y se libera al cerrar su
+  albarán (antes se renderizaban todas a 300 ppp a la vez); caché de lecturas por página.
+  Comprobado en Chromium con pdf.js + tesseract.js (PDF mixto: 3 albaranes bien separados).
+- `control-29.js`: pantalla «Lector local de albaranes» (varios PDF, progreso por bloques,
+  errores por lote, tabla consolidada, descarga JSON/CSV; catálogo STEL de solo lectura).
+- `albaranes/manuscritos.js` + `vision.js`: detección de anotaciones manuscritas en la imagen
+  y validación de códigos de obra/STEL; visión solo de recortes (pendiente de autorización).
+  Ver `docs/lector-manuscritos.md`.
+- Proveedores sin NIF en claro: los perfiles públicos guardan la huella SHA-256 del CIF.
+  Fallo real encontrado: con el registro público (lo que tiene la web) el lector caía al 74,9 %
+  con **2 errores críticos** (el CIF de DAFRICA aceptado como emisor). Corregido: huellas, CIF
+  de DAFRICA propagado entre lecturas, NIF no registrado siempre en revisión, desempate por
+  cercanía al nombre impreso. Ahora 90,3 % y 0 críticos sin registro privado.
+- Saltoki: «Ø» restituido tras «PRENSAR» (el OCR lo lee M/Y/W); referencias de 10 cifras
+  aceptadas por formato del proveedor + unanimidad de las relecturas.
+- Corpus: separación automática evaluada (30/30 albaranes en su sitio); manuscritos esperados
+  añadidos (60, no evaluables sin motor de visión); corregido un esperado mío («ceranor»).
+- Pruebas: 174 superadas (lector, manuscritos, proveedor por huella, regresiones).
+- Medición (30 albaranes, 545 campos): 90,6 % correcto y automático, 0 errores críticos
+  (90,3 % solo con perfiles públicos). Objetivo > 95 % aún no alcanzado: ver informe.
+
 ## 2026-10-20 · Lector PDF: lote B (20 albaranes reales) y segunda fase automática
 
 **Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos).
@@ -38,7 +167,7 @@ Los PDF, sus resultados esperados y los NIF reales siguen fuera de git (`pruebas
 
 **Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos;
 solo lecturas en Supabase para localizar el caso).
-- Caso de partida: albarán Rodavi 003424 (subido el 16/10). En la ficha guardada había
+- Caso de partida: un albarán de Rodavi subido el 16/10. En la ficha guardada había
   código, descripción y cantidad, pero precio, descuento e importe vacíos. Causa: lo
   procesaron las funciones de IA (`compras-auto-v3`, hoy desactivada, y
   `compras-interpretar-v2`). La primera no tiene campos de descuento ni de importe y anula

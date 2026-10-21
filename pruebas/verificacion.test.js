@@ -34,13 +34,45 @@ test('dos artículos posibles no se resuelven automáticamente',()=>{
 test('una descripción de dimensiones distintas no verifica una referencia coincidente',()=>{
  const r=documento(),c=catalogo();c.articulos[0].descripcion='TUBO MULTICAPA 22 MM';verificar(r,c);assert.ok(!r.lineas[0].referencia.validado_catalogo);
 });
-test('resuelve solo una alternativa realmente observada por OCR, sin inventar variantes',()=>{
- const r=documento(),c=catalogo();c.articulos[0].referencia='1200P001';verificar(r,c);assert.ok(!r.lineas[0].referencia.validado_catalogo);
+test('alternativa realmente observada por OCR: se valida con la referencia exacta del catálogo',()=>{
+ const r=documento(),c=catalogo();c.articulos[0].referencia='1200P001';
  r.lineas[0].referencia.alternativas_ocr=['1200P001'];verificar(r,c);assert.equal(r.lineas[0].referencia.valor,'1200P001');assert.equal(r.lineas[0].referencia.literal_ocr_original,'120OP001');
+ assert.equal(r.lineas[0].referencia.resolucion.metodo,'catalogo_stel');
+});
+test('referencia leída con O/0 confundidos: se toma la ÚNICA del catálogo equivalente, con descripción compatible',()=>{
+ const r=documento(),c=catalogo();c.articulos[0].referencia='1200P001';verificar(r,c);
+ assert.equal(r.lineas[0].referencia.valor,'1200P001');assert.equal(r.lineas[0].referencia.validado_catalogo,true);
+ assert.equal(r.lineas[0].referencia.resolucion.metodo,'catalogo_stel_confundibles');
+ assert.equal(r.estado,'AUTO_OK');
+});
+test('dos referencias del catálogo equivalentes por caracteres confundibles: no se elige ninguna',()=>{
+ const r=documento(),c=catalogo();c.articulos=[{id:10,referencia:'1200P001',descripcion:'TUBO MULTICAPA'},{id:11,referencia:'120OPOO1',descripcion:'TUBO MULTICAPA'}];
+ verificar(r,c);assert.ok(!r.lineas[0].referencia.validado_catalogo);assert.equal(r.estado,'REVISAR');
+});
+test('equivalente por confundibles con otra descripción o con otras medidas: no se valida',()=>{
+ for(const descripcion of ['CODO LATON','TUBO MULTICAPA 22 MM']){
+  const r=documento(),c=catalogo();c.articulos=[{id:10,referencia:'1200P001',descripcion}];
+  verificar(r,c);assert.ok(!r.lineas[0].referencia.validado_catalogo,descripcion);
+ }
+});
+test('un código con un carácter NO confundible distinto (X por 0) no se valida',()=>{
+ const r=documento(),c=catalogo();c.articulos=[{id:10,referencia:'12XOP001',descripcion:'TUBO MULTICAPA'}];
+ verificar(r,c);assert.ok(!r.lineas[0].referencia.validado_catalogo);
 });
 test('el catálogo nunca elimina un descuadre ni rellena los importes del documento',()=>{
  const r=documento({importe:'11,00'});verificar(r,catalogo());assert.equal(r.lineas[0].importe.valor,11);assert.equal(r.lineas[0].cuadre.estado,'DESCUADRE');assert.equal(r.estado,'REVISAR');
 });
 test('respuesta sin garantías de solo lectura no sirve como autoridad del catálogo',()=>{
  const r=documento(),c=catalogo();c.persistido=true;verificar(r,c);assert.equal(r.proveedor.estado,'NIF_NO_REGISTRADO');assert.equal(r.estado,'REVISAR');
+});
+test('proveedor identificado por la huella de su CIF (STEL sin CIF): valida artículos; un NIF no registrado, no',()=>{
+ const {huella}=require('../albaranes/nif');
+ const conHuella=()=>leer([...cabeceraDoc(),...fila(120,['ALBARÁN',60],['009999',120],['FECHA',300],['15/10/2026',340]),
+  ...fila(200,['CÓDIGO',60],['CONCEPTO',120],['CANTIDAD',400],['PRECIO',460],['DTO%',500],['IMPORTE',545]),
+  ...fila(218,['120OP001',60],['TUBO',120],['MULTICAPA',150],['2,00',420],['10,00',462],['50',510],['10,00',560])],
+  {registro:registroCon({nifs:[],huellas_nif:[huella(NIF)]})});
+ const c=catalogo();c.proveedores=[{id:1,nif:'',nombre:'Proveedor ficticio'}];c.articulos[0].referencia='1200P001';
+ const r=conHuella();assert.equal(r.proveedor.via,'nif');verificar(r,c);
+ assert.equal(r.lineas[0].referencia.valor,'1200P001');assert.equal(r.lineas[0].referencia.validado_catalogo,true);
+ const s=documento();verificar(s,c);assert.ok(!s.lineas[0].referencia.validado_catalogo);
 });

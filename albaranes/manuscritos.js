@@ -1,0 +1,329 @@
+"use strict";
+/*
+ * DAFRICA · Anotaciones manuscritas de DAFRICA en los albaranes escaneados.
+ *
+ * En la oficina se escribe a mano sobre el albarán:
+ *   - el número del albarán ya registrado en STEL: «ABP26 1234» (serie ABP + año + número);
+ *   - el código de obra (proyecto STEL): «PRY00123» (PRY + 5 cifras).
+ * Tesseract no lee cifras manuscritas. Este módulo:
+ *   1. localiza en la imagen los trazos que no son texto impreso (detectarRegiones);
+ *   2. pide a un motor de visión SOLO esos recortes (nunca la página, nunca precios ni cantidades);
+ *   3. acepta un código únicamente si se valida por contexto (validarCodigos):
+ *      formato, obra impresa, coherencia con otros albaranes del lote, catálogo de obras y
+ *      albarán de compra de STEL (proveedor, número, fecha). Si quedan dos interpretaciones
+ *      plausibles y ninguna se valida, el campo no se resuelve.
+ * Cada código resuelto guarda valor, confianza, método y evidencias.
+ * Funciones puras salvo leerManuscritos, que llama a los motores recibidos.
+ */
+(function(root,factory){
+ const req=typeof require==="function"&&typeof module==="object"?require:null;
+ const api=factory(root,req);
+ if(typeof module==="object"&&module.exports)module.exports=api;
+ else{root.DafricaAlbaranes=root.DafricaAlbaranes||{};root.DafricaAlbaranes.manuscritos=api;}
+})(typeof globalThis!=="undefined"?globalThis:this,function(root,req){
+
+/* ------------------------------ Detección ------------------------------ */
+/*
+ * gris: {ancho, alto, datos} (un byte por píxel, 0 = negro) a baja resolución (`dpi`).
+ * impresas: cajas [x0, y0, x1, y1] (en píxeles de `gris`) de palabras impresas leídas con
+ * fiabilidad por el OCR: se borran antes de buscar trazos.
+ * Devuelve las zonas con aspecto de una anotación escrita en una línea (ancho > alto, altura
+ * de letra manuscrita), de mayor a menor, en píxeles de `gris`.
+ */
+function detectarRegiones(gris,impresas=[],{dpi=75,maximo=8,todas=false}={}){
+ const {ancho:W,alto:H,datos}=gris;
+ const tinta=new Uint8Array(W*H);
+ // Umbral alto: el bolígrafo claro o el lápiz quedan entre 150 y 205 al reducir la imagen.
+ for(let i=0;i<W*H;i++)tinta[i]=datos[i]<205?1:0;
+ const base=tinta.slice();
+ for(const [x0,y0,x1,y1] of impresas){
+  for(let y=Math.max(0,Math.floor(y0)-1);y<=Math.min(H-1,Math.ceil(y1)+1);y++)
+   for(let x=Math.max(0,Math.floor(x0)-1);x<=Math.min(W-1,Math.ceil(x1)+1);x++)tinta[y*W+x]=0;
+ }
+ const mm=dpi/25.4;
+ // Rayas largas (tabla, subrayados a bolígrafo que cruzan la anotación): se borran los tramos
+ // horizontales o verticales continuos de más de 12 mm; ningún trazo de letra es tan largo.
+ const largo=Math.round(12*mm),borrar=[];
+ for(let y=0;y<H;y++){let x=0;while(x<W){if(!tinta[y*W+x]){x++;continue;}let e=x;while(e<W&&tinta[y*W+e])e++;if(e-x>=largo)borrar.push([y*W+x,e-x,1]);x=e;}}
+ for(let x=0;x<W;x++){let y=0;while(y<H){if(!tinta[y*W+x]){y++;continue;}let e=y;while(e<H&&tinta[e*W+x])e++;if(e-y>=largo)borrar.push([y*W+x,e-y,W]);y=e;}}
+ // Donde la raya cruza un trazo (tinta justo encima y debajo, o a ambos lados) se conserva el
+ // cruce: si no, las letras subrayadas quedarían partidas en dos.
+ const orig=base.slice(),en=(x,y)=>x>=0&&y>=0&&x<W&&y<H&&orig[y*W+x];
+ for(const [i,n,paso] of borrar)for(let k=0;k<n;k++){
+  const q=i+k*paso,x=q%W,y=(q-x)/W;
+  const cruce=paso===1?(en(x,y-2)||en(x,y-3))&&(en(x,y+2)||en(x,y+3)):(en(x-2,y)||en(x-3,y))&&(en(x+2,y)||en(x+3,y));
+  if(!cruce){tinta[q]=0;base[q]=0;}
+ }
+ // Componentes de la tinta completa (sin borrar el impreso): para completar cada anotación con
+ // las letras que el OCR haya leído como texto (un «PRY» manuscrito leído con confianza media).
+ const completa=componentes(base,W,H).filter(c=>c.n>=3);
+ // Componentes conexos de la tinta restante.
+ const comps=componentes(tinta,W,H);
+ // Fuera: motas, rayas de tabla, recuadros y bloques demasiado grandes para ser escritura.
+ const trazos=comps.filter(c=>{
+  const w=c.x1-c.x0+1,h=c.y1-c.y0+1;
+  if(c.n<3)return false;
+  if(w>12*h&&h<1.2*mm)return false;
+  if(h>12*w&&w<1.2*mm)return false;
+  if(w>0.45*W||h>0.25*H)return false;
+  return true;
+ });
+ // Trazos de una misma anotación: misma franja vertical y separados menos de ~6 mm.
+ const hueco=6*mm;
+ const grupos=agrupar(trazos,(a,b)=>{
+  const solapeV=Math.min(a.y1,b.y1)-Math.max(a.y0,b.y0);
+  const altoMin=Math.min(a.y1-a.y0,b.y1-b.y0)+1;
+  const dx=Math.max(0,Math.max(a.x0,b.x0)-Math.min(a.x1,b.x1));
+  // Hueco entre letras: 6 mm, o más si la escritura es grande («P R Y  0 0 1 1 1» espaciado).
+  // Solo trazos de altura parecida (una firma o un círculo al lado no se unen al código).
+  const ha=a.y1-a.y0+1,hb=b.y1-b.y0+1;
+  return solapeV>0.3*altoMin&&Math.max(ha,hb)<=2.5*Math.min(ha,hb)+2&&dx<=Math.max(hueco,1.3*Math.max(ha,hb));
+ });
+ const zonas=grupos.map(g=>({x0:Math.min(...g.map(c=>c.x0)),y0:Math.min(...g.map(c=>c.y0)),x1:Math.max(...g.map(c=>c.x1)),y1:Math.max(...g.map(c=>c.y1)),
+  trazos:g.length,tinta:g.reduce((n,c)=>n+c.n,0)}));
+ // Una línea manuscrita: 3–25 mm de alto, más ancha que alta, con varios trazos (letras).
+ // Cada zona se completa con la tinta vecina de su misma franja (letras borradas como impresas).
+ for(const z of zonas){
+  // Franja vertical original: crecer en cadena no puede arrastrar firmas o anotaciones vecinas.
+  const h=z.y1-z.y0+1,fy0=z.y0,fy1=z.y1;let cambio=true;
+  while(cambio){
+   cambio=false;
+   for(const c of completa){
+    if(c.x0>=z.x0&&c.x1<=z.x1&&c.y0>=z.y0&&c.y1<=z.y1)continue;
+    const ch=c.y1-c.y0+1,cw=c.x1-c.x0+1;
+    if(ch>1.6*h||cw>0.45*W)continue;
+    const solape=Math.min(fy1,c.y1)-Math.max(fy0,c.y0);
+    if(Math.max(z.y1,c.y1)-Math.min(z.y0,c.y0)>1.8*h)continue;
+    const dx=Math.max(0,Math.max(z.x0,c.x0)-Math.min(z.x1,c.x1));
+    if(solape>0.4*Math.min(h,ch)&&dx<=Math.max(hueco,1.3*h)&&Math.max(z.x1,c.x1)-Math.min(z.x0,c.x0)<=0.45*W){
+     z.x0=Math.min(z.x0,c.x0);z.x1=Math.max(z.x1,c.x1);z.y0=Math.min(z.y0,c.y0);z.y1=Math.max(z.y1,c.y1);cambio=true;
+    }
+   }
+  }
+ }
+ // Zonas solapadas tras crecer: una sola.
+ for(let i=0;i<zonas.length;i++)for(let j=zonas.length-1;j>i;j--){
+  const a=zonas[i],b=zonas[j];
+  const ha=a.y1-a.y0+1,hb=b.y1-b.y0+1;
+  // Solo zonas de la misma línea de escritura (una firma grande encima de un código no se une).
+  if(Math.min(a.x1,b.x1)>=Math.max(a.x0,b.x0)&&Math.min(a.y1,b.y1)-Math.max(a.y0,b.y0)>0.5*Math.min(ha,hb)&&Math.max(ha,hb)<=2*Math.min(ha,hb)){
+   a.x0=Math.min(a.x0,b.x0);a.x1=Math.max(a.x1,b.x1);a.y0=Math.min(a.y0,b.y0);a.y1=Math.max(a.y1,b.y1);a.trazos+=b.trazos;zonas.splice(j,1);
+  }
+ }
+ // Densidad de tinta de la caja: la escritura a bolígrafo es un trazo fino (poca tinta); los
+ // rótulos, logotipos y anuncios impresos son trazos gruesos (mucha tinta).
+ for(const z of zonas){let n=0;for(let y=z.y0;y<=z.y1;y++)for(let x=z.x0;x<=z.x1;x++)if(base[y*W+x])n++;z.densidad=n/((z.x1-z.x0+1)*(z.y1-z.y0+1));}
+ // Fuera también el texto impreso claro sobre bandas grises (fondo oscuro en la caja).
+ const fondoOscuro=z=>{let n=0,t=0;for(let y=z.y0;y<=z.y1;y++)for(let x=z.x0;x<=z.x1;x++){t++;if(datos[y*W+x]<200)n++;}return n>0.45*t;};
+ if(todas)return zonas;
+ return zonas.filter(z=>{const w=z.x1-z.x0+1,h=z.y1-z.y0+1;return h>=4.5*mm&&h<=25*mm&&w>=1.8*h&&w>=15*mm&&(z.trazos>=3||(z.trazos>=2&&w>=3*h))&&z.densidad<=0.36&&!fondoOscuro(z);})
+  // Primero lo más parecido a escritura a mano (trazo fino).
+  .sort((a,b)=>a.densidad-b.densidad).slice(0,maximo);
+}
+
+function componentes(m,W,H){
+ const vista=new Uint8Array(W*H),salida=[],pila=[];
+ for(let i=0;i<W*H;i++){
+  if(!m[i]||vista[i])continue;
+  let x0=W,y0=H,x1=0,y1=0,n=0;
+  pila.push(i);vista[i]=1;
+  while(pila.length){
+   const p=pila.pop(),x=p%W,y=(p-x)/W;n++;
+   if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
+   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+    const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=W||yy>=H)continue;
+    const q=yy*W+xx;if(m[q]&&!vista[q]){vista[q]=1;pila.push(q);}
+   }
+  }
+  salida.push({x0,y0,x1,y1,n});
+ }
+ return salida;
+}
+// Grupos por cierre transitivo de la relación `unir` (unión-búsqueda).
+function agrupar(items,unir){
+ const padre=items.map((_,i)=>i);
+ const raiz=i=>padre[i]===i?i:(padre[i]=raiz(padre[i]));
+ for(let i=0;i<items.length;i++)for(let j=i+1;j<items.length;j++)if(unir(items[i],items[j]))padre[raiz(i)]=raiz(j);
+ const g=new Map();
+ items.forEach((c,i)=>{const r=raiz(i);if(!g.has(r))g.set(r,[]);g.get(r).push(c);});
+ const grupos=[...g.values()];
+ return grupos;
+}
+
+/* ------------------------------ Validación ----------------------------- */
+const FORMATOS={
+ obra:/^PRY\d{5}$/,
+ // Serie del año (ABP26) + número: «ABP261234» se guarda como «ABP26-1234».
+ stel:/^ABP\d{2}\d{4}$/
+};
+const canon=t=>String(t||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+const formatoStel=c=>c.slice(0,5)+"-"+c.slice(5);
+const cifrasObra=t=>{const m=String(t||"").match(/\b(\d{5})\s*$/);return m?m[1]:null;};
+
+/*
+ * lecturas: [{indice, texto_literal, tachado, tipo, lecturas:[{codigo, confianza}]}] (motor de visión).
+ * ctx: {obraImpresa, proveedorId, numero, fecha, anio, lote:[{obraImpresa, obra:{valor, estado}}],
+ *       catalogoObras:[{codigo, nombre}] | null, albaranStel(codigo) → {proveedorId, numero, fecha} | null}
+ * Devuelve {obra, stel}: cada uno {valor, literal, estado, confianza, resolucion{metodo, evidencias, alternativas}}.
+ */
+function validarCodigos(lecturas,ctx={}){
+ const salida={};
+ for(const [campo,tipo] of [["obra","PRY"],["stel","ABP"]]){
+  const vistas=(lecturas||[]).filter(l=>l.tipo===tipo&&!l.tachado);
+  const tachadas=(lecturas||[]).filter(l=>l.tipo===tipo&&l.tachado).map(l=>l.texto_literal);
+  if(!vistas.length){salida[campo]=vacio(tachadas.length?["Solo hay anotaciones tachadas: "+tachadas.join(", ")]:[]);continue;}
+  // Interpretaciones con el formato conocido (varias anotaciones o varias lecturas de una).
+  const cand=new Map();
+  for(const v of vistas)for(const l of v.lecturas||[]){
+   let c=canon(l.codigo);
+   // Código de obra con el prefijo cortado o borroso («Y12345»): las 5 cifras son el dato; el
+   // prefijo PRY es fijo. Solo si la anotación es de tipo PRY.
+   const parcial=campo==="obra"&&c.match(/^(?:P?R?Y)(\d{5})$/);
+   if(parcial)c="PRY"+parcial[1];
+   if(!FORMATOS[campo].test(c))continue;
+   const x=cand.get(c)||{codigo:c,confianza:0,literales:new Set(),anotaciones:0};
+   x.confianza=Math.max(x.confianza,Number(l.confianza)||0);x.literales.add(v.texto_literal);x.anotaciones++;
+   cand.set(c,x);
+  }
+  const literal=vistas.map(v=>v.texto_literal).join(" | ");
+  if(!cand.size){salida[campo]={...vacio(["Anotación «"+literal+"» sin el formato "+(campo==="obra"?"PRY + 5 cifras":"ABP + año + 4 cifras")]),literal};continue;}
+  const lista=[...cand.values()];
+  for(const x of lista)x.evidencias=evidencias(campo,x.codigo,ctx);
+  const validadas=lista.filter(x=>x.evidencias.length);
+  const alternativas=lista.map(x=>x.codigo);
+  if(validadas.length===1){
+   const x=validadas[0];
+   salida[campo]={valor:campo==="stel"?formatoStel(x.codigo):x.codigo,literal,estado:"OK",confianza:0.95,
+    resolucion:{metodo:"vision_recorte_validada",evidencias:["Visión: «"+literal+"»",...x.evidencias],alternativas}};
+  }else if(validadas.length>1){
+   salida[campo]={valor:null,literal,estado:"AMBIGUO",confianza:0,motivos:["Varias interpretaciones validadas: "+validadas.map(x=>x.codigo).join(" / ")],resolucion:{alternativas}};
+  }else if(lista.length===1&&lista[0].confianza>=0.9){
+   // Una sola lectura con el formato, pero nada externo la confirma: propuesta, no aceptada.
+   const x=lista[0];
+   salida[campo]={valor:campo==="stel"?formatoStel(x.codigo):x.codigo,literal,estado:"REVISAR",confianza:0.8,
+    motivos:["Formato correcto pero sin validación por obra impresa, lote, catálogo ni STEL"],resolucion:{metodo:"vision_recorte",evidencias:["Visión: «"+literal+"»"],alternativas}};
+  }else{
+   salida[campo]={valor:null,literal,estado:"AMBIGUO",confianza:0,motivos:["Interpretaciones plausibles sin validar: "+alternativas.join(" / ")],resolucion:{alternativas}};
+  }
+ }
+ return salida;
+}
+const vacio=motivos=>({valor:null,literal:"",estado:"VACIO",confianza:null,motivos});
+
+function evidencias(campo,codigo,ctx){
+ const ev=[];
+ if(campo==="obra"){
+  for(const t of [].concat(ctx.obraImpresa||[])){
+   const num=cifrasObra(t);
+   if(num&&codigo.slice(3)===num)ev.push("Coincide con el número de la obra impresa «"+t+"»");
+  }
+  const cat=(ctx.catalogoObras||[]).filter(o=>canon(o.codigo)===codigo);
+  if(cat.length===1)ev.push("Existe en el catálogo de obras: «"+cat[0].nombre+"»");
+ }else{
+  const alb=typeof ctx.albaranStel==="function"?ctx.albaranStel(formatoStel(codigo)):null;
+  if(alb){
+   const mismoProv=ctx.proveedorId!=null&&String(alb.proveedorId)===String(ctx.proveedorId);
+   const mismoNum=ctx.numero&&canon(alb.numero)===canon(ctx.numero);
+   const mismaFecha=ctx.fecha&&alb.fecha===ctx.fecha;
+   if(mismoProv&&(mismoNum||mismaFecha))ev.push("Albarán STEL "+formatoStel(codigo)+": mismo proveedor"+(mismoNum?", mismo número":"")+(mismaFecha?", misma fecha":""));
+  }
+ }
+ return ev;
+}
+
+/*
+ * Palabras que identifican una obra («MOLINO», «VEGAS», «NAVE», «PISCINAS»…), sin rótulos,
+ * números ni palabras comunes a todos los albaranes (la comarca, la empresa, el almacén).
+ */
+const VACIAS=new Set(["OBRA","OBRAS","REF","REFERENCIA","DATOS","PEDIDO","SU","DE","DEL","LA","EL","LOS","LAS","Y","EN","SL","SLU","SA",
+ "DAFRICA","BIERZO","LEON","PONFERRADA","CAMPONARAYA","ALMACEN","STOCK","TALLER","SUMINISTRO","MONTAJE","ENTREGA","CONTACTO","RETIRADO","POR"]);
+function palabrasObra(t){
+ return new Set(String(t||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/[^A-Z ]/g," ")
+  .split(/\s+/).filter(x=>x.length>=4&&!VACIAS.has(x)));
+}
+const claveObra=t=>{const p=[...palabrasObra(t)].sort();return p.length?p.join(" "):null;};
+const palabrasDoc=d=>new Set([...[].concat(d.obraImpresa||[]),...[].concat(d.obraEscrita||[])].flatMap(t=>[...palabrasObra(t)]));
+
+/*
+ * Coherencia del lote. Un código de obra que la visión lee con el formato correcto se acepta
+ * si en OTRO albarán del lote se ha leído, de forma independiente, el mismo código, ambos
+ * comparten una palabra distintiva de obra (impresa o escrita) y ningún albarán del lote con
+ * esa palabra tiene un código distinto. Si el lote se contradice, no se acepta nada por esta vía.
+ * docs: [{obraImpresa:[…], obraEscrita:[…], obra:{valor, estado, …}}] (se modifican).
+ */
+function coherenciaLote(docs){
+ const leidos=docs.filter(d=>d.obra?.valor&&["OK","REVISAR"].includes(d.obra.estado));
+ let cambios=0;
+ for(const d of leidos){
+  if(d.obra.estado!=="REVISAR")continue;
+  const mias=palabrasDoc(d);
+  if(!mias.size)continue;
+  const afines=leidos.filter(o=>o!==d&&[...palabrasDoc(o)].some(p=>mias.has(p)));
+  const iguales=afines.filter(o=>o.obra.valor===d.obra.valor);
+  const distintos=afines.filter(o=>o.obra.valor!==d.obra.valor);
+  if(iguales.length&&!distintos.length){
+   const comunes=[...new Set(iguales.flatMap(o=>[...palabrasDoc(o)].filter(p=>mias.has(p))))];
+   d.obra={...d.obra,estado:"OK",confianza:0.93,motivos:[],
+    resolucion:{...d.obra.resolucion,metodo:"vision_recorte_coherencia_lote",
+     evidencias:[...(d.obra.resolucion?.evidencias||[]),"Mismo código leído en "+iguales.length+" albarán(es) más del lote con la obra «"+comunes.join(", ")+"», sin códigos contradictorios"]}};
+   cambios++;
+  }
+ }
+ return cambios;
+}
+
+/* Textos de obra impresos: «OBRA: …», «Referencia: OBRA …», «OBRA/DATOS» con su casilla, «SU PEDIDO: …». */
+const RE_OBRA=/^(?:.*\b(?:OBRA(?:\/DATOS)?|SU PEDIDO|S\/REF|REFERENCIA)\b\s*[:.]?)\s*(.+)$/i;
+function obrasImpresas(lineas){
+ const out=[];
+ for(const l of lineas||[]){
+  const t=String(l.texto||"").trim();
+  const m=t.match(RE_OBRA);
+  if(m&&m[1]&&/[A-Za-z]{4}/.test(m[1]))out.push(m[1].trim());
+ }
+ return [...new Set(out)];
+}
+
+/*
+ * Flujo completo sobre un albarán escaneado ya leído (`resultado`, de escaneado.js).
+ * paginas: páginas OCR con gris(factor) y recortePng([x, y, w, h]).
+ * vision(recortes) → [{indice, texto_literal, tachado, tipo, lecturas}] (motor de visión SOLO de recortes).
+ * Devuelve {obra, stel, obraImpresa, obraEscrita, recortes} o null si no hay motor o imagen.
+ */
+async function leerManuscritos(paginas,resultado,vision,ctx={}){
+ if(typeof vision!=="function")return null;
+ const lecturas=[],recortes=[];
+ for(const p of paginas){
+  if(typeof p.gris!=="function"||typeof p.recortePng!=="function")continue;
+  const g=p.gris(4),k=g.dpi/72,f=p.anchoPx/g.ancho;
+  // Texto impreso leído con fiabilidad (se borra antes de buscar trazos).
+  // Solo con la altura del texto impreso de la página: un manuscrito leído por el OCR es más alto.
+  const impresas=[],lineas=(resultado._pags||[]).filter(x=>x.numero===p.numero).flatMap(pg=>pg.lineas);
+  const altos=lineas.map(l=>l.alto).sort((a,b)=>a-b),mediana=altos[Math.floor(altos.length/2)]||10;
+  for(const l of lineas)for(const c of l.celdas)if((c.conf??100)>=60&&l.alto<=1.5*mediana)impresas.push([c.x0*k,(l.y-l.alto)*k,c.x1*k,l.y*k]);
+  const zonas=detectarRegiones(g,impresas,{dpi:g.dpi});
+  for(const z of zonas){
+   // Margen: 0,35 alturas arriba y abajo; 2 alturas a los lados, porque los extremos de un
+   // código escrito con trazo muy claro («PR…», «…03») pueden quedar fuera de la zona detectada.
+   const h=(z.y1-z.y0+1)*f,m=0.35*h,mx=2*h;
+   const x0=Math.max(0,Math.floor(z.x0*f-mx)),y0=Math.max(0,Math.floor(z.y0*f-m));
+   const x1=Math.min(p.anchoPx,Math.ceil((z.x1+1)*f+mx)),y1=Math.min(p.altoPx,Math.ceil((z.y1+1)*f+m));
+   recortes.push({pagina:p.numero,caja:[x0,y0,x1-x0,y1-y0],png:p.recortePng([x0,y0,x1-x0,y1-y0])});
+  }
+ }
+ if(!recortes.length)return {obra:vacio([]),stel:vacio([]),obraImpresa:[],obraEscrita:[],recortes:[]};
+ for(let i=0;i<recortes.length;i+=8){
+  const r=await vision(recortes.slice(i,i+8).map(x=>x.png));
+  for(const x of r||[])if(Number.isInteger(x.indice)&&recortes[i+x.indice])lecturas.push({...x,indice:i+x.indice});
+ }
+ const lineas=(resultado._pags||[]).flatMap(p=>p.lineas);
+ const obraImpresa=[...obrasImpresas(lineas),...(resultado.lineas_ignoradas||[]).map(x=>String(x.texto||""))
+  // Anotación corta impresa o escrita en la tabla («Vegas», «OBRA VEGAS»), no nombres ni cifras.
+  .filter(t=>t.split(/\s+/).length<=3&&!/\d/.test(t)&&palabrasObra(t).size)];
+ const obraEscrita=lecturas.filter(l=>l.tipo==="OTRO"&&!l.tachado&&palabrasObra(l.texto_literal).size).map(l=>l.texto_literal);
+ const v=validarCodigos(lecturas,{...ctx,obraImpresa,proveedorId:resultado.proveedor?.id,numero:resultado.numero?.valor,fecha:resultado.fecha?.valor});
+ return {...v,obraImpresa,obraEscrita,recortes:recortes.map((x,i)=>({pagina:x.pagina,caja:x.caja,lectura:lecturas.find(l=>l.indice===i)||null}))};
+}
+
+return {detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,FORMATOS};
+});

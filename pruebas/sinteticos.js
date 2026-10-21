@@ -126,7 +126,7 @@ const DOCUMENTOS=[
    cabeceraProveedor(pg,"FERRETERÍA DEL SIL FICTICIA, S.L.",NIF.B,"Pol. Ind. Inventado, nave 3, 24400 Ponferrada");
    recuadroCliente(pg,"DESTINATARIO");
    pg.t("ALBARÁN Nº",40,125,{negrita:true});pg.t("FECHA",150,125,{negrita:true});pg.t("CÓD. CLIENTE",260,125,{negrita:true});
-   pg.t("003424",40,139);pg.t("17-10-26",150,139);pg.t("4300",260,139);
+   pg.t("003999",40,139);pg.t("17-10-26",150,139);pg.t("4300",260,139);
    const y=tabla(pg,[{titulo:"ARTÍCULO",x:40},{titulo:"DESCRIPCIÓN",x:100},{titulo:"CANTIDAD",x:290,derecha:true},
     {titulo:"PRECIO UNIDAD",x:390,derecha:true},{titulo:"SUBTOTAL",x:445,derecha:true},{titulo:"DTO",x:485,derecha:true},{titulo:"TOTAL",x:550,derecha:true}],[
     ["104578","BROCA SDS PLUS 10X160","3","4,95","14,85","10,00","13,37"],
@@ -136,7 +136,7 @@ const DOCUMENTOS=[
    pg.t("TOTAL ALBARÁN",380,y+20,{negrita:true});pg.t("26,57",550,y+20,{derecha:true});
    return ctx.pdf.save();
   },
-  esperado:{estado_documento:"AUTO_OK",tipo_pdf:"DIGITAL",proveedor_nif:NIF.B,numero:"003424",fecha:"2026-10-17",
+  esperado:{estado_documento:"AUTO_OK",tipo_pdf:"DIGITAL",proveedor_nif:NIF.B,numero:"003999",fecha:"2026-10-17",
    lineas:[
     {referencia:"104578",descripcion:"BROCA SDS PLUS 10X160",cantidad:3,precio:4.95,descuento:[10],importe:13.37},
     {referencia:"200011",descripcion:"GUANTE NITRILO T9",cantidad:12,precio:1.1,descuento:null,importe:13.2}
@@ -180,7 +180,8 @@ const DOCUMENTOS=[
     {referencia:"A-100",descripcion:"TORNILLO 4X40 ZINCADO",cantidad:1000,precio:null,descuento:null,importe:null},
     {referencia:"A-200",descripcion:"TACO NYLON 6MM",cantidad:5,precio:null,descuento:null,importe:null},
     {referencia:"A-300",descripcion:"ARANDELA M6",cantidad:12,precio:null,descuento:null,importe:null}
-   ],marcados:["lineas.1.cantidad"]}
+   // NIF válido pero no registrado: se conserva y queda marcado para revisión (no se acepta solo).
+   ],marcados:["lineas.1.cantidad","cabecera.proveedor_nif"]}
  },
  {
   id:"S05-descuadre-precio-por-100-sin-fecha",
@@ -296,7 +297,7 @@ const DOCUMENTOS=[
   },
   esperado:{estado_documento:"REVISAR",tipo_pdf:"DIGITAL",proveedor_nif:NIF.D,numero:"55001",fecha:"2026-10-10",
    lineas:[{referencia:"T-9",descripcion:"TUERCA M10",cantidad:40,precio:null,descuento:null,importe:null}],
-   marcados:[]}
+   marcados:["cabecera.proveedor_nif"]}
  },
  {
   id:"S11-fecha-sin-etiqueta-fila-sin-cantidad-portes",
