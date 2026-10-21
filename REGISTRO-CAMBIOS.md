@@ -3,6 +3,23 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Objetivo > 95 %: códigos de obra con el catálogo de obras de STEL
+
+**Producción:** desplegada `compras-catalogo-lectura` v5 (solo lectura). Web publicada en `main`
+(versión `20261021lector10`; copia previa en `respaldo/main-antes-lector10`).
+
+- Situación medida (lectura del usuario con visión): 506 de 602 campos (84,1 %); para el 95 %
+  faltan 66. Cifras, descuentos, importes y totales ya están entre el 95 y el 100 %; lo que falta
+  está en los manuscritos (STEL 29 sin validar, obra 21), códigos (18) y descripciones (10).
+- La función lee también los proyectos de STEL (solo código PRY y nombre) en la descarga inicial.
+- Validación de un código de obra manuscrito con el catálogo: existir ya no basta (los PRY son
+  correlativos y una cifra mal leída suele dar otro código existente). Con una sola lectura de
+  la visión hace falta además que el nombre de la obra en STEL comparta una palabra distintiva
+  con la obra impresa o escrita en el albarán; entre varias lecturas (1/7), solo decide si
+  existe exactamente una. Regresión en `manuscritos.test.js`.
+- Caché del catálogo con clave nueva (`dafrica_catalogo_stel_v2`) para incluir las obras.
+- Pruebas: 206 superadas.
+
 ## 2026-10-21 · Catálogo STEL guardado en el navegador y reanudable (cupo de consultas de STEL)
 
 **Producción:** desplegada `compras-catalogo-lectura` v4 (solo lectura). Web publicada en `main`

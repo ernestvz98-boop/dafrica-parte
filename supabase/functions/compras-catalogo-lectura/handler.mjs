@@ -55,6 +55,14 @@ export async function leerPaginas(fetcher,ruta,clave,{maxPaginas=200,simultaneas
   return fin(false,'limite_paginas');
  }catch(e){return fin(false,String(e?.message||e).slice(0,80));}
 }
+// Código PRY de un proyecto de STEL: en su referencia o, si no, un único «PRY…» en su nombre.
+const normPry=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+export function codigoProyecto(x){
+ for(const k of ['reference','project-reference','code','full-reference']){const c=normPry(x?.[k]);if(/^PRY\d{5}$/.test(c))return c;}
+ const t=String(x?.name||x?.title||'').toUpperCase().match(/(?:^|[^A-Z0-9])PRY\s*\d{5}(?=$|[^A-Z0-9])/g)||[];
+ const cs=[...new Set(t.map(normPry))];
+ return cs.length===1?cs[0]:'';
+}
 export async function handler(req,{fetcher=fetch,env}={}){
  if(req.method==='OPTIONS')return new Response(null,{headers:cors});
  if(req.method!=='POST')return json({error:'Método no permitido'},405);
@@ -79,11 +87,15 @@ export async function handler(req,{fetcher=fetch,env}={}){
   // Proveedores y después artículos: nunca dos consultas a STEL a la vez. Al reanudar (desde > 0)
   // no se repiten los proveedores: el navegador ya los tiene guardados.
   const s=desde?{filas:[],completo:false,paginas:0,motivo:'no_solicitado'}:await leerPaginas(fetcher,'suppliers',stel,{maxPaginas:20});
+  // Proyectos (obras) de STEL: solo código y nombre, para validar los códigos de obra manuscritos.
+  const o=desde?{filas:[],completo:false,paginas:0,motivo:'no_solicitado'}:await leerPaginas(fetcher,'projects',stel,{maxPaginas:30});
   const a=await leerPaginas(fetcher,'products',stel,{desde:desde||0});
   const activo=x=>x.deleted!==true&&x.inactive!==true;
   return json({solo_lectura:true,persistido:false,escritura_supabase:false,escritura_stel:false,
    proveedores_completo:s.completo,articulos_completo:a.completo,
-   diagnostico:{proveedores:{paginas:s.paginas,motivo:s.motivo||null},articulos:{paginas:a.paginas,motivo:a.motivo||null}},
+   obras_completo:o.completo,
+   diagnostico:{proveedores:{paginas:s.paginas,motivo:s.motivo||null},obras:{paginas:o.paginas,motivo:o.motivo||null},articulos:{paginas:a.paginas,motivo:a.motivo||null}},
+   obras:o.filas.filter(activo).map(x=>({id:x.id,codigo:codigoProyecto(x),nombre:String(x.name||x.title||'').slice(0,150)})).filter(x=>x.codigo),
    articulos_desde:desde||0,articulos_siguiente:a.siguiente,articulos_ids_inicio:a.ids_inicio,articulos_ids_final:a.ids_final,
    proveedores:s.filas.filter(activo).map(x=>({id:x.id,nombre:String(x.name||x['fiscal-name']||''),nif:String(x['tax-identification-number']||'')})),
    articulos:a.filas.filter(activo).map(x=>({id:x.id,referencia:String(x.reference||''),descripcion:String(x.name||'')}))});

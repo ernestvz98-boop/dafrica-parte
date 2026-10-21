@@ -37,7 +37,8 @@ async function obtenerCatalogo({consultar,almacen=null,ahora=Date.now()}){
    resultado={...r,creado:parcial.creado,origen:"reanudado",
     articulos:[...parcial.articulos,...(r.articulos||[]).filter(a=>!vistos.has(String(a.id)))],
     proveedores:r.proveedores_completo?r.proveedores:parcial.proveedores,
-    proveedores_completo:r.proveedores_completo||parcial.proveedores_completo};
+    proveedores_completo:r.proveedores_completo||parcial.proveedores_completo,
+    obras:r.obras_completo?r.obras:parcial.obras,obras_completo:r.obras_completo||parcial.obras_completo};
   }else if(!r||!(r.articulos_ids_inicio||[]).length){
    // STEL no ha devuelto nada (cupo agotado, error): se conserva lo guardado sin gastar más consultas.
    return {...parcial,diagnostico:r?.diagnostico||parcial.diagnostico,origen:"parcial_sin_avance"};
@@ -53,7 +54,7 @@ async function obtenerCatalogo({consultar,almacen=null,ahora=Date.now()}){
 }
 
 /* Almacén en localStorage (si el navegador lo permite). */
-function almacenLocal(clave="dafrica_catalogo_stel_v1",ls=typeof localStorage!=="undefined"?localStorage:null){
+function almacenLocal(clave="dafrica_catalogo_stel_v2",ls=typeof localStorage!=="undefined"?localStorage:null){
  return {leer:()=>{const t=ls?.getItem(clave);return t?JSON.parse(t):null;},guardar:o=>ls?.setItem(clave,JSON.stringify(o))};
 }
 return {obtenerCatalogo,almacenLocal,VIGENCIA_COMPLETO,VIGENCIA_PARTES};

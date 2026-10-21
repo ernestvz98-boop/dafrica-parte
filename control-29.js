@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261021lector9";
+const VERSION_LECTOR="20261021lector10";
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -92,13 +92,15 @@ function montar(root){
    };
    const nombreProveedor=x=>(x?.proveedor?.account_id!=null&&(catalogo?.proveedores||[]).find(p=>String(p.id)===String(x.proveedor.account_id))?.nombre)||x?.proveedor?.nombre||null;
    if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo,
-    motivo:catalogo.diagnostico?.articulos?.motivo||null,paginas:catalogo.diagnostico?.articulos?.paginas??null,origen:catalogo.origen||null});
+    motivo:catalogo.diagnostico?.articulos?.motivo||null,paginas:catalogo.diagnostico?.articulos?.paginas??null,origen:catalogo.origen||null,
+    obras:(catalogo.obras||[]).length,obras_completo:!!catalogo.obras_completo});
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
     const fuente=await lib.motorNavegador.abrirFuente(pdfjs,bytes,{alProgresar:t=>{estado.textContent=f.name+" · "+t;}});
     try{
      const r=await lib.lector.leerPdf(fuente,{registro:lib.proveedores.REGISTRO,vision,tamLote:5,cancelado:()=>detener,
+      catalogoObras:catalogo?.obras_completo?catalogo.obras:null,
       alProgresar:e=>{
        barra.max=e.total;barra.value=e.pagina||e.total;
        estado.textContent="PDF "+(i+1)+"/"+lista.length+" «"+f.name+"» · página "+(e.pagina||e.total)+"/"+e.total+
@@ -135,7 +137,7 @@ function montar(root){
   const n=e=>r.documentos.filter(d=>d.estado_documento===e).length;
   const ETIQ={AUTO_OK:"AUTO_OK · verificado",REVISAR:'<span class="error">REVISAR</span>',ERROR_DOCUMENTO:'<b class="error">ERROR_DOCUMENTO</b>'};
   const m=r.motores,v=m?.vision,cat=m?.catalogo;
-  const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?esc(cat.articulos)+' artículos'+({cache:' (guardado en este navegador)',reanudado:' (descarga reanudada)',parcial_sin_avance:' (STEL no ha respondido; se usa lo guardado)'}[cat.origen]||'')+(cat.completo?'':' (<b>incompleto</b>'+(cat.motivo?': '+esc(cat.motivo):'')+'; sin catálogo completo no se validan códigos)'):'<b>no disponible</b>'+(cat.error?' ('+esc(cat.error)+')':''))+
+  const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?(cat.obras_completo?esc(cat.obras)+' obras y ':'obras <b>no disponibles</b> · ')+esc(cat.articulos)+' artículos'+({cache:' (guardado en este navegador)',reanudado:' (descarga reanudada)',parcial_sin_avance:' (STEL no ha respondido; se usa lo guardado)'}[cat.origen]||'')+(cat.completo?'':' (<b>incompleto</b>'+(cat.motivo?': '+esc(cat.motivo):'')+'; sin catálogo completo no se validan códigos)'):'<b>no disponible</b>'+(cat.error?' ('+esc(cat.error)+')':''))+
    ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas'+(v.ultimo_error?': '+esc(v.ultimo_error):'')+')':esc(v.llamadas)+' consultas')+
    (m.stel_albaranes?' · albaranes STEL (códigos ABP): '+esc(m.stel_albaranes.validados)+' validados en '+esc(m.stel_albaranes.consultas)+' consultas'+
     (m.stel_albaranes.fallos?' (<b>'+esc(m.stel_albaranes.fallos)+' fallidas</b>'+(m.stel_albaranes.ultimo_error?': '+esc(m.stel_albaranes.ultimo_error):'')+')':''):'')+

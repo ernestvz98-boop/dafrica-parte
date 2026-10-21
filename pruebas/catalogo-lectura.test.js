@@ -88,3 +88,22 @@ test('lectura reanudable: «desde» continúa en esa fila y devuelve los ids par
   assert.equal(r.status,400);
  }
 });
+test('obras de STEL: solo código PRY y nombre; el código sale de la referencia o de un único «PRY» en el nombre',async()=>{
+ const {codigoProyecto,handler}=await mod();
+ assert.equal(codigoProyecto({reference:'PRY00123'}),'PRY00123');
+ assert.equal(codigoProyecto({reference:'',name:'PRY 00124 Nave ficticia'}),'PRY00124');
+ assert.equal(codigoProyecto({name:'PRY00125 y PRY00126'}),'');
+ assert.equal(codigoProyecto({name:'Obra sin código'}),'');
+ const env=k=>({SUPABASE_URL:'https://test.invalid',SUPABASE_ANON_KEY:'a',STEL_API_KEY:'c'})[k],rutas=[];
+ const r=await handler(new Request('https://test.invalid',{method:'POST',headers:{authorization:'Bearer x','Content-Type':'application/json'},body:'{}'}),{env,fetcher:async(url,op)=>{
+  if(url.endsWith('/user'))return response({id:1});if(url.endsWith('/mis_permisos'))return response([{codigo:'costes.ver'}]);
+  const u=new URL(url);rutas.push(u.pathname);assert.equal(op.method,'GET');if(u.searchParams.get('start')!=='0')return response([]);
+  if(u.pathname.endsWith('/projects'))return response([{id:7,reference:'PRY00123',name:'Nave ficticia','budget':1000},{id:8,name:'Sin código'}]);
+  return response([]);
+ }});
+ const d=await r.json();
+ assert.equal(d.obras_completo,true);assert.deepEqual(d.obras,[{id:7,codigo:'PRY00123',nombre:'Nave ficticia'}]);
+ assert.ok(!JSON.stringify(d).includes('budget'));
+ // Nunca dos consultas a STEL a la vez: proveedores, obras y artículos en orden.
+ assert.deepEqual([...new Set(rutas.map(x=>x.split('/').pop()))],['suppliers','projects','products']);
+});

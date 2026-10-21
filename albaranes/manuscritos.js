@@ -189,6 +189,14 @@ function validarCodigos(lecturas,ctx={}){
   if(!cand.size){salida[campo]={...vacio(["Anotación «"+literal+"» sin el formato "+(campo==="obra"?"PRY + 5 cifras":"ABP + año + 4 cifras")]),literal};continue;}
   const lista=[...cand.values()];
   for(const x of lista)x.evidencias=evidencias(campo,x.codigo,ctx);
+  // Existir en el catálogo de obras solo decide entre VARIAS lecturas de la visión (1/7): los
+  // códigos PRY son correlativos y una cifra mal leída suele dar otro código que también existe.
+  if(campo==="obra"&&lista.length>1){
+   const enCatalogo=lista.filter(x=>(ctx.catalogoObras||[]).filter(o=>canon(o.codigo)===x.codigo).length===1);
+   if(enCatalogo.length===1&&!enCatalogo[0].evidencias.length)
+    enCatalogo[0].evidencias.push("De las lecturas "+lista.map(x=>x.codigo).join(" / ")+", solo esta existe en el catálogo de obras: «"+
+     (ctx.catalogoObras.find(o=>canon(o.codigo)===enCatalogo[0].codigo).nombre)+"»");
+  }
   const validadas=lista.filter(x=>x.evidencias.length);
   const alternativas=lista.map(x=>x.codigo);
   if(validadas.length===1){
@@ -217,8 +225,14 @@ function evidencias(campo,codigo,ctx){
    const num=cifrasObra(t);
    if(num&&codigo.slice(3)===num)ev.push("Coincide con el número de la obra impresa «"+t+"»");
   }
+  // Catálogo de obras: el código existe (una vez) y su nombre comparte una palabra distintiva con
+  // la obra impresa o escrita en el albarán.
   const cat=(ctx.catalogoObras||[]).filter(o=>canon(o.codigo)===codigo);
-  if(cat.length===1)ev.push("Existe en el catálogo de obras: «"+cat[0].nombre+"»");
+  if(cat.length===1){
+   const delAlbaran=new Set([...[].concat(ctx.obraImpresa||[]),...[].concat(ctx.obraEscrita||[])].flatMap(t=>[...palabrasObra(t)]));
+   const comunes=[...palabrasObra(cat[0].nombre)].filter(p=>delAlbaran.has(p));
+   if(comunes.length)ev.push("Obra «"+cat[0].nombre+"» del catálogo de STEL, con «"+comunes.join(", ")+"» también en el albarán");
+  }
  }else{
   const alb=typeof ctx.albaranStel==="function"?ctx.albaranStel(formatoStel(codigo)):null;
   if(alb){
@@ -321,7 +335,7 @@ async function leerManuscritos(paginas,resultado,vision,ctx={}){
   // Anotación corta impresa o escrita en la tabla («Vegas», «OBRA VEGAS»), no nombres ni cifras.
   .filter(t=>t.split(/\s+/).length<=3&&!/\d/.test(t)&&palabrasObra(t).size)];
  const obraEscrita=lecturas.filter(l=>l.tipo==="OTRO"&&!l.tachado&&palabrasObra(l.texto_literal).size).map(l=>l.texto_literal);
- const v=validarCodigos(lecturas,{...ctx,obraImpresa,proveedorId:resultado.proveedor?.id,numero:resultado.numero?.valor,fecha:resultado.fecha?.valor});
+ const v=validarCodigos(lecturas,{...ctx,obraImpresa,obraEscrita,proveedorId:resultado.proveedor?.id,numero:resultado.numero?.valor,fecha:resultado.fecha?.valor});
  return {...v,obraImpresa,obraEscrita,recortes:recortes.map((x,i)=>({pagina:x.pagina,caja:x.caja,lectura:lecturas.find(l=>l.indice===i)||null}))};
 }
 

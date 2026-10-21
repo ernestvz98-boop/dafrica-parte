@@ -160,3 +160,14 @@ test("código STEL manuscrito: se valida con el albarán de compra de STEL (solo
  // Varias coincidencias exactas en STEL: no es única.
  r=base();assert.equal(await validarStel(r,async()=>[...stel["ABP26-1234"],...stel["ABP26-1234"]]),false);
 });
+
+test("una sola lectura PRY: existir en el catálogo no basta; hace falta que el nombre de la obra coincida con el albarán",()=>{
+ const catalogoObras=[{codigo:"PRY00123",nombre:"REFORMA NAVE FICTICIA"},{codigo:"PRY00124",nombre:"VIVIENDA INVENTADA"}];
+ const solo=validarCodigos([vista("PRY00123",[["PRY00123",0.95]])],{catalogoObras});
+ assert.equal(solo.obra.estado,"REVISAR");
+ const conObra=validarCodigos([vista("PRY00123",[["PRY00123",0.95]])],{catalogoObras,obraImpresa:["OBRA: NAVE POLIGONO"]});
+ assert.equal(conObra.obra.estado,"OK");assert.match(conObra.obra.resolucion.evidencias.join(" "),/NAVE/);
+ // Nombre de otra obra: no corrobora.
+ const otra=validarCodigos([vista("PRY00123",[["PRY00123",0.95]])],{catalogoObras,obraEscrita:["Vivienda"]});
+ assert.equal(otra.obra.estado,"REVISAR");
+});
