@@ -16,9 +16,19 @@ base de datos ni en las funciones Edge.
   de recortes y siempre validada; catálogo STEL solo lectura.
 - `index.html`: versión de los scripts `20261021lector4` (el navegador no reutiliza copias
   antiguas).
-- Probado en Chromium con la aplicación completa (inicio de sesión con Supabase simulado en la
-  prueba, menú, recarga directa al módulo, lectura de los 3 PDF reales, descarga del JSON y
-  medición con `pruebas/evaluar-web.js`). Sin errores de JavaScript.
+- La pantalla, el JSON y `evaluar-web.js` indican si el catálogo STEL y la visión estuvieron
+  disponibles en cada lectura (sin ellos, los campos dudosos quedan en REVISAR).
+- Fallo hallado en el navegador (pdf.js desplaza el límite entre DTO e IMPORTE): «50 3,30» se
+  leía como descuentos en cascada con el importe vacío (en revisión, no crítico). El último
+  valor pasa a importe solo si tiene forma de importe y la línea cuadra exactamente. Regresión.
+- Probado en Chromium con la aplicación completa: inicio de sesión (Supabase simulado en la
+  prueba; pdf.js servido localmente porque este Chromium no sale a Internet), menú, recarga
+  directa al módulo, lectura de los 3 PDF reales a la vez (30 páginas, 666 s), descarga del
+  JSON y medición con `pruebas/evaluar-web.js`: separación 30/30, **484/545 campos correctos y
+  automáticos (88,8 %), 0 errores críticos**, 6 AUTO_OK sin ningún error, sin errores de
+  JavaScript. Sin sesión real, catálogo y visión no participan (48 consultas de visión que con
+  sesión se harían). Node, con los mismos cambios: nativo 495 (90,8 %), perfiles públicos 493
+  (90,5 %), tesseract.js 491 (90,1 %); 0 críticos en todos. 195 pruebas superadas.
 
 ## 2026-10-21 · Lector PDF: fallos hallados en Chromium real (motor de la web, tesseract.js)
 
