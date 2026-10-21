@@ -59,3 +59,16 @@ test('rechaza recibir PDF o cualquier orden de escritura en la consulta de catá
   return response(url.endsWith('/user')?{id:'ficticio'}:[{codigo:'costes.ver'}]);
  }});assert.equal(r.status,400);assert.equal(stel,0);
 });
+test('STEL rechaza un momento (403/429): se reintenta con espera y la lectura sigue de una en una',async()=>{
+ const {leerPaginas}=await mod(),llamadas=[];let fallos=2,enVuelo=0,maxEnVuelo=0;
+ const r=await leerPaginas(async url=>{
+  enVuelo++;maxEnVuelo=Math.max(maxEnVuelo,enVuelo);await new Promise(x=>setTimeout(x,1));enVuelo--;
+  const n=Number(new URL(url).searchParams.get('start'));llamadas.push(n);
+  if(n===200&&fallos-->0)return response({},403);
+  return response(Array.from({length:Math.max(0,Math.min(100,250-n))},(_,i)=>({id:n+i+1})));
+ },'products','ficticia',{dormir:async()=>{}});
+ assert.equal(r.completo,true);assert.equal(r.filas.length,250);assert.equal(maxEnVuelo,1);
+ // Un error que persiste tras los reintentos deja el catálogo incompleto y lo dice.
+ const malo=await leerPaginas(async()=>response({},403),'products','ficticia',{dormir:async()=>{}});
+ assert.equal(malo.completo,false);assert.match(malo.motivo,/403/);
+});

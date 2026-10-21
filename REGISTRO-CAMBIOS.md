@@ -3,6 +3,19 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Lectura de los 3 PDF reales con la sesión del usuario
+
+**Producción:** desplegada `compras-catalogo-lectura` v3 (solo lectura). Web sin cambios.
+
+- Resultado (versión `20261021lector7`, 3 PDF, 30 albaranes, 545 campos): separación 30/30,
+  **484 correctos y automáticos (88,8 %), 0 errores críticos**, 6 AUTO_OK sin ningún error.
+  Igual que la medición en Chromium sin sesión: la segunda fase no participó.
+- Visión: 48 de 48 consultas fallidas, **«OpenAI 429 credit_balance_exhausted»**: la cuenta de
+  OpenAI no tiene saldo. Lo resuelve el usuario recargándola; no requiere cambios de código.
+- Catálogo: STEL respondió **403** en la página 44 al pedir 4 páginas a la vez (v2). v3 pide de
+  una en una (proveedores y después artículos, nunca dos consultas a la vez) y reintenta 403,
+  429 y 5xx con espera creciente (1,5 s, 4 s, 8 s). Regresión en `catalogo-lectura.test.js`.
+
 ## 2026-10-21 · Primera lectura con la sesión del usuario: visión y catálogo
 
 **Producción:** desplegadas `albaranes-manuscritos` v2 y `compras-catalogo-lectura` v2 (solo
