@@ -22,7 +22,7 @@
  else{root.DafricaAlbaranes=root.DafricaAlbaranes||{};root.DafricaAlbaranes.escaneado=api;}
 })(typeof globalThis!=="undefined"?globalThis:this,function(root,req){
 
-const M=k=>req?req("./"+{extraer:"extraer.js",ocr:"ocr.js",normalizar:"normalizar.js",manuscritos:"manuscritos.js"}[k]):root.DafricaAlbaranes[k];
+const M=k=>req?req("./"+{extraer:"extraer.js",ocr:"ocr.js",normalizar:"normalizar.js",manuscritos:"manuscritos.js",etiquetas:"etiquetas.js"}[k]):root.DafricaAlbaranes[k];
 // La binarización adaptativa (Sauvola) rescata rótulos y cifras sobre fondos grises.
 const LECTURAS=[{psm:4},{psm:6},{psm:3},{psm:4,umbral:"sauvola"}];
 
@@ -615,9 +615,16 @@ async function extraerEscaneado(paginas,opciones={}){
  // Anotaciones manuscritas (códigos de obra y de STEL): solo con un motor de visión de recortes.
  if(opciones.vision){
   try{principal.manuscritos=await M("manuscritos").leerManuscritos(paginas,principal,opciones.vision,
-   {catalogoObras:opciones.catalogoObras||null,albaranStel:opciones.albaranStel||null,compararModelos:opciones.compararModelos||null});
+   {catalogoObras:opciones.catalogoObras||null,catalogoObrasCompleto:opciones.catalogoObrasCompleto,albaranStel:opciones.albaranStel||null,compararModelos:opciones.compararModelos||null});
    M("manuscritos").aplicarEstado(principal);}
   catch(e){principal.manuscritos=null;principal.incidencias=[...(principal.incidencias||[]),"No se han podido leer los manuscritos: "+String(e?.message||e).slice(0,120)];}
+ }
+ // Etiqueta de obra con QR pegada en el albarán (código exacto, impreso): con jsQR disponible.
+ if(typeof opciones.qr==="function"){
+  try{
+   const h=M("etiquetas").detectar(paginas,opciones.qr);
+   if(M("etiquetas").aplicar(principal,h)&&principal.manuscritos)M("manuscritos").aplicarEstado(principal);
+  }catch(e){principal.incidencias=[...(principal.incidencias||[]),"No se han podido leer las etiquetas QR: "+String(e?.message||e).slice(0,120)];}
  }
  principal.orientacion=orientacion;
  const giradas=orientacion.filter(o=>o.grados);

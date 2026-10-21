@@ -193,7 +193,8 @@ function validarCodigos(lecturas,ctx={}){
   for(const x of lista)x.evidencias=evidencias(campo,x.codigo,ctx);
   // Existir en el catálogo de obras solo decide entre VARIAS lecturas de la visión (1/7): los
   // códigos PRY son correlativos y una cifra mal leída suele dar otro código que también existe.
-  if(campo==="obra"&&lista.length>1){
+  // Solo con el catálogo COMPLETO (el de STEL): en una lista parcial la lectura correcta puede faltar.
+  if(campo==="obra"&&lista.length>1&&ctx.catalogoObrasCompleto!==false){
    const enCatalogo=lista.filter(x=>(ctx.catalogoObras||[]).filter(o=>canon(o.codigo)===x.codigo).length===1);
    if(enCatalogo.length===1&&!enCatalogo[0].evidencias.length)
     enCatalogo[0].evidencias.push("De las lecturas "+lista.map(x=>x.codigo).join(" / ")+", solo esta existe en el catálogo de obras: «"+
@@ -270,7 +271,7 @@ const palabrasDoc=d=>new Set([...[].concat(d.obraImpresa||[]),...[].concat(d.obr
  * Si el lote se contradice, no se acepta nada por esta vía.
  * docs: [{obraImpresa:[…], obraEscrita:[…], obra:{valor, estado, …}}] (se modifican).
  */
-const VALIDADA_INDEPENDIENTE=new Set(["vision_recorte_validada"]);
+const VALIDADA_INDEPENDIENTE=new Set(["vision_recorte_validada","etiqueta_qr"]);
 function coherenciaLote(docs){
  const leidos=docs.filter(d=>d.obra?.valor&&["OK","REVISAR"].includes(d.obra.estado));
  let cambios=0;
@@ -442,5 +443,25 @@ async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null}={
  return true;
 }
 
-return {detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,fechaStel,FORMATOS};
+/*
+ * Vuelve a validar el código de obra con más contexto (después de leer): el nombre de la obra
+ * del albarán de compra de STEL (lo escribió la oficina) y el catálogo de obras disponible. Usa
+ * las mismas lecturas de la visión y la misma regla (validarCodigos); solo cambia un código que
+ * no estaba aceptado. Devuelve true si queda validado.
+ */
+function revalidarObra(r,{catalogoObras=null,catalogoObrasCompleto=false,obraStel=null}={}){
+ const m=r?.manuscritos;
+ if(!m||(m.obra?.estado==="OK")||!Array.isArray(m.recortes))return false;
+ const lecturas=m.recortes.map(x=>x.lectura).filter(Boolean);
+ if(!lecturas.some(l=>l.tipo==="PRY"))return false;
+ const obraEscrita=[...(m.obraEscrita||[]),...(obraStel?[obraStel]:[])];
+ const v=validarCodigos(lecturas,{catalogoObras,catalogoObrasCompleto,obraImpresa:m.obraImpresa||[],obraEscrita,
+  proveedorId:r.proveedor?.id,numero:r.numero?.valor,fecha:r.fecha?.valor});
+ if(v.obra?.estado!=="OK")return false;
+ const usaStel=obraStel&&[...palabrasObra(obraStel)].some(p=>(v.obra.resolucion?.evidencias||[]).join(" ").toUpperCase().includes(p));
+ m.obra={...v.obra,resolucion:{...v.obra.resolucion,evidencias:[...(v.obra.resolucion?.evidencias||[]),...(usaStel?["Obra del albarán de compra de STEL: «"+obraStel+"»"]:[])]}};
+ return true;
+}
+
+return {revalidarObra,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,fechaStel,FORMATOS};
 });

@@ -3,6 +3,49 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · ABP por el título de STEL, catálogo de obras, tarifas y etiquetas QR (lector18)
+
+**Producción:** web en `main` (versión `20261021lector18`; copia previa en
+`respaldo/main-antes-lector18`). Función Edge `stel-albaranes-consulta` v4 (solo lectura; modo
+`buscar` nuevo, el modo por referencia sigue igual). Base de datos: migración
+`supabase/migraciones/20261021_lector_obras_y_tarifas.sql` (tabla `lector_obras`; columnas `origen` y
+`clase` en `lector_referencias_confirmadas`; RLS: leer `costes.ver`, escribir `costes.editar`;
+reversión en el propio fichero). Sin escrituras en STEL.
+
+Análisis de la última lectura del usuario (519/605): 38 de los 86 fallos son letra a mano (obra 23,
+STEL 15) y 31 códigos/descripciones de artículo. Lo impreso numérico ya está entre 95 y 100 %.
+
+- **ABP sin leer la letra a mano** (`albaranes/compras-stel.js`): en STEL el título del albarán de
+  compra es «número del proveedor + fecha + obra». Una consulta por lectura trae los albaranes de
+  compra de los proveedores leídos (filtro por cuenta comprobado o, si STEL lo ignora, los más
+  recientes desde el final). Se acepta solo con: cuenta del proveedor verificada por CIF, el número
+  como palabra del título de UN único albarán de esa cuenta y la misma fecha. Dos albaranes leídos
+  con el mismo de STEL, o un ABP a mano validado distinto: a revisión. Si el número del papel estaba
+  en revisión y coincide así, queda confirmado. Reproducido sobre la lectura del usuario con los
+  albaranes de STEL guardados: 14 encontrados, 14 correctos, 2 números confirmados (correctos).
+- **Catálogo de obras propio** (`lector_obras`): STEL no publica los proyectos en su API. Se llena
+  importando la lista (CSV/Excel) o con «Confirmar obra» en la revisión. Al ser incompleto solo
+  valida un código si su nombre coincide con la obra del albarán o del título de STEL (nuevo:
+  `manuscritos.revalidarObra`); la regla «solo una lectura existe en el catálogo» exige el
+  catálogo completo de STEL (`catalogoObrasCompleto`).
+- **Tarifas de proveedor** (`albaranes/datos-referencia.js`): CSV/Excel → código y descripción
+  (nunca precios) en `lector_referencias_confirmadas` con origen «tarifa». Validación: un solo
+  código equivalente (O/0, S/5…) en la tarifa y descripción compatible; si hay dos equivalentes, ni
+  la coincidencia exacta decide (también para los confirmados por una persona). Los códigos se
+  piden a la base de datos solo para las clases leídas en esa lectura.
+- **Etiquetas de obra con QR** (`albaranes/etiquetas.js`): hoja A4 descargable (código grande,
+  nombre y QR «DAFRICA-OBRA:PRY…»). El lector busca el QR en cada página escaneada: obra exacta
+  (`etiqueta_qr`, ancla válida para la coherencia del lote); dos etiquetas distintas → AMBIGUO;
+  letra a mano validada distinta → REVISAR. Comprobado: hoja impresa en PDF y leída a 150 ppp.
+- Librerías en `albaranes/vendor/` (jsQR 1.4.0, qrcode-generator 1.4.4, xlsx 0.18.5, de npm, con
+  sus licencias): la política de seguridad de la web solo admite scripts propios y de cdnjs.
+- Chromium con la aplicación completa (datos simulados): importar obras (CSV) y tarifa (Excel),
+  descargar etiquetas, QR leído en un escaneo real (obra correcta), 10/10 ABP por número sin
+  ningún error, botones «Confirmar obra», consulta selectiva de códigos, sin errores de JavaScript.
+- Pruebas nuevas: `stel-compras-consulta`, `compras-stel`, `datos-referencia`, `etiquetas`, tarifas en
+  `confirmadas`, `revalidarObra` y catálogo incompleto en `manuscritos`. 243 pruebas. Corpus sin
+  visión sin cambios: 91,0 % / 90,6 % / sintético 93,3 %, 0 críticos.
+
 ## 2026-10-21 · Códigos confirmados por una persona y prueba de modelos de visión
 
 **Producción:** web en `main` (versión `20261021lector17`; copia previa en

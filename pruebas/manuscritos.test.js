@@ -217,3 +217,20 @@ test("código STEL: el proveedor se compara por la cuenta de STEL verificada con
  // Otra cuenta, aunque el nombre coincida: no.
  r=base();assert.equal(await validarStel(r,async()=>[{...doc,accountId:778,supplier:"PROVEEDOR FICTICIO SL"}]),false);
 });
+
+test("revalidarObra: el nombre de obra del albarán de compra de STEL corrobora el código del catálogo; otro nombre, no",()=>{
+ const {revalidarObra}=require("../albaranes/manuscritos.js");
+ const r=()=>({proveedor:{id:"A"},numero:{valor:"1"},fecha:{valor:"2026-10-14"},manuscritos:{obra:{valor:"PRY12345",estado:"REVISAR"},stel:{estado:"VACIO"},obraImpresa:[],obraEscrita:[],
+  recortes:[{lectura:{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY 12345",lecturas:[{codigo:"PRY12345",confianza:0.95}]}}]}});
+ const cat=[{codigo:"PRY12345",nombre:"ALAMEDA FICTICIA"},{codigo:"PRY12845",nombre:"PISCINA FICTICIA"}];
+ const a=r();assert.equal(revalidarObra(a,{catalogoObras:cat,obraStel:"ALAMEDA"}),true);
+ assert.equal(a.manuscritos.obra.estado,"OK");assert.ok(a.manuscritos.obra.resolucion.evidencias.some(e=>/STEL/.test(e)));
+ const b=r();assert.equal(revalidarObra(b,{catalogoObras:cat,obraStel:"GIRASOL"}),false);
+ assert.equal(b.manuscritos.obra.estado,"REVISAR");
+});
+test("catálogo de obras incompleto: «solo una de las lecturas existe» no decide",()=>{
+ const {validarCodigos}=require("../albaranes/manuscritos.js");
+ const lect=[{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY 12?45",lecturas:[{codigo:"PRY12345",confianza:0.6},{codigo:"PRY12845",confianza:0.5}]}];
+ const cat=[{codigo:"PRY12845",nombre:"PISCINA FICTICIA"}];
+ assert.notEqual(validarCodigos(lect,{catalogoObras:cat,catalogoObrasCompleto:false}).obra.estado,"OK");
+});

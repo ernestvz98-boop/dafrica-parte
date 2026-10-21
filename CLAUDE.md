@@ -49,6 +49,8 @@ Edge). El repositorio es **público**.
 - Relectura y visión confirman los caracteres de una casilla, no sus límites: si el código lleva
   texto pegado, la descripción no se confirma por esa vía.
 - Un código manuscrito (obra o STEL) leído pero sin validar impide AUTO_OK.
+- Un catálogo de obras incompleto (`lector_obras`) solo valida un código con el nombre de la obra;
+  «solo una de las lecturas existe en el catálogo» exige el catálogo completo de STEL.
 
 ## Proceso ante cada fallo real
 
@@ -67,7 +69,11 @@ evaluación del corpus (`node pruebas/evaluar.js --incluir-sin-revisar`, tambié
 | `albaranes/manuscritos.js` / `vision.js` | anotaciones manuscritas: detección, recortes, validación |
 | `albaranes/verificacion.js` | contraste con el catálogo STEL de solo lectura |
 | `albaranes/catalogo.js` | catálogo STEL en el navegador: caché 24 h y descarga reanudable con empalme comprobado |
-| `albaranes/confirmadas.js` | códigos de proveedor confirmados por una persona (tabla `lector_referencias_confirmadas`, sin precios) |
+| `albaranes/confirmadas.js` | códigos de proveedor confirmados por una persona o de tarifas importadas (tabla `lector_referencias_confirmadas`, sin precios) |
+| `albaranes/compras-stel.js` | albarán de compra de STEL por el número del proveedor en su título (ABP sin leer la letra a mano) |
+| `albaranes/datos-referencia.js` | importación de listas de obras (`lector_obras`) y tarifas de proveedor desde CSV/Excel, nunca precios |
+| `albaranes/etiquetas.js` | etiquetas de obra con QR: hoja para imprimir y lectura del QR en el escaneo |
+| `albaranes/vendor/` | librerías de terceros servidas por la web (jsQR, qrcode-generator, xlsx); ver su `LEEME.md` |
 | `albaranes/motor-navegador.js` | pdf.js + tesseract.js en el navegador (renderizado bajo demanda) |
 | `control-29.js` | módulo «Lector de albaranes» del menú (permiso `costes.ver`) |
 | `pruebas/` | `npm test`, evaluador, corpus sintético; ver `pruebas/LEEME.md` |

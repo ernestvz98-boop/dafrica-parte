@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261021lector17";
+const VERSION_LECTOR="20261021lector18";
 // PRUEBA (no activa nada): modelos de visión que se comparan con el principal sobre los mismos
 // recortes de manuscritos, solo si se marca la casilla. El resultado no cambia.
 const MODELOS_COMPARAR=["gpt-4.1","gpt-5","gpt-5.1","o4-mini"];
@@ -51,8 +51,10 @@ function montar(root){
   '<button type="button" class="btn secondary" id="lalCancelar" disabled>Detener</button></div>'+
   '<progress id="lalBarra" max="1" value="0" style="width:100%;display:none"></progress>'+
   '<p class="muted" role="status" id="lalEstado">Selecciona uno o varios PDF.</p>'+
-  '<div id="lalResumen"></div><div id="lalErrores"></div><div id="lalDocs"></div>';
+  '<div id="lalResumen"></div><div id="lalErrores"></div><div id="lalDocs"></div>'+
+  (has("costes.editar")?panelReferencia():'');
  root.appendChild(card);
+ if(has("costes.editar"))montarReferencia();
  const archivos=$("lalArchivos"),leer=$("lalLeer"),cancelar=$("lalCancelar"),barra=$("lalBarra"),estado=$("lalEstado");
  let detener=false,ultimo=null;
  cancelar.onclick=()=>{detener=true;estado.textContent="Deteniendo al terminar la página en curso…";};
@@ -66,10 +68,13 @@ function montar(root){
   const resultado={archivos:[],documentos:[],errores:[]};
   try{
    const pdfjs=await pcLoadPdfJs();
+   // Lector de QR para las etiquetas de obra (librería propia de la web, sin servicios externos).
+   const jsQR=await cargarScript("albaranes/vendor/jsQR.js?v="+VERSION_LECTOR,"jsQR").catch(()=>null);
    // Visión SOLO de recortes (manuscritos y celdas dudosas) con la sesión del usuario; su salida
    // nunca se acepta sin validar (formato, contexto, OCR, catálogo). Desactivable con config.
    const motores={vision:{activa:false,llamadas:0,fallos:0},catalogo:{disponible:false,articulos:0,completo:false}};
    resultado.motores=motores;
+   motores.qr={disponible:typeof jsQR==="function",etiquetas:0};
    const vision=lib.config?.vision===false||typeof sb!=="function"?null:
     async(recortes,{modo="manuscrito"}={})=>{
      motores.vision.activa=true;motores.vision.llamadas++;
@@ -99,10 +104,10 @@ function montar(root){
    const catalogo=lib.verificacion&&lib.catalogo&&typeof sb==="function"?
     await lib.catalogo.obtenerCatalogo({consultar:consultarCatalogo,almacen:lib.catalogo.almacenLocal()})
      .catch(e=>{motores.catalogo.error=String(e?.message||e).slice(0,160);return null;}):null;
-   // Códigos de proveedor confirmados por una persona en revisiones anteriores (sin precios).
-   const confirmadas=typeof sb==="function"&&lib.confirmadas?
-    await sb("/rest/v1/lector_referencias_confirmadas?select=proveedor_clave,referencia,descripcion,confirmado_en&limit=20000").catch(()=>null):null;
-   motores.confirmadas={cargadas:Array.isArray(confirmadas)?confirmadas.length:null,aplicadas:0};
+   // Obras del lector (código PRY y nombre, importadas o confirmadas por una persona): catálogo de
+   // obras cuando STEL no da el suyo completo. Incompleto: solo valida con el nombre de la obra.
+   const obrasLector=typeof sb==="function"?await sb("/rest/v1/lector_obras?select=codigo,nombre&limit=20000").catch(()=>null):null;
+   motores.confirmadas={cargadas:null,aplicadas:0};
    // Albaranes de compra de STEL (SOLO LECTURA) para validar los códigos ABP manuscritos.
    const stelAlb={consultas:0,validados:0,fallos:0};motores.stel_albaranes=stelAlb;
    const cacheStel=new Map();
@@ -117,7 +122,7 @@ function montar(root){
       if((resp?.documents||[]).length)(stelAlb.encontrados||(stelAlb.encontrados=[])).push({ref:x,documentos:resp.documents});
       return resp?.documents||[];
      }catch(e){stelAlb.fallos++;stelAlb.ultimo_error=String(e?.message||e).slice(0,160);return [];}};
-    // STEL guarda la referencia sin guion («ABP262661»): se pide así primero (medido 2026-10-21).
+    // STEL guarda la referencia sin guion («ABP261234»): se pide así primero (medido 2026-10-21).
     const docs=await pedir(ref.replace(/-/g,""));
     const final=docs.length?docs:await pedir(ref);
     cacheStel.set(ref,final);
@@ -127,13 +132,16 @@ function montar(root){
    if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo,
     motivo:catalogo.diagnostico?.articulos?.motivo||null,paginas:catalogo.diagnostico?.articulos?.paginas??null,origen:catalogo.origen||null,
     obras:(catalogo.obras||[]).length,obras_completo:!!catalogo.obras_completo,obras_motivo:catalogo.diagnostico?.obras?.motivo||null});
+   const catalogoObrasCompleto=!!catalogo?.obras_completo;
+   const catalogoObras=catalogoObrasCompleto?catalogo.obras:(Array.isArray(obrasLector)&&obrasLector.length?obrasLector:null);
+   motores.catalogo.obras_lector=Array.isArray(obrasLector)?obrasLector.length:null;
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
     const fuente=await lib.motorNavegador.abrirFuente(pdfjs,bytes,{alProgresar:t=>{estado.textContent=f.name+" · "+t;}});
     try{
-     const r=await lib.lector.leerPdf(fuente,{registro:lib.proveedores.REGISTRO,vision,compararModelos,tamLote:5,cancelado:()=>detener,
-      catalogoObras:catalogo?.obras_completo?catalogo.obras:null,
+     const r=await lib.lector.leerPdf(fuente,{registro:lib.proveedores.REGISTRO,vision,compararModelos,qr:jsQR,tamLote:5,cancelado:()=>detener,
+      catalogoObras,catalogoObrasCompleto,
       alProgresar:e=>{
        barra.max=e.total;barra.value=e.pagina||e.total;
        estado.textContent="PDF "+(i+1)+"/"+lista.length+" «"+f.name+"» · página "+(e.pagina||e.total)+"/"+e.total+
@@ -162,16 +170,55 @@ function montar(root){
     finally{await fuente.cerrar();}
     pintar(resultado);
    }
+   // Albarán de compra de STEL de cada albarán leído, por el número del proveedor en su título
+   // (solo lectura; una consulta para toda la lectura). Solo con la búsqueda completa.
+   if(typeof sb==="function"&&lib.comprasStel&&!detener){
+    const q=lib.comprasStel.consulta(resultado.documentos),sc=motores.stel_compras={consultado:false};
+    if(q){
+     let pista=null;try{pista=Number(localStorage.getItem("dafrica_stel_compras_total"))||null;}catch{}
+     estado.textContent="Buscando los albaranes de compra en STEL (solo lectura)…";
+     try{
+      const resp=await sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
+       body:JSON.stringify({buscar:{...q,...(pista?{pista}:{})}}),signal:AbortSignal.timeout(170000)});
+      Object.assign(sc,{consultado:true,metodo:resp?.metodo||null,completo:!!resp?.completo,notas:(resp?.notas||[]).length,consultas:resp?.consultas??null,motivo:resp?.motivo||null});
+      if(resp?.total)try{localStorage.setItem("dafrica_stel_compras_total",String(resp.total));}catch{}
+      if(resp?.completo){
+       Object.assign(sc,lib.comprasStel.resolver(resultado.documentos,resp.notas||[]));
+       // Con el nombre de la obra que la oficina escribió en STEL, el código PRY a mano puede
+       // validarse con el catálogo de obras (mismo código y mismo nombre).
+       sc.obras=0;
+       for(const d of resultado.documentos){const x=d.resultado;
+        if(x?.albaran_stel?.estado==="OK"&&x.albaran_stel.obra&&lib.manuscritos?.revalidarObra&&
+         lib.manuscritos.revalidarObra(x,{catalogoObras,catalogoObrasCompleto,obraStel:x.albaran_stel.obra}))sc.obras++;}
+      }
+      // En el JSON descargado (solo en el equipo del usuario), para medir sin volver a leer.
+      sc.lista=resp?.notas||[];
+     }catch(e){sc.error=String(e?.message||e).slice(0,160);}
+    }
+   }
    // Coherencia de los códigos de obra entre todos los PDF leídos juntos.
    const man=resultado.documentos.map(d=>d.resultado?.manuscritos).filter(Boolean);
    if(man.length&&lib.manuscritos)lib.manuscritos.coherenciaLote(man);
+   // Códigos confirmados por una persona y tarifas importadas: solo los que hacen falta.
+   let confirmadas=null;
+   if(typeof sb==="function"&&lib.confirmadas){
+    confirmadas=[];
+    try{
+     for(const [k,clases] of Object.entries(lib.confirmadas.necesarias(resultado.documentos)))
+      for(let i=0;i<clases.length;i+=40)
+       confirmadas.push(...(await sb("/rest/v1/lector_referencias_confirmadas?select=proveedor_clave,referencia,descripcion,confirmado_en,origen&proveedor_clave=eq."+
+        encodeURIComponent(k)+"&clase=in.("+clases.slice(i,i+40).map(encodeURIComponent).join(",")+")")||[]));
+    }catch(e){motores.confirmadas.error=String(e?.message||e).slice(0,160);}
+    motores.confirmadas.cargadas=confirmadas.length;
+   }
    // Estado final de cada albarán tras catálogo, STEL y lote: un manuscrito sin validar impide AUTO_OK.
    for(const d of resultado.documentos){
     const x=d.resultado;if(!x)continue;
     const n=Array.isArray(confirmadas)&&x._ctx?lib.confirmadas.aplicar(x,confirmadas):0;
     motores.confirmadas.aplicadas+=n;
-    if(x._ctx&&(n||x.manuscritos))lib.extraer.finalizar(x);
+    if(x._ctx&&(n||x.manuscritos||x.albaran_stel))lib.extraer.finalizar(x);
     if(x.manuscritos&&lib.manuscritos?.aplicarEstado)lib.manuscritos.aplicarEstado(x);
+    if(x.etiqueta_obra)motores.qr.etiquetas++;
     d.estado_documento=lib.lector.estadoDocumento(x);
    }
    // Catálogo usado (solo lectura, sin precios) dentro del JSON descargado: permite medir y ajustar
@@ -191,6 +238,8 @@ function montar(root){
    ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas'+(v.ultimo_error?': '+esc(v.ultimo_error):'')+')':esc(v.llamadas)+' consultas')+
    (m.stel_albaranes?' · albaranes STEL (códigos ABP): '+esc(m.stel_albaranes.validados)+' validados en '+esc(m.stel_albaranes.consultas)+' consultas'+
     (m.stel_albaranes.fallos?' (<b>'+esc(m.stel_albaranes.fallos)+' fallidas</b>'+(m.stel_albaranes.ultimo_error?': '+esc(m.stel_albaranes.ultimo_error):'')+')':''):'')+
+   (m.stel_compras?.consultado?' · albaranes de compra STEL por número: '+esc(m.stel_compras.resueltos||0)+' encontrados'+(m.stel_compras.completo?'':' (<b>búsqueda incompleta</b>'+(m.stel_compras.motivo?': '+esc(m.stel_compras.motivo):'')+')'):
+    m.stel_compras?.error?' · albaranes de compra STEL: <b>no disponible</b> ('+esc(m.stel_compras.error)+')':'')+
    (cat.disponible&&(!v.activa||!v.fallos)?'':'. Sin ellos, los campos dudosos quedan en REVISAR.')+'</p>';
   $("lalResumen").innerHTML='<p><b>'+esc(r.documentos.length)+'</b> documentos: <b>'+esc(n("AUTO_OK"))+'</b> AUTO_OK · <b>'+
    esc(n("REVISAR"))+'</b> REVISAR · <b>'+esc(n("ERROR_DOCUMENTO"))+'</b> ERROR_DOCUMENTO</p>'+segunda+
@@ -205,8 +254,22 @@ function montar(root){
   $("lalErrores").innerHTML=r.errores.length?'<details open><summary>'+esc(r.errores.length)+' error(es) de lectura</summary>'+
    r.errores.map(e=>'<p class="error">'+esc(e.archivo)+(e.paginas?.length?' · páginas '+esc(e.paginas.join(", ")):'')+': '+esc(e.error)+'</p>').join("")+'</details>':"";
   $("lalDocs").innerHTML=r.documentos.map((d,i)=>!d.resultado?'':'<details style="border:1px solid #d6dee8;border-radius:8px;padding:10px;margin:8px 0"><summary style="cursor:pointer;font-weight:bold">'+
-   (i+1)+' · '+esc(d.resultado?.proveedor?.nombre||"Proveedor no identificado")+' · '+esc(d.resultado?.numero?.valor||"sin número")+'</summary>'+pcRenderDeterminista(d.resultado)+confirmarCodigos(d,i)+'</details>').join("");
+   (i+1)+' · '+esc(d.resultado?.proveedor?.nombre||"Proveedor no identificado")+' · '+esc(d.resultado?.numero?.valor||"sin número")+'</summary>'+pcRenderDeterminista(d.resultado)+confirmarObra(d,i)+confirmarCodigos(d,i)+'</details>').join("");
   $("lalDocs").onclick=async ev=>{
+   const bo=ev.target.closest?.("button[data-lal-obra]");
+   if(bo){
+    const i=Number(bo.dataset.lalObra),codigo=String($("lalObraCod_"+i)?.value||"").toUpperCase().replace(/[^A-Z0-9]/g,""),nombre=String($("lalObraNom_"+i)?.value||"").trim();
+    const est=$("lalObraEstado_"+i);
+    if(!/^PRY\d{5}$/.test(codigo)){est.textContent="El código debe ser PRY y 5 cifras.";return;}
+    if(nombre.length<2){est.textContent="Escribe el nombre de la obra.";return;}
+    bo.disabled=true;est.textContent="Guardando…";
+    try{
+     await sb("/rest/v1/lector_obras?on_conflict=codigo",{method:"POST",headers:{"Content-Type":"application/json",Prefer:"resolution=ignore-duplicates,return=minimal"},
+      body:JSON.stringify({codigo,nombre:nombre.slice(0,150),origen:"persona"})});
+     est.textContent="✓ Obra guardada: las próximas lecturas validarán este código con el nombre de la obra.";
+    }catch(e){est.textContent="No se ha podido guardar: "+(e?.message||e);bo.disabled=false;}
+    return;
+   }
    const b=ev.target.closest?.("button[data-lal-confirmar]");if(!b)return;
    const lib=window.DafricaAlbaranes;
    const [i,f]=b.dataset.lalConfirmar.split(":").map(Number),d=r.documentos[i],l=d?.resultado?.lineas?.[f];
@@ -224,6 +287,20 @@ function montar(root){
   const j=$("lalJson"),c=$("lalCsv");
   if(j)j.onclick=()=>descargar("albaranes.json","application/json",JSON.stringify(r,null,1));
   if(c)c.onclick=()=>descargar("albaranes-lineas.csv","text/csv;charset=utf-8",csv(r));
+ }
+ // Obra pendiente de un albarán: la persona que revisa confirma el código PRY y el nombre; queda en
+ // el catálogo de obras del lector (lector_obras) para validar las lecturas siguientes.
+ function confirmarObra(d,i){
+  const x=d.resultado,o=x?.manuscritos?.obra;
+  if(!x?.manuscritos||!has("costes.editar")||(o?.estado==="OK"&&(o.confianza??0)>=0.9))return "";
+  const cod=o?.valor||(o?.resolucion?.alternativas||[])[0]||"";
+  const nom=x.albaran_stel?.obra||(x.manuscritos.obraImpresa||[])[0]||(x.manuscritos.obraEscrita||[])[0]||"";
+  return '<div style="margin-top:8px"><b>Confirmar obra</b> <span class="muted">(código PRY del papel y nombre de la obra)</span>'+
+   '<div style="display:flex;gap:6px;align-items:center;margin:4px 0;flex-wrap:wrap">'+
+   '<input id="lalObraCod_'+i+'" value="'+esc(cod)+'" placeholder="PRY00000" style="width:120px">'+
+   '<input id="lalObraNom_'+i+'" value="'+esc(nom)+'" placeholder="Nombre de la obra" style="width:220px">'+
+   '<button type="button" class="btn secondary" data-lal-obra="'+i+'">Confirmar obra</button>'+
+   '<span id="lalObraEstado_'+i+'" class="muted"></span></div></div>';
  }
  // Códigos pendientes de un albarán: la persona que revisa puede confirmarlos (o corregirlos) para
  // que el lector los valide solo en adelante. Solo con permiso de edición de costes.
@@ -247,6 +324,77 @@ function montar(root){
     l.referencia?.valor,l.descripcion?.valor,l.cantidad?.valor,l.unidad?.valor,l.precio?.valor,l.precio?.valor==null?"precio_pendiente":"",
     l.descuento?.porcentajes?.join("+"),l.importe?.valor,l.estado]);}
   return "﻿"+filas.map(f=>f.map(q).join(";")).join("\n");
+ }
+ // Script propio de la web (albaranes/vendor/), cargado solo cuando hace falta.
+ function cargarScript(src,global){
+  if(window[global])return Promise.resolve(window[global]);
+  return new Promise((ok,mal)=>{const sc=document.createElement("script");sc.src=src;sc.async=true;
+   sc.onload=()=>window[global]?ok(window[global]):mal(Error("No se ha cargado "+global));sc.onerror=()=>mal(Error("No se ha cargado "+src));
+   document.head.appendChild(sc);});
+ }
+ // Tabla de un CSV o de la primera hoja de un Excel (.xlsx o .xls): lista de filas de celdas.
+ async function leerTabla(archivo){
+  if(/\.csv$|\.txt$/i.test(archivo.name))return window.DafricaAlbaranes.datosReferencia.parseCsv(await archivo.text());
+  const X=await cargarScript("albaranes/vendor/xlsx.full.min.js?v="+VERSION_LECTOR,"XLSX");
+  const libro=X.read(new Uint8Array(await archivo.arrayBuffer()),{type:"array"});
+  return X.utils.sheet_to_json(libro.Sheets[libro.SheetNames[0]],{header:1,raw:false,defval:""});
+ }
+ // Envío por bloques a una tabla del lector (los repetidos se ignoran).
+ async function insertar(tabla,conflicto,filas,alAvanzar){
+  for(let i=0;i<filas.length;i+=500){
+   await sb("/rest/v1/"+tabla+"?on_conflict="+conflicto,{method:"POST",headers:{"Content-Type":"application/json",Prefer:"resolution=ignore-duplicates,return=minimal"},
+    body:JSON.stringify(filas.slice(i,i+500))});
+   alAvanzar(Math.min(filas.length,i+500));
+  }
+ }
+ // Datos de referencia del lector (permiso costes.editar): lista de obras, tarifas de proveedor y
+ // etiquetas de obra con QR. Nada de precios: de las tarifas solo se toman código y descripción.
+ function panelReferencia(){
+  const provs=(window.DafricaAlbaranes?.proveedores?.REGISTRO?.proveedores||[]).slice().sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre)));
+  return '<details style="margin-top:14px;border-top:1px solid #d6dee8;padding-top:8px"><summary style="cursor:pointer;font-weight:bold">Datos de referencia del lector</summary>'+
+   '<p class="muted">Mejoran la validación automática. Solo se guardan códigos, nombres y descripciones; nunca precios.</p>'+
+   '<h4>Lista de obras</h4><p class="muted">CSV o Excel con columnas «Código» (PRY00000) y «Nombre» (por ejemplo, la lista de proyectos exportada de STEL). Con ella, un código de obra escrito a mano se valida si existe y su nombre coincide con la obra del albarán o del albarán de compra de STEL.</p>'+
+   '<input type="file" id="lalObrasArchivo" accept=".csv,.txt,.xlsx,.xls"> <button type="button" class="btn secondary" id="lalObrasImportar">Importar obras</button> <span class="muted" id="lalObrasEstado"></span>'+
+   '<h4>Tarifa o catálogo de un proveedor</h4><p class="muted">CSV o Excel con columnas «Código»/«Referencia» y «Descripción». Un código leído se valida si existe una sola vez en la tarifa de ese proveedor y la descripción coincide.</p>'+
+   '<select id="lalTarifaProv"><option value="">Proveedor…</option>'+provs.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.nombre)+'</option>').join("")+'</select> '+
+   '<input type="file" id="lalTarifaArchivo" accept=".csv,.txt,.xlsx,.xls"> <button type="button" class="btn secondary" id="lalTarifaImportar">Importar tarifa</button> <span class="muted" id="lalTarifaEstado"></span>'+
+   '<h4>Etiquetas de obra con QR</h4><p class="muted">Hoja A4 para imprimir: se pega una etiqueta en cada albarán al recibirlo y el lector toma el código de obra del QR, sin depender de la letra a mano.</p>'+
+   '<input id="lalEtqCodigo" placeholder="PRY00000" style="width:120px"> <input id="lalEtqNombre" placeholder="Nombre de la obra" style="width:220px"> '+
+   '<button type="button" class="btn secondary" id="lalEtqDescargar">Descargar hoja de etiquetas</button> <span class="muted" id="lalEtqEstado"></span></details>';
+ }
+ function montarReferencia(){
+  const lib=window.DafricaAlbaranes;
+  $("lalObrasImportar").onclick=async()=>{
+   const f=$("lalObrasArchivo").files?.[0],est=$("lalObrasEstado");if(!f){est.textContent="Elige un fichero.";return;}
+   try{
+    est.textContent="Leyendo…";
+    const r=lib.datosReferencia.filasObras(await leerTabla(f));
+    if(r.error){est.textContent=r.error;return;}
+    if(!r.filas.length){est.textContent="No hay ninguna obra con código PRY y 5 cifras.";return;}
+    await insertar("lector_obras","codigo",r.filas.map(x=>({...x,origen:"lista"})),n=>{est.textContent="Guardando "+n+" de "+r.filas.length+"…";});
+    est.textContent="✓ "+r.filas.length+" obras importadas"+(r.repetidas?" · "+r.repetidas+" códigos con dos nombres distintos no importados":"")+(r.descartadas?" · "+r.descartadas+" filas sin código PRY válido":"")+".";
+   }catch(e){est.textContent="No se ha podido importar: "+(e?.message||e);}
+  };
+  $("lalTarifaImportar").onclick=async()=>{
+   const id=$("lalTarifaProv").value,f=$("lalTarifaArchivo").files?.[0],est=$("lalTarifaEstado");
+   if(!id){est.textContent="Elige el proveedor.";return;}if(!f){est.textContent="Elige un fichero.";return;}
+   try{
+    est.textContent="Leyendo…";
+    const r=lib.datosReferencia.filasTarifa(await leerTabla(f),"perfil:"+id);
+    if(r.error){est.textContent=r.error;return;}
+    if(!r.filas.length){est.textContent="No hay códigos con descripción.";return;}
+    await insertar("lector_referencias_confirmadas","proveedor_clave,referencia",r.filas,n=>{est.textContent="Guardando "+n+" de "+r.filas.length+"…";});
+    est.textContent="✓ "+r.filas.length+" códigos importados"+(r.repetidas?" · "+r.repetidas+" códigos repetidos con descripciones distintas no importados":"")+".";
+   }catch(e){est.textContent="No se ha podido importar: "+(e?.message||e);}
+  };
+  $("lalEtqDescargar").onclick=async()=>{
+   const est=$("lalEtqEstado"),codigo=String($("lalEtqCodigo").value||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+   try{
+    const qrcode=await cargarScript("albaranes/vendor/qrcode.js?v="+VERSION_LECTOR,"qrcode");
+    descargar("etiquetas-"+codigo+".html","text/html;charset=utf-8",lib.etiquetas.hojaEtiquetas({codigo,nombre:$("lalEtqNombre").value},qrcode));
+    est.textContent="✓ Abre el fichero descargado e imprímelo en A4 a tamaño real (100 %).";
+   }catch(e){est.textContent=String(e?.message||e);}
+  };
  }
  function descargar(nombre,tipo,texto){
   const url=URL.createObjectURL(new Blob([texto],{type:tipo}));

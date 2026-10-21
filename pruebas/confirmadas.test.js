@@ -33,3 +33,18 @@ test("no se valida: otro proveedor, descripción distinta, dos confirmados equiv
  assert.equal(aplicar(doc("1200P001"),[conf("120OP001"),conf("1200P001","TUBO MULTICAPA 2")]),0);
  assert.equal(aplicar(doc(),[{...conf("120OP001"),descripcion:null}]),0);
 });
+
+test("tarifa: código único con descripción compatible se valida; dos códigos equivalentes O/0, no",()=>{
+ const C=require("../albaranes/confirmadas.js");
+ const det=()=>({proveedor:{estado:"OK",id:"FICTICIO"},lineas:[{referencia:{literal:"AB0123",valor:"AB0123",estado:"REVISAR",confianza:0.6},descripcion:{valor:"TUBO FICTICIO 20MM"}}]});
+ const a=det();
+ assert.equal(C.aplicar(a,[{proveedor_clave:"perfil:FICTICIO",referencia:"ABO123",descripcion:"TUBO FICTICIO 20MM",origen:"tarifa"}]),1);
+ assert.equal(a.lineas[0].referencia.valor,"ABO123");assert.equal(a.lineas[0].referencia.resolucion.metodo,"referencia_tarifa");
+ const b=det();
+ assert.equal(C.aplicar(b,[{proveedor_clave:"perfil:FICTICIO",referencia:"ABO123",descripcion:"TUBO FICTICIO 20MM",origen:"tarifa"},
+  {proveedor_clave:"perfil:FICTICIO",referencia:"AB0123",descripcion:"TUBO FICTICIO 20MM",origen:"tarifa"}]),0);
+ // Descripción con otra medida: no.
+ const c=det();
+ assert.equal(C.aplicar(c,[{proveedor_clave:"perfil:FICTICIO",referencia:"ABO123",descripcion:"TUBO FICTICIO 25MM",origen:"tarifa"}]),0);
+ assert.deepEqual(C.necesarias([{resultado:det()}]),{"perfil:FICTICIO":["A80123"]});
+});
