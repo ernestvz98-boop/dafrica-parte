@@ -330,6 +330,9 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   try{for(let i=0;i<recortes.length;i+=8)for(const v of await opciones.vision(recortes.slice(i,i+8),{modo:"impreso"})||[])
    if(Number.isInteger(v.indice))lecturas[i+v.indice]=String(v.texto||"");}
   catch(e){principal.incidencias=[...(principal.incidencias||[]),"Visión de campos dudosos no disponible: "+String(e?.message||e).slice(0,100)];}
+  // Registro de cada casilla consultada (candidatos OCR y texto de la visión): permite reproducir y
+  // medir las reglas de aceptación sin volver a leer el PDF.
+  principal.vision_celdas=pendientes.map((x,i)=>({fila:x.cabecera?"cabecera":x.l.fila,campo:x.campo,candidatos:[...new Set(x.candidatos)],vision:lecturas[i]??null}));
   const igual=(campo,a,b)=>campo==="referencia"?N.canon(a)===N.canon(b)&&N.canon(a)!=="":
    String(a).replace(/\s+/g," ").trim()===String(b).replace(/\s+/g," ").trim()&&String(a).trim()!=="";
   pendientes.forEach((x,i)=>{

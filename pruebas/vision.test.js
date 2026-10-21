@@ -34,6 +34,8 @@ test("visión del recorte que coincide con una de las lecturas OCR en conflicto:
  assert.equal(d.resolucion.metodo,"vision_coincide_ocr");
  // Solo se envía el recorte de la celda, nunca la página.
  assert.ok(m.recortes.every(([,,w,h])=>w<300&&h<40));
+ // Queda registrado qué se consultó y qué respondió la visión (para medir sin releer el PDF).
+ assert.ok(r.vision_celdas.some(x=>x.campo==="descripcion"&&x.vision==="ESPUMA PU 750ml"&&x.candidatos.includes("ESPUMA PU 750m1")));
 });
 
 test("visión que propone un texto que ningún OCR leyó (p. ej. S en vez de 5): no se acepta",async()=>{

@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261021lector13";
+const VERSION_LECTOR="20261021lector14";
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -91,6 +91,7 @@ function montar(root){
        body:JSON.stringify({fullReference:x}),signal:AbortSignal.timeout(30000)});
       // Diagnóstico de las primeras consultas (cuántos albaranes devuelve STEL y su formato).
       if((stelAlb.muestras||(stelAlb.muestras=[])).length<3)stelAlb.muestras.push({ref:x,devueltos:resp?.checkedCount??null,encontrados:(resp?.documents||[]).length,diagnostico:resp?.diagnostico||null});
+      if((resp?.documents||[]).length)(stelAlb.encontrados||(stelAlb.encontrados=[])).push({ref:x,documentos:resp.documents});
       return resp?.documents||[];
      }catch(e){stelAlb.fallos++;stelAlb.ultimo_error=String(e?.message||e).slice(0,160);return [];}};
     // STEL guarda la referencia sin guion («ABP262661»): se pide así primero (medido 2026-10-21).
@@ -118,7 +119,7 @@ function montar(root){
       if(catalogo&&d.resultado?._ctx)lib.verificacion.verificar(d.resultado,catalogo);
       if(consultarStel&&d.resultado?.manuscritos&&lib.manuscritos?.validarStel&&
        await lib.manuscritos.validarStel(d.resultado,consultarStel,{proveedorNombre:nombreProveedor(d.resultado),
-        diagnostico:x=>{if((stelAlb.comparaciones||(stelAlb.comparaciones=[])).length<8)stelAlb.comparaciones.push(x);}}))stelAlb.validados++;
+        diagnostico:x=>{(stelAlb.comparaciones||(stelAlb.comparaciones=[])).push(x);}}))stelAlb.validados++;
       resultado.documentos.push({archivo:f.name,...d});
      }
      for(const e of r.errores)resultado.errores.push({archivo:f.name,...e});
@@ -136,6 +137,10 @@ function montar(root){
     if(x.manuscritos&&lib.manuscritos?.aplicarEstado){if(x._ctx)lib.extraer.finalizar(x);lib.manuscritos.aplicarEstado(x);}
     d.estado_documento=lib.lector.estadoDocumento(x);
    }
+   // Catálogo usado (solo lectura, sin precios) dentro del JSON descargado: permite medir y ajustar
+   // la validación con el catálogo sin volver a leer los PDF. Solo en el fichero que descarga el usuario.
+   if(catalogo)resultado.catalogo_stel={articulos_completo:!!catalogo.articulos_completo,proveedores_completo:!!catalogo.proveedores_completo,
+    creado:catalogo.creado||null,articulos:catalogo.articulos||[],proveedores:catalogo.proveedores||[]};
    ultimo=resultado;pintar(resultado);
    estado.textContent=(detener?"Lectura detenida. ":"Lectura terminada. ")+resultado.documentos.length+" albaranes en "+resultado.archivos.length+" PDF.";
   }catch(e){estado.textContent="No se ha podido leer: "+(e?.message||e);}

@@ -3,6 +3,24 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Análisis del objetivo del 95 % y lectura que se puede reproducir sin el usuario
+
+**Producción:** web publicada en `main` (versión `20261021lector14`; copia previa en
+`respaldo/main-antes-lector14`). Sin cambios en funciones Edge, datos ni STEL.
+
+- Situación (lectura del usuario, 602 campos): datos impresos 497 de 543 (91,5 %), de los que 21
+  están bien leídos pero sin validar (techo ~95,4 % validándolos) y 25 mal leídos o sin valor.
+  Códigos manuscritos: 4 de 59; 29 bien leídos sin validar y 26 mal leídos o no detectados por
+  la visión: aunque se validaran todos, ~56 %. El 95 % es alcanzable en datos impresos; en
+  manuscritos lo limita la lectura de la letra, no la validación.
+- Para dejar de depender de lecturas repetidas del usuario, el JSON descargado guarda ahora
+  todo lo necesario para reproducir y medir las reglas aquí: el catálogo de STEL usado
+  (artículos y proveedores, sin precios; `catalogo_stel`), cada casilla consultada a la visión
+  con sus candidatos OCR (`vision_celdas`) y cada albarán encontrado en STEL con todas las
+  comparaciones (`motores.stel_albaranes`). El fichero solo lo descarga el usuario; los datos
+  reales quedan fuera de git (`pruebas/corpus-real/web/`).
+- Pruebas: 208 superadas.
+
 ## 2026-10-21 · Códigos ABP: referencia sin guion y proveedor por cuenta de STEL
 
 **Producción:** desplegada `stel-albaranes-consulta` v3 (solo lectura). Web publicada en `main`
