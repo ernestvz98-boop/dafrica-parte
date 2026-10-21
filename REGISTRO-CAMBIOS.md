@@ -3,6 +3,22 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Lector PDF publicado en producción (`main`)
+
+**Producción:** con autorización del usuario (versión validada, pruebas superadas, reversión
+clara) se fusiona la rama del lector en `main` con un commit de fusión. Copia de seguridad del
+`main` anterior en la rama `respaldo/main-antes-lector-20261021`. Reversión:
+`git revert -m 1 <commit de fusión>` y push a `main`. Sin cambios en STEL, en la base de datos
+ni en las funciones Edge (ya desplegadas: `albaranes-manuscritos`, `compras-catalogo-lectura`).
+
+- Pantalla «Lector local de albaranes» (Compras, permiso `costes.ver`): texto actualizado
+  (visión solo de recortes y siempre validada; catálogo STEL solo lectura). Versión de los
+  scripts `20261021lector3` para que el navegador no use copias antiguas.
+- Comprobado en Chromium: la aplicación carga sin errores de JavaScript, igual que el `main`
+  anterior. 194 pruebas superadas; corpus real 0 errores críticos (nativo y tesseract.js).
+- Siguiente paso (requiere la sesión del usuario): medir visión y catálogo con
+  `pruebas/evaluar-web.js` sobre el JSON descargado de la pantalla.
+
 ## 2026-10-21 · Lector PDF: fallos hallados en Chromium real (motor de la web, tesseract.js)
 
 **Producción:** sin cambios (rama de trabajo; nada desplegado; sin STEL ni base de datos).
