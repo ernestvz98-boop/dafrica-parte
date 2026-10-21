@@ -3,21 +3,22 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
-## 2026-10-21 · Lector PDF publicado en producción (`main`)
+## 2026-10-21 · Lector de albaranes como módulo de DAFRICA Control
 
-**Producción:** con autorización del usuario (versión validada, pruebas superadas, reversión
-clara) se fusiona la rama del lector en `main` con un commit de fusión. Copia de seguridad del
-`main` anterior en la rama `respaldo/main-antes-lector-20261021`. Reversión:
-`git revert -m 1 <commit de fusión>` y push a `main`. Sin cambios en STEL, en la base de datos
-ni en las funciones Edge (ya desplegadas: `albaranes-manuscritos`, `compras-catalogo-lectura`).
+**Producción:** sin cambios. Todo sigue en la rama de desarrollo hasta la revisión del usuario
+(se intentó fusionar en `main` y el sistema de permisos lo impidió; solo se creó la rama de
+copia `respaldo/main-antes-lector-20261021` con el `main` actual). Sin cambios en STEL, en la
+base de datos ni en las funciones Edge.
 
-- Pantalla «Lector local de albaranes» (Compras, permiso `costes.ver`): texto actualizado
-  (visión solo de recortes y siempre validada; catálogo STEL solo lectura). Versión de los
-  scripts `20261021lector3` para que el navegador no use copias antiguas.
-- Comprobado en Chromium: la aplicación carga sin errores de JavaScript, igual que el `main`
-  anterior. 194 pruebas superadas; corpus real 0 errores críticos (nativo y tesseract.js).
-- Siguiente paso (requiere la sesión del usuario): medir visión y catálogo con
-  `pruebas/evaluar-web.js` sobre el JSON descargado de la pantalla.
+- `control-29.js`: el lector deja de ser una tarjeta dentro de «Pedidos y alertas» y pasa a ser
+  el módulo **«📄 Lector de albaranes»** del menú lateral (permiso `costes.ver`, después de
+  «Costes / Consumos»; enlace directo `?mod=lector-albaranes`). Texto actualizado: visión solo
+  de recortes y siempre validada; catálogo STEL solo lectura.
+- `index.html`: versión de los scripts `20261021lector4` (el navegador no reutiliza copias
+  antiguas).
+- Probado en Chromium con la aplicación completa (inicio de sesión con Supabase simulado en la
+  prueba, menú, recarga directa al módulo, lectura de los 3 PDF reales, descarga del JSON y
+  medición con `pruebas/evaluar-web.js`). Sin errores de JavaScript.
 
 ## 2026-10-21 · Lector PDF: fallos hallados en Chromium real (motor de la web, tesseract.js)
 

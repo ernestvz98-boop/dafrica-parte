@@ -1,20 +1,32 @@
 "use strict";
 /*
- * Lector local de albaranes (Fase 1): uno o varios PDF de cualquier tamaño, digitales,
- * escaneados o mixtos. Todo se procesa en el navegador página a página (albaranes/lector.js):
- * separa los albaranes, muestra el avance por bloques, los errores por página y un resultado
- * consolidado que se puede descargar. No guarda nada ni envía el PDF. Segunda fase: visión solo
- * de RECORTES dudosos (siempre validada) y catálogo STEL solo en lectura, con la sesión del usuario.
- * La lectura de códigos manuscritos (visión de recortes) solo se activa si está configurada.
+ * Módulo «Lector de albaranes» de DAFRICA Control (Fase 1), en el menú lateral (permiso
+ * costes.ver). Uno o varios PDF de cualquier tamaño, digitales, escaneados o mixtos, leídos en el
+ * navegador página a página (albaranes/lector.js): separa los albaranes, muestra el avance por
+ * bloques, los errores por página y un resultado consolidado que se puede descargar. No guarda nada
+ * ni envía el PDF. Segunda fase: visión solo de RECORTES dudosos (siempre validada) y catálogo STEL
+ * solo en lectura, con la sesión del usuario.
  */
 (function(){
-const anterior=typeof renderComprasLotePilot==="function"?renderComprasLotePilot:null;
-renderComprasLotePilot=function(){
- if(anterior)anterior();
- const root=$("pcBatch");if(!root||!has("costes.ver")||$("lalCard"))return;
+const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
+if(!modules.some(m=>m.id===MODULO.id)){
+ const i=modules.findIndex(m=>m.id==="costes");
+ modules.splice(i>=0?i+1:modules.length,0,MODULO);
+}
+const renderModuleBase=renderModule;
+renderModule=async function(){
+ if(state.module===MODULO.id)return renderLectorAlbaranes();
+ return renderModuleBase();
+};
+function renderLectorAlbaranes(){
+ setTopbar("Lector de albaranes","PDF digitales, escaneados o mixtos · se leen en este navegador y no se guardan");
+ setContent('<div id="lalRaiz"></div>');
+ montar($("lalRaiz"));
+}
+function montar(root){
  const card=document.createElement("div");
  card.className="card";card.id="lalCard";
- card.innerHTML='<h3>Lector local de albaranes · SIN GUARDAR</h3>'+
+ card.innerHTML='<h3>Leer albaranes PDF · SIN GUARDAR</h3>'+
   '<p class="muted">Lee PDF digitales y escaneados de cualquier número de páginas en este navegador, separa cada albarán y comprueba cantidades, precios, descuentos, importes y totales. Solo acepta automáticamente lo que valida; lo demás queda marcado para revisión. Para los campos dudosos consulta el catálogo de STEL en solo lectura y, solo con recortes pequeños (nunca la página), un motor de visión cuya lectura se acepta únicamente si la confirman el OCR, el formato o el catálogo; nunca precios, cantidades ni importes. <b>No guarda nada, no envía el PDF y no crea nada en STEL.</b></p>'+
   '<label for="lalArchivos">PDF de albaranes (uno o varios)</label>'+
   '<input type="file" id="lalArchivos" accept=".pdf,application/pdf" multiple>'+

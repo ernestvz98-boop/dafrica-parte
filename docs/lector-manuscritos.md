@@ -43,10 +43,10 @@ sin confirmar por una persona) están en `pruebas/corpus-real/*.esperado.json` (
 ## Activación
 
 - 2026-10-21: función `albaranes-manuscritos` **desplegada** con autorización del usuario (solo
-  sesión con permiso `costes.ver`; rechaza llamadas sin sesión). La pantalla «Lector local de
-  albaranes» (`control-29.js`) la usa automáticamente con la sesión del usuario; se puede
+  sesión con permiso `costes.ver`; rechaza llamadas sin sesión). El módulo «Lector de albaranes»
+  del menú de DAFRICA Control (`control-29.js`) la usa automáticamente con la sesión del usuario; se puede
   desactivar con `DafricaAlbaranes.config = {vision: false}`.
-- Medición con visión y catálogo: abrir la pantalla con sesión, leer los PDF del corpus,
+- Medición con visión y catálogo: abrir el módulo con sesión, leer los PDF del corpus,
   «Descargar resultado (JSON)» y ejecutar `node pruebas/evaluar-web.js albaranes.json`
   (compara con `pruebas/corpus-real/*.esperado.json`, fuera de git).
 

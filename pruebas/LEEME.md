@@ -208,7 +208,7 @@ haber verificado el catálogo real ni haber conseguido lectura perfecta del manu
 ## Lectura de la web (con visión y catálogo)
 
 La visión de recortes y el catálogo STEL de solo lectura exigen la sesión de un usuario con
-permiso `costes.ver`, así que se miden desde la web: pantalla «Lector local de albaranes» →
+permiso `costes.ver`, así que se miden desde la web: módulo «Lector de albaranes» del menú →
 leer los PDF del corpus → «Descargar resultado (JSON)» → `node pruebas/evaluar-web.js
 albaranes.json`. Mismo informe que `evaluar.js` (`pruebas/informes-reales/precision-web.md`).
 

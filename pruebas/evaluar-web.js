@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 /*
- * Precisión de una lectura hecha en la WEB (pantalla «Lector local de albaranes», con la sesión
+ * Precisión de una lectura hecha en la WEB (módulo «Lector de albaranes» de DAFRICA Control, con la sesión
  * del usuario: visión de recortes y catálogo STEL de solo lectura activos).
  *
  *   node pruebas/evaluar-web.js albaranes.json [carpeta-corpus]
