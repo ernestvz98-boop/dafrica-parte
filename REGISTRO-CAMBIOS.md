@@ -3,6 +3,31 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Error crítico por coherencia del lote; códigos tachados; diagnóstico de STEL
+
+**Producción:** desplegada `stel-albaranes-consulta` v2 (solo lectura; ahora en el repositorio).
+Web publicada en `main` (versión `20261021lector12`; copia previa en `respaldo/main-antes-lector12`).
+
+Lectura del usuario (lector10): catálogo de artículos **completo** (5059), visión 46/46; 501 de
+605 campos (82,8 %), **1 error crítico** y 1 AUTO_OK con un campo pendiente.
+
+- **Error crítico:** un código de obra «…88» se aceptó como «…38» por coherencia del lote: dos albaranes
+  del mismo PDF con la misma obra leídos igual de mal por la visión (misma letra, mismo motor,
+  mismo error 8 → 3). `lector.js` aplica la coherencia por PDF y otros dos albaranes de la obra
+  con «…88» estaban en otro PDF. Corrección: la coherencia del lote solo extiende un código
+  desde un albarán donde está validado con evidencia independiente de la visión (obra impresa,
+  catálogo, STEL); dos lecturas de visión iguales no se confirman entre sí. Regresión.
+- **AUTO_OK con un código ABP sin leer:** la visión lo marcó como tachado (en la lectura anterior
+  no) y se descartaba. Un código detectado como tachado queda ahora pendiente y no permite AUTO_OK.
+- **ABP sin validar (0 de 48 consultas):** STEL no devolvió ningún albarán con esa referencia. La
+  función de consulta informa ahora, sin coincidencia, de cuántos albaranes devolvió STEL y del
+  formato de sus primeras referencias; la pantalla lo guarda en el JSON (3 primeras consultas)
+  para saber si STEL aplica el filtro o usa otro formato.
+- **Obras de STEL:** llegaron 0; la pantalla muestra ahora el motivo.
+- Aviso «Cargando el catálogo de STEL…» mientras se descarga (1–2 min sin caché).
+- Pruebas: 207 superadas. Corpus sin visión sin cambios (0 críticos). Aplicadas las reglas nuevas
+  a la lectura del usuario: 0 críticos y 0 AUTO_OK con fallos.
+
 ## 2026-10-21 · Objetivo > 95 %: códigos de obra con el catálogo de obras de STEL
 
 **Producción:** desplegada `compras-catalogo-lectura` v5 (solo lectura). Web publicada en `main`

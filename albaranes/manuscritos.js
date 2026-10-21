@@ -171,7 +171,9 @@ function validarCodigos(lecturas,ctx={}){
  for(const [campo,tipo] of [["obra","PRY"],["stel","ABP"]]){
   const vistas=(lecturas||[]).filter(l=>l.tipo===tipo&&!l.tachado);
   const tachadas=(lecturas||[]).filter(l=>l.tipo===tipo&&l.tachado).map(l=>l.texto_literal);
-  if(!vistas.length){salida[campo]=vacio(tachadas.length?["Solo hay anotaciones tachadas: "+tachadas.join(", ")]:[]);continue;}
+  // Solo tachadas: no se usan como valor, pero la visión no es fiable decidiendo qué está tachado
+  // (el mismo código, tachado en una lectura y no en otra): queda pendiente de revisión.
+  if(!vistas.length){salida[campo]={...vacio(tachadas.length?["Solo hay anotaciones tachadas: "+tachadas.join(", ")]:[]),literal:tachadas.join(" | ")};continue;}
   // Interpretaciones con el formato conocido (varias anotaciones o varias lecturas de una).
   const cand=new Map();
   for(const v of vistas)for(const l of v.lecturas||[]){
@@ -260,11 +262,15 @@ const palabrasDoc=d=>new Set([...[].concat(d.obraImpresa||[]),...[].concat(d.obr
 
 /*
  * Coherencia del lote. Un código de obra que la visión lee con el formato correcto se acepta
- * si en OTRO albarán del lote se ha leído, de forma independiente, el mismo código, ambos
- * comparten una palabra distintiva de obra (impresa o escrita) y ningún albarán del lote con
- * esa palabra tiene un código distinto. Si el lote se contradice, no se acepta nada por esta vía.
+ * si en OTRO albarán del lote ese mismo código está VALIDADO con evidencia independiente de la
+ * visión (número de obra impreso, catálogo de obras, STEL), ambos comparten una palabra distintiva
+ * de obra (impresa o escrita) y ningún albarán del lote con esa palabra tiene un código distinto.
+ * Dos lecturas de visión que coinciden NO bastan: es el mismo motor sobre la letra del mismo autor
+ * y se equivoca igual (fallo real: un código de obra «…88» leído «…38» en dos albaranes, 2026-10-21).
+ * Si el lote se contradice, no se acepta nada por esta vía.
  * docs: [{obraImpresa:[…], obraEscrita:[…], obra:{valor, estado, …}}] (se modifican).
  */
+const VALIDADA_INDEPENDIENTE=new Set(["vision_recorte_validada"]);
 function coherenciaLote(docs){
  const leidos=docs.filter(d=>d.obra?.valor&&["OK","REVISAR"].includes(d.obra.estado));
  let cambios=0;
@@ -275,11 +281,13 @@ function coherenciaLote(docs){
   const afines=leidos.filter(o=>o!==d&&[...palabrasDoc(o)].some(p=>mias.has(p)));
   const iguales=afines.filter(o=>o.obra.valor===d.obra.valor);
   const distintos=afines.filter(o=>o.obra.valor!==d.obra.valor);
-  if(iguales.length&&!distintos.length){
+  const anclas=iguales.filter(o=>o.obra.estado==="OK"&&VALIDADA_INDEPENDIENTE.has(o.obra.resolucion?.metodo));
+  if(anclas.length&&!distintos.length){
    const comunes=[...new Set(iguales.flatMap(o=>[...palabrasDoc(o)].filter(p=>mias.has(p))))];
    d.obra={...d.obra,estado:"OK",confianza:0.93,motivos:[],
     resolucion:{...d.obra.resolucion,metodo:"vision_recorte_coherencia_lote",
-     evidencias:[...(d.obra.resolucion?.evidencias||[]),"Mismo código leído en "+iguales.length+" albarán(es) más del lote con la obra «"+comunes.join(", ")+"», sin códigos contradictorios"]}};
+     evidencias:[...(d.obra.resolucion?.evidencias||[]),"Mismo código validado en "+anclas.length+" albarán(es) más del lote ("+
+      anclas.flatMap(o=>(o.obra.resolucion?.evidencias||[]).slice(1,2)).join("; ")+") con la obra «"+comunes.join(", ")+"», sin códigos contradictorios"]}};
    cambios++;
   }
  }

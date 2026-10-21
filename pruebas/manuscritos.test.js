@@ -59,9 +59,11 @@ test("de dos interpretaciones, la que existe en el catálogo de obras se acepta;
  assert.deepEqual(r.obra.resolucion.alternativas.sort(),["PRY00123","PRY00127"]);
 });
 
-test("una anotación tachada no se usa",()=>{
+test("una anotación tachada no se usa, pero queda pendiente: impide AUTO_OK",()=>{
+ const {aplicarEstado}=require("../albaranes/manuscritos.js");
  const r=validarCodigos([vista("ABP26 1234",[["ABP261234",0.9]],{tipo:"ABP",tachado:true})],{});
- assert.equal(r.stel.estado,"VACIO");assert.match(r.stel.motivos[0],/tachadas/);
+ assert.equal(r.stel.estado,"VACIO");assert.equal(r.stel.valor,null);assert.match(r.stel.motivos[0],/tachadas/);
+ assert.equal(aplicarEstado({estado:"AUTO_OK",manuscritos:{obra:{estado:"VACIO",literal:""},stel:r.stel}}).estado,"REVISAR");
 });
 
 test("ABP validado con el albarán de STEL (mismo proveedor y número); sin STEL queda propuesto",()=>{
@@ -73,13 +75,23 @@ test("ABP validado con el albarán de STEL (mismo proveedor y número); sin STEL
  assert.equal(otro.stel.estado,"REVISAR");
 });
 
-test("coherencia del lote: mismo código en dos albaranes con la misma obra → aceptado; si el lote se contradice, no",()=>{
- const doc=(obra,cod,impresa=[],escrita=[])=>({obraImpresa:impresa,obraEscrita:escrita,obra:{valor:cod,estado:"REVISAR",confianza:0.8,resolucion:{evidencias:[]}}});
- const a=doc("",  "PRY00456",["MOLINO FICTICIA"]),b=doc("","PRY00456",[],["Molino"]),c=doc("","PRY00055",["OBRA NAVE"]);
- assert.equal(coherenciaLote([a,b,c]),2);
- assert.equal(a.obra.estado,"OK");assert.equal(b.obra.estado,"OK");assert.equal(c.obra.estado,"REVISAR");
- const x=doc("","PRY00456",["MOLINO FICTICIA"]),y=doc("","PRY00456",["Molino"]),z=doc("","PRY00453",["Molino"]);
+test("coherencia del lote: el código se extiende desde un albarán donde está VALIDADO; si el lote se contradice, no",()=>{
+ const doc=(obra,cod,impresa=[],escrita=[],validado=false)=>({obraImpresa:impresa,obraEscrita:escrita,obra:validado?
+  {valor:cod,estado:"OK",confianza:0.95,resolucion:{metodo:"vision_recorte_validada",evidencias:["Visión","Coincide con el número de la obra impresa"]}}:
+  {valor:cod,estado:"REVISAR",confianza:0.8,resolucion:{evidencias:[]}}});
+ const a=doc("","PRY00456",["MOLINO FICTICIA 00456"],[],true),b=doc("","PRY00456",[],["Molino"]),c=doc("","PRY00055",["OBRA NAVE"]);
+ assert.equal(coherenciaLote([a,b,c]),1);
+ assert.equal(b.obra.estado,"OK");assert.equal(b.obra.resolucion.metodo,"vision_recorte_coherencia_lote");assert.equal(c.obra.estado,"REVISAR");
+ const x=doc("","PRY00456",["MOLINO FICTICIA 00456"],[],true),y=doc("","PRY00456",["Molino"]),z=doc("","PRY00453",["Molino"]);
  assert.equal(coherenciaLote([x,y,z]),0);
+});
+
+test("coherencia del lote: dos lecturas de visión iguales sin validar NO se confirman entre sí (fallo real 88 → 38)",()=>{
+ const doc=(cod,impresa)=>({obraImpresa:impresa,obraEscrita:[],obra:{valor:cod,estado:"REVISAR",confianza:0.8,resolucion:{evidencias:[]}}});
+ // Misma letra, mismo motor: los dos albaranes de la obra ficticia se leen igual de mal.
+ const a=doc("PRY00031",["OBRA MOLINO FICTICIO"]),b=doc("PRY00031",["MOLINO FICTICIO"]);
+ assert.equal(coherenciaLote([a,b]),0);
+ assert.equal(a.obra.estado,"REVISAR");assert.equal(b.obra.estado,"REVISAR");
 });
 
 test("obra impresa: «OBRA: …», «Referencia: OBRA …» y «SU PEDIDO: …»",()=>{
