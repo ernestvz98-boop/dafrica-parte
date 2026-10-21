@@ -309,3 +309,16 @@ test("descripción partida por un trazo a mano («LATON 2» en una fila sin cód
  // Sin esa fila, la descripción se acepta como antes.
  assert.equal(leer(pag(false)).lineas[0].descripcion.estado,"OK");
 });
+
+test("importe leído dentro de la columna de descuento («50 3,30», importe vacío): se recupera solo si la línea cuadra",()=>{
+ const pag=imp=>[...cabeceraDoc(),...etiquetas(),...cabeceraSaltoki(),
+  ...fila(218,["1300000001",60],["TUBO",120],["1,00",420],["6,590",462],["50",500],[imp,518])];
+ const r=leer(pag("3,30"));
+ const l=r.lineas[0];
+ assert.equal(l.importe.valor,3.3);assert.equal(l.cuadre.estado,"VERIFICADO");
+ assert.deepEqual(l.descuento.porcentajes,[50]);
+ assert.ok(l.importe.notas.some(n=>/columna de descuento/.test(n)));
+ // Si no cuadra («3,90»), no se reinterpreta: sin importe, la línea queda en revisión.
+ const m=leer(pag("3,90")).lineas[0];
+ assert.equal(m.importe.estado,"VACIO");assert.notEqual(m.cuadre.estado,"VERIFICADO");assert.equal(m.estado,"REVISAR");
+});

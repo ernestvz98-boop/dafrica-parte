@@ -841,6 +841,25 @@ function campoDescuento(celda,opciones){
 }
 const redondear=(x,d=2)=>Math.round((x+Math.sign(x)*1e-9)*10**d)/10**d;
 /*
+ * Importe leído dentro de la columna de descuento («50 3,30» con el importe vacío): el límite
+ * entre ambas columnas depende de la lectura OCR. El último valor es el importe solo si tiene
+ * forma de importe (dos decimales, sin «%») y la línea cuadra exactamente así; si no, se queda
+ * como descuento en cascada (y la línea, sin importe, en revisión).
+ */
+function importeEnColumnaDescuento(f,opcionesNumero,precioPor){
+ if(f.importe.estado!=="VACIO"||!f.descuento.cascada_por_espacios)return;
+ const partes=f.descuento.literal.split(/\s+/),ultimo=partes[partes.length-1];
+ if(partes.length<2||!/^\d{1,3}(?:[.\s]\d{3})*,\d{2}$|^\d+\.\d{2}$/.test(ultimo))return;
+ const importe=N().numero(ultimo,opcionesNumero);
+ const descuento=campoDescuento({texto:partes.slice(0,-1).join(" ")},opcionesNumero);
+ if(importe.estado!=="OK"||!["OK","VACIO"].includes(descuento.estado))return;
+ const prueba={...f,importe:{...importe,estado:"OK"},descuento};
+ if(cuadre(prueba,precioPor).estado!=="VERIFICADO")return;
+ const caja=f.descuento.caja,nota="Importe leído dentro de la columna de descuento («"+f.descuento.literal+"»): el cuadre de la línea lo confirma";
+ f.importe={...importe,caja,conf_ocr:f.descuento.conf_ocr,notas:[...(importe.notas||[]),nota]};
+ f.descuento={...descuento,caja,conf_ocr:f.descuento.conf_ocr,notas:[...(descuento.notas||[]),nota]};
+}
+/*
  * Cantidad ilegible (tapada por una firma o un sello) con precio, descuento e importe
  * válidos: se calcula qué cantidad haría cuadrar la línea y se ofrece al revisor como
  * sugerencia. NUNCA se asigna como valor: la cantidad queda vacía y la línea en revisión.
@@ -996,6 +1015,7 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  for(const campo of cruda.conflictos){
   f[campo]={...f[campo],valor:null,estado:"AMBIGUO",motivos:[...(f[campo].motivos||[]),"Varias cifras en la misma columna"]};
  }
+ importeEnColumnaDescuento(f,opcionesNumero,precioPor);
  f.cuadre=cuadre(f,precioPor);
  if(f.cuadre.estado!=="VERIFICADO")repararSeparadoresOCR(f,opcionesNumero,precioPor);
  sugerirCantidad(f,precioPor);
