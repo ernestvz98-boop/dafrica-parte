@@ -183,3 +183,15 @@ test("una sola lectura PRY: existir en el catálogo no basta; hace falta que el 
  const otra=validarCodigos([vista("PRY00123",[["PRY00123",0.95]])],{catalogoObras,obraEscrita:["Vivienda"]});
  assert.equal(otra.obra.estado,"REVISAR");
 });
+
+test("código STEL: el proveedor se compara por la cuenta de STEL verificada con el CIF, aunque el nombre se escriba distinto",async()=>{
+ const {validarStel}=require("../albaranes/manuscritos.js");
+ const base=()=>({fecha:{estado:"OK",valor:"2026-10-14"},numero:{valor:"600.111"},proveedor:{nombre:"PROVEEDOR FICTICIO, S.L.",account_id:777},
+  manuscritos:{stel:{valor:"ABP26-1234",literal:"ABP26 1234",estado:"REVISAR",resolucion:{alternativas:["ABP261234"]}}}});
+ const doc={fullReference:"ABP261234",supplier:"Ficticio Distribuciones",accountId:777,date:"2026-10-14",extraReference:""};
+ const vistos=[];
+ let r=base();assert.equal(await validarStel(r,async()=>[doc],{diagnostico:x=>vistos.push(x)}),true);
+ assert.equal(vistos[0].mismo_proveedor,true);assert.equal(vistos[0].cuenta_stel,777);
+ // Otra cuenta, aunque el nombre coincida: no.
+ r=base();assert.equal(await validarStel(r,async()=>[{...doc,accountId:778,supplier:"PROVEEDOR FICTICIO SL"}]),false);
+});

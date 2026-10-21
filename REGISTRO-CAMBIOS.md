@@ -3,6 +3,23 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Códigos ABP: referencia sin guion y proveedor por cuenta de STEL
+
+**Producción:** desplegada `stel-albaranes-consulta` v3 (solo lectura). Web publicada en `main`
+(versión `20261021lector13`; copia previa en `respaldo/main-antes-lector13`).
+
+- Lectura del usuario (lector12): 501 de 605 (82,8 %), **0 errores críticos**, 0 AUTO_OK (todos
+  con su código ABP sin validar). El diagnóstico mostró que STEL **sí** encuentra los albaranes,
+  pero con la referencia sin guion: «ABP26-1234» → 0 resultados, «ABP261234» → el albarán (ejemplo ficticio). Aun
+  así no se validó ninguno: la comparación de proveedor (por nombre) o de fecha no coincidía.
+- Ahora se pide primero sin guion (la mitad de consultas) y el proveedor se compara por la cuenta
+  de STEL (`account-id`), la misma que verificó el CIF en el catálogo; el nombre solo se usa si
+  no hay cuenta. Cada comparación (proveedor, fecha, número; hasta 8) se guarda en el JSON para
+  ver qué no coincide. Regresión en `manuscritos.test.js`.
+- Obras: la API pública de STEL no tiene catálogo de proyectos (404). Los códigos de obra solo se
+  validan con la obra impresa en el albarán o desde otro albarán del lote ya validado.
+- Pruebas: 208 superadas.
+
 ## 2026-10-21 · Error crítico por coherencia del lote; códigos tachados; diagnóstico de STEL
 
 **Producción:** desplegada `stel-albaranes-consulta` v2 (solo lectura; ahora en el repositorio).

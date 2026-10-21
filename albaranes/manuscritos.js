@@ -381,11 +381,12 @@ function fechaStel(v){
  const m=String(v).match(/^(\d{4}-\d{2}-\d{2})/);if(m)return m[1];
  const d=new Date(v);return isNaN(d)?null:d.toISOString().slice(0,10);
 }
-async function validarStel(r,consultar,{proveedorNombre=null}={}){
+async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null}={}){
  const m=r?.manuscritos?.stel;
  if(!m||!["REVISAR","AMBIGUO"].includes(m.estado)||typeof consultar!=="function")return false;
  const nombre=proveedorNombre||r.proveedor?.nombre;
- if(!nombre)return false;
+ const cuenta=r.proveedor?.account_id;
+ if(!nombre&&cuenta==null)return false;
  const alternativas=[...new Set((m.resolucion?.alternativas||[]).map(canon).filter(c=>FORMATOS.stel.test(c)))];
  const validas=[];
  for(const c of alternativas){
@@ -393,9 +394,14 @@ async function validarStel(r,consultar,{proveedorNombre=null}={}){
   const exactos=docs.filter(d=>canon(d.fullReference)===c);
   if(exactos.length!==1)continue;
   const d=exactos[0];
-  const mismoProv=canonNombre(d.supplier)!==""&&canonNombre(d.supplier)===canonNombre(nombre);
+  // Proveedor: la cuenta de STEL (la misma que verificó el CIF en el catálogo) o, si no hay, el nombre.
+  const mismoProv=cuenta!=null&&d.accountId!=null?String(d.accountId)===String(cuenta):
+   canonNombre(d.supplier)!==""&&canonNombre(d.supplier)===canonNombre(nombre);
   const mismaFecha=r.fecha?.estado==="OK"&&!!r.fecha.valor&&fechaStel(d.date)===r.fecha.valor;
   const mismoNum=!!r.numero?.valor&&!!d.extraReference&&canon(d.extraReference)===canon(r.numero.valor);
+  if(typeof diagnostico==="function")diagnostico({ref:d.fullReference,proveedor_stel:d.supplier,cuenta_stel:d.accountId??null,proveedor:nombre,cuenta:cuenta??null,
+   fecha_stel:d.date,fecha_stel_normalizada:fechaStel(d.date),fecha:r.fecha?.valor??null,referencia_externa:d.extraReference||null,numero:r.numero?.valor??null,
+   mismo_proveedor:mismoProv,misma_fecha:mismaFecha,mismo_numero:mismoNum});
   if(mismoProv&&(mismaFecha||mismoNum))validas.push({c,ev:"Albarán de compra STEL "+d.fullReference+" (solo lectura): proveedor «"+d.supplier+"»"+
    (mismaFecha?", misma fecha "+r.fecha.valor:"")+(mismoNum?", referencia del proveedor «"+d.extraReference+"»":"")});
  }

@@ -2,8 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 /*
  * DAFRICA · Consulta de SOLO LECTURA de un albarán de compra de STEL por su referencia completa
  * («ABP26-1234»). Exige sesión con permiso costes.ver. Solo GET a STEL; no guarda nada.
- * 2026-10-21: añadido diagnóstico (sin coincidencia exacta: cuántos albaranes devolvió STEL y el
- * formato de las primeras referencias), para saber si STEL aplica el filtro.
+ * 2026-10-21: diagnóstico (cuántos albaranes devolvió STEL, formato de las referencias y nombres de
+ * los campos) y cuenta del proveedor (`accountId`) para compararla con la del catálogo.
  */
 const cors={
   "Access-Control-Allow-Origin":"https://ernestvz98-boop.github.io",
@@ -60,12 +60,14 @@ Deno.serve(async(req:Request)=>{
       date:String(x.date||""),
       title:String(x.title||""),
       supplier:String(x["account-name"]||x["supplier-name"]||x.account?.name||""),
+      accountId:x["account-id"]??x.accountId??x.account?.id??null,
       extraReference:String(x["extra-reference"]||x.extraReference||""),
       state:String(x["document-state"]||x.status||"")
     }));
-    // Diagnóstico sin coincidencia: formato de las primeras referencias y campos disponibles.
-    const diagnostico=documents.length?null:{
-      muestra:raw.slice(0,5).map((x:any)=>({fullReference:String(x["full-reference"]??x.fullReference??""),reference:String(x.reference??""),date:String(x.date??"")})),
+    // Diagnóstico: formato de las primeras referencias (sin coincidencia) y nombres de los campos
+    // que devuelve STEL (sin importes ni datos de contacto).
+    const diagnostico={
+      muestra:documents.length?[]:raw.slice(0,5).map((x:any)=>({fullReference:String(x["full-reference"]??x.fullReference??""),reference:String(x.reference??""),date:String(x.date??"")})),
       campos:raw.length?Object.keys(raw[0]).filter(k=>!/price|amount|total|tax|discount|cost|iban|email|phone/i.test(k)).slice(0,40):[]
     };
     return reply({
