@@ -9,6 +9,8 @@
  */
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
+// Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
+const VERSION_LECTOR="20261021lector5";
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -19,7 +21,7 @@ renderModule=async function(){
  return renderModuleBase();
 };
 function renderLectorAlbaranes(){
- setTopbar("Lector de albaranes","PDF digitales, escaneados o mixtos · se leen en este navegador y no se guardan");
+ setTopbar("Lector de albaranes","Versión "+VERSION_LECTOR+" · PDF digitales, escaneados o mixtos · se leen en este navegador y no se guardan");
  setContent('<div id="lalRaiz"></div>');
  montar($("lalRaiz"));
 }

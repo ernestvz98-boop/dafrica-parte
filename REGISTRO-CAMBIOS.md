@@ -14,8 +14,8 @@ base de datos ni en las funciones Edge.
   el módulo **«📄 Lector de albaranes»** del menú lateral (permiso `costes.ver`, después de
   «Costes / Consumos»; enlace directo `?mod=lector-albaranes`). Texto actualizado: visión solo
   de recortes y siempre validada; catálogo STEL solo lectura.
-- `index.html`: versión de los scripts `20261021lector4` (el navegador no reutiliza copias
-  antiguas).
+- `index.html`: versión de los scripts `20261021lector5` (el navegador no reutiliza copias
+  antiguas); la misma versión se ve en el subtítulo del módulo («Versión 20261021lector5»).
 - La pantalla, el JSON y `evaluar-web.js` indican si el catálogo STEL y la visión estuvieron
   disponibles en cada lectura (sin ellos, los campos dudosos quedan en REVISAR).
 - Fallo hallado en el navegador (pdf.js desplaza el límite entre DTO e IMPORTE): «50 3,30» se
