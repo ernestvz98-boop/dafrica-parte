@@ -51,13 +51,20 @@ function montar(root){
    const pdfjs=await pcLoadPdfJs();
    // Visión SOLO de recortes (manuscritos y celdas dudosas) con la sesión del usuario; su salida
    // nunca se acepta sin validar (formato, contexto, OCR, catálogo). Desactivable con config.
+   const motores={vision:{activa:false,llamadas:0,fallos:0},catalogo:{disponible:false,articulos:0,completo:false}};
+   resultado.motores=motores;
    const vision=lib.config?.vision===false||typeof sb!=="function"?null:
-    async(recortes,{modo="manuscrito"}={})=>(await sb("/functions/v1/albaranes-manuscritos",{method:"POST",headers:{"Content-Type":"application/json"},
-     body:JSON.stringify({recortes,modo}),signal:AbortSignal.timeout(70000)}))?.recortes||[];
+    async(recortes,{modo="manuscrito"}={})=>{
+     motores.vision.activa=true;motores.vision.llamadas++;
+     try{return (await sb("/functions/v1/albaranes-manuscritos",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({recortes,modo}),signal:AbortSignal.timeout(70000)}))?.recortes||[];}
+     catch(e){motores.vision.fallos++;throw e;}
+    };
    // Catálogo STEL de SOLO LECTURA (proveedores y artículos, sin precios): una consulta por
    // ejecución, solo en memoria. Valida CIF y referencias O/0, S/5… con coincidencia única.
    const catalogo=lib.verificacion&&typeof sb==="function"?
     await sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(65000)}).catch(()=>null):null;
+   if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo});
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
@@ -91,8 +98,12 @@ function montar(root){
  function pintar(r){
   const n=e=>r.documentos.filter(d=>d.estado_documento===e).length;
   const ETIQ={AUTO_OK:"AUTO_OK · verificado",REVISAR:'<span class="error">REVISAR</span>',ERROR_DOCUMENTO:'<b class="error">ERROR_DOCUMENTO</b>'};
+  const m=r.motores,v=m?.vision,cat=m?.catalogo;
+  const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?esc(cat.articulos)+' artículos'+(cat.completo?'':' (incompleto)'):'<b>no disponible</b>')+
+   ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas)':esc(v.llamadas)+' consultas')+
+   (cat.disponible&&(!v.activa||!v.fallos)?'':'. Sin ellos, los campos dudosos quedan en REVISAR.')+'</p>';
   $("lalResumen").innerHTML='<p><b>'+esc(r.documentos.length)+'</b> documentos: <b>'+esc(n("AUTO_OK"))+'</b> AUTO_OK · <b>'+
-   esc(n("REVISAR"))+'</b> REVISAR · <b>'+esc(n("ERROR_DOCUMENTO"))+'</b> ERROR_DOCUMENTO</p>'+
+   esc(n("REVISAR"))+'</b> REVISAR · <b>'+esc(n("ERROR_DOCUMENTO"))+'</b> ERROR_DOCUMENTO</p>'+segunda+
    (r.documentos.length?'<p><button type="button" class="btn secondary" id="lalJson">Descargar resultado (JSON)</button> '+
     '<button type="button" class="btn secondary" id="lalCsv">Descargar líneas (CSV)</button></p>':'')+
    '<div class="table-wrap" style="overflow:auto;max-height:420px"><table><thead><tr><th>#</th><th>PDF · páginas</th><th>Proveedor</th><th>Número</th><th>Fecha</th><th>Líneas</th><th>Total</th><th>Obra (manuscrito)</th><th>Estado</th></tr></thead><tbody>'+
