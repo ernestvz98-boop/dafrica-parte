@@ -1,0 +1,4 @@
+# Esta función valida Auth + costes.ver para usuarios y capacidades de un uso
+# para el backend autorizado. Las capacidades no son JWT y se validan dentro.
+[functions.stel-costes-lectura]
+verify_jwt = false
