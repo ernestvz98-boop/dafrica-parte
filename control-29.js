@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261021lector5";
+const VERSION_LECTOR="20261021lector6";
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -19,6 +19,16 @@ const renderModuleBase=renderModule;
 renderModule=async function(){
  if(state.module===MODULO.id)return renderLectorAlbaranes();
  return renderModuleBase();
+};
+// El piloto anterior de «Pedidos y alertas» (PDF completo a una IA externa) queda sustituido por
+// este módulo: en su lugar, un aviso que lleva al lector nuevo.
+renderComprasLotePilot=function(){
+ const root=$("pcBatch");if(!root||!has("costes.ver"))return;
+ root.innerHTML='<div class="card"><h3>Lectura de albaranes PDF</h3>'+
+  '<p class="muted">La lectura de albaranes se hace ahora en el módulo <b>«📄 Lector de albaranes»</b> del menú (versión '+esc(VERSION_LECTOR)+'). '+
+  'El piloto anterior, que enviaba el PDF completo a una IA externa, ya no se usa.</p>'+
+  '<button type="button" class="btn" id="pcIrLector">Abrir el Lector de albaranes</button></div>';
+ $("pcIrLector").onclick=()=>navigate(MODULO.id);
 };
 function renderLectorAlbaranes(){
  setTopbar("Lector de albaranes","Versión "+VERSION_LECTOR+" · PDF digitales, escaneados o mixtos · se leen en este navegador y no se guardan");

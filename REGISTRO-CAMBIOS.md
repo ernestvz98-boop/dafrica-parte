@@ -3,6 +3,16 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · «Pedidos y alertas» ya no ofrece el piloto antiguo de lectura
+
+**Producción:** publicado en `main` (copia previa en `respaldo/main-antes-lector6`).
+
+- El usuario probó por error la tarjeta antigua «Interpretar albaranes de PDF» de «Pedidos y
+  alertas» (PDF completo a una IA externa; respondía «Análisis IA no disponible»). Se sustituye
+  por un aviso con el botón «Abrir el Lector de albaranes». Versión `20261021lector6`.
+- Probado en Chromium con la aplicación completa: aviso visible, tarjeta antigua ausente, el
+  botón abre el módulo; sin errores de JavaScript. 195 pruebas superadas.
+
 ## 2026-10-21 · Publicación en producción del lector de albaranes
 
 **Producción:** publicado en `main` con autorización expresa del usuario (commit de fusión
