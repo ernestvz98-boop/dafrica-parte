@@ -14,6 +14,18 @@
   const prueba=catalogo?.solo_lectura===true&&catalogo.persistido===false&&catalogo.escritura_supabase===false&&catalogo.escritura_stel===false;
   if(!prueba){det.comprobacion_automatica={catalogo_disponible:false,motivos:['No se dispone de una respuesta verificable del catálogo de solo lectura']};return det;}
   const motivos=[];
+  // CIF impreso ilegible pero proveedor identificado por su nombre registrado: el perfil público solo
+  // guarda la huella del CIF. Si exactamente un proveedor del catálogo completo tiene un CIF con esa
+  // huella, se completa con él (lo mismo que hace el registro privado, sin el CIF en claro).
+  const huellas=new Set(det._ctx?.perfil?.huellas_nif||[]);
+  if(catalogo.proveedores_completo&&p?.via==='nombre_registrado'&&!p.nif&&huellas.size){
+   const c=(catalogo.proveedores||[]).filter(s=>s.nif&&M('nif').validar(s.nif).valido&&huellas.has(M('nif').huella(s.nif)));
+   if(c.length===1){
+    Object.assign(p,{nif:M('nif').normalizar(c[0].nif),estado:'OK',motivos:[],account_id:c[0].id,
+     verificacion_catalogo:{metodo:'Nombre registrado impreso y huella del CIF del perfil única en el catálogo completo de STEL',account_id:c[0].id}});
+    p.notas=[...(p.notas||[]),'CIF impreso no legible: completado con el catálogo de STEL (huella del perfil, coincidencia única)'];
+   }else motivos.push(c.length?'Huella del CIF repetida en el catálogo de proveedores':'Huella del CIF del perfil no encontrada en el catálogo de proveedores');
+  }
   if(catalogo.proveedores_completo&&p?.nif&&M('nif').validar(p.nif).valido&&['OK','NIF_NO_REGISTRADO'].includes(p.estado)){
    const candidatos=(catalogo.proveedores||[]).filter(s=>M('nif').normalizar(s.nif)===M('nif').normalizar(p.nif));
    if(candidatos.length===1){

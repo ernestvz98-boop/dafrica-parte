@@ -89,7 +89,9 @@ function comparar(resultado,esperado){
  for(const [k,e] of Object.entries(esperado.manuscritos||{})){
   if(!resultado.manuscritos){sinMotor.push("manuscritos."+k);continue;}
   const m=resultado.manuscritos[k]||{valor:null,estado:"VACIO"};
-  add({campo:"manuscritos."+k,tipo:"texto",esperado:e,obtenido:m.valor,estado:m.estado,debeMarcarse:marcados.has("manuscritos."+k),confianza:conf(m),motivos:m.motivos||[]});
+  // Sin anotación esperada y nada leído (ni literal): correcto, no «pendiente».
+  const vacioEsperado=(e===null||e===undefined)&&m.estado==="VACIO"&&!m.literal&&!marcados.has("manuscritos."+k);
+  add({campo:"manuscritos."+k,tipo:"texto",esperado:e,obtenido:m.valor,estado:vacioEsperado?"OK":m.estado,debeMarcarse:marcados.has("manuscritos."+k),confianza:vacioEsperado?null:conf(m),motivos:m.motivos||[]});
  }
  const lineas=[];
  for(const [ie,io] of alinear(esperado.lineas||[],resultado.lineas||[])){

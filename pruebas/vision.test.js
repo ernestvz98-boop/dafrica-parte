@@ -115,3 +115,15 @@ test("código con texto pegado: la visión del recorte no confirma una descripci
  assert.ok(l.descripcion.confianza<0.9||l.descripcion.estado!=="OK");
  assert.ok(l.descripcion.motivos.some(m=>/Frontera entre código y descripción/.test(m)));
 });
+
+test("código con S/5, Z/2, B/8 o G/6 (sin O/0 ni I/1): visión y OCR iguales lo confirman; con O/0 no",async()=>{
+ for(const [ref,acepta] of [["25RC32",true],["20RC32",false]]){
+  const m=motor(["ESPUMA PU 750ml"],ref);
+  const vision=async recortes=>recortes.map((_,i)=>({indice:i,texto:ref}));
+  const r=await extraerEscaneado(m.paginas,{registro:registroCon(),hoy:HOY,vision});
+  const c=r.lineas[0].referencia;
+  assert.equal(c.valor,ref);
+  if(acepta){assert.equal(c.resolucion?.metodo,"vision_coincide_ocr",ref);assert.ok(c.confianza>=0.9,ref);}
+  else assert.ok(c.confianza<0.9,ref);
+ }
+});

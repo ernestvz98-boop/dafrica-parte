@@ -186,7 +186,10 @@ function candidatoDe(campo,texto,ctx){
  const tokens=String(texto).split(/\s+/).map(limpiarBordes).filter(Boolean);
  if(campo==="numero"){
   const re=perfil?.formato_numero?new RegExp(perfil.formato_numero):/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i;
-  const v=[...tokens,...tokens.slice(0,-1).map((t,i)=>t+" "+tokens[i+1])].filter(t=>re.test(t)&&/\d/.test(t)&&N.fecha(t).estado!=="OK");
+  // También dos fichas separadas solo por el espacio junto a «/», «-» o «.» («2026 /9294»).
+  const crudos=String(texto).split(/\s+/).filter(Boolean);
+  const pegadas=crudos.slice(0,-1).map((t,i)=>/[\/.\-]$/.test(t)||/^[\/.\-]/.test(crudos[i+1])?limpiarBordes(t+crudos[i+1]):null).filter(Boolean);
+  const v=[...new Set([...tokens,...tokens.slice(0,-1).map((t,i)=>t+" "+tokens[i+1]),...pegadas])].filter(t=>re.test(t)&&/\d/.test(t)&&N.fecha(t).estado!=="OK");
   return v.length===1?v[0]:null;
  }
  if(campo==="fecha"){
@@ -204,6 +207,36 @@ function candidatoDe(campo,texto,ctx){
  }
  const t=campo==="descripcion"?M("extraer").restituirGlifos(tokens.join(" "),perfil):tokens.join(" ");
  return t||null;
+}
+/*
+ * ¿La lectura de visión del recorte coincide con UNA de las lecturas OCR de la casilla?
+ * Devuelve {candidato, valor, regla} o null. Nunca acepta un texto que ningún OCR haya leído:
+ * - número/fecha: el texto de la visión se valida como el OCR (formato del proveedor, fecha).
+ * - código: igualdad exacta; si no, igualdad sin puntuación siempre que sea única.
+ * - descripción: igualdad exacta; si no, mismas letras y cifras salvo espacios y signos sueltos al
+ *   principio o al final («[CODO 92 M-H LATON2» / «CODO 92 M-H LATON 2»): se toma el texto de la visión.
+ */
+function coincidenciaVision(campo,candidatos,v,ctx={}){
+ const N=M("normalizar");
+ const cands=[...new Set((candidatos||[]).map(c=>String(c??"")))].filter(c=>c.trim());
+ if(v==null||!String(v).trim())return null;
+ const unica=(lista,regla,valor=x=>x)=>lista.length===1?{candidato:lista[0],valor:valor(lista[0]),regla}:null;
+ if(campo==="numero"||campo==="fecha"){
+  const cv=candidatoDe(campo,v,ctx);if(!cv)return null;
+  const exactos=cands.filter(c=>c===cv);
+  if(exactos.length)return unica(exactos,"exacta");
+  return unica(cands.filter(c=>campo==="numero"&&N.canon(c)===N.canon(cv)),"sin_puntuacion");
+ }
+ if(campo==="referencia"){
+  const exactos=cands.filter(c=>c.trim()===String(v).trim());
+  if(exactos.length)return unica(exactos,"exacta");
+  return unica(cands.filter(c=>N.canon(c)!==""&&N.canon(c)===N.canon(v)),"sin_puntuacion");
+ }
+ const esp=t=>String(t).replace(/\s+/g," ").trim();
+ const exactos=cands.filter(c=>esp(c)===esp(v));
+ if(exactos.length)return unica(exactos,"exacta");
+ const letras=t=>String(t).replace(/^[^\p{L}\p{N}Ø]+|[^\p{L}\p{N}Ø.)%]+$/gu,"").replace(/\s+/g,"");
+ return letras(v)?unica(cands.filter(c=>letras(c)===letras(v)),"espacios",()=>esp(v)):null;
 }
 async function resolverCampo(p,campo,cajas,ctx){
  const validas=[];
@@ -299,6 +332,10 @@ async function segundaFase(principal,paginas,lecturas,opciones){
    const r=await resolverCampo(pag,campo,[c.caja],{perfil,opcionesFecha,literal:c.literal});
    // Sin resolver: candidato a la comprobación por un segundo motor (visión del recorte).
    if(!r||r.conflicto)pendientes.push({l,campo,candidatos:[c.valor??c.literal,...(r?.conflicto||[]),...(campo==="referencia"?c.alternativas_ocr||[]:[])].filter(Boolean)});
+   // Código con S/5, Z/2, B/8 o G/6 (sin O/0 ni I/1/l): las relecturas del OCR confunden igual esos
+   // pares; aunque concuerden, solo la visión (otro motor) puede confirmarlo.
+   else if(campo==="referencia"&&/[A-Z]/i.test(r.valor)&&/\d/.test(r.valor)&&/[S5B8Z2G6]/.test(r.valor)&&!/[O0I1l]/.test(r.valor))
+    pendientes.push({l,campo,candidatos:[r.valor,c.valor??c.literal,...(c.alternativas_ocr||[])].filter(Boolean)});
    if(!r)continue;
    if(r.conflicto){l[campo]={...c,motivos:[...(c.motivos||[]),"Relecturas fiables distintas: "+r.conflicto.join(" | ")]};continue;}
    // Una referencia no cambia de número de palabras (la relectura no debe arrastrar la celda vecina).
@@ -333,30 +370,26 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   // Registro de cada casilla consultada (candidatos OCR y texto de la visión): permite reproducir y
   // medir las reglas de aceptación sin volver a leer el PDF.
   principal.vision_celdas=pendientes.map((x,i)=>({fila:x.cabecera?"cabecera":x.l.fila,campo:x.campo,candidatos:[...new Set(x.candidatos)],vision:lecturas[i]??null}));
-  const igual=(campo,a,b)=>campo==="referencia"?N.canon(a)===N.canon(b)&&N.canon(a)!=="":
-   String(a).replace(/\s+/g," ").trim()===String(b).replace(/\s+/g," ").trim()&&String(a).trim()!=="";
   pendientes.forEach((x,i)=>{
    let v=lecturas[i];if(v==null)return;
+   const m=coincidenciaVision(x.campo,x.candidatos,v,{perfil,opcionesFecha});
+   if(!m)return;
    if(x.cabecera){
     // Valor de la visión normalizado y validado igual que el OCR; debe ser uno de los candidatos.
-    const cv=candidatoDe(x.campo,v,{perfil,opcionesFecha});
-    const iguales=[...new Set(x.candidatos)].filter(c=>cv&&(x.campo==="fecha"?c===cv:N.canon(c)===N.canon(cv)));
-    if(iguales.length!==1)return;
     const actual=principal[x.campo]||{};
-    principal[x.campo]={...actual,valor:x.campo==="fecha"?iguales[0]:String(iguales[0]).replace(/\s*\/\s*/g,"/"),literal:actual.literal||v,estado:"OK",
+    principal[x.campo]={...actual,valor:x.campo==="fecha"?m.candidato:String(m.candidato).replace(/\s*\/\s*/g,"/"),literal:actual.literal||v,estado:"OK",
      motivos:[],caja:x.caja,resolucion:{metodo:"vision_coincide_ocr",confianza:0.95,
-      evidencias:["Visión del recorte de la casilla: «"+v+"»","Coincide con una lectura OCR: «"+iguales[0]+"»",
+      evidencias:["Visión del recorte de la casilla: «"+v+"»","Coincide con una lectura OCR: «"+m.candidato+"»",
        "Lecturas OCR en conflicto: "+[...new Set(x.candidatos)].join(" | "),
        x.campo==="fecha"?"Fecha válida":perfil?.formato_numero?"Cumple el formato de número del proveedor ("+perfil.formato_numero+")":"Valor con forma de número de albarán"]}};
     resueltos.push(x.campo+" (visión = OCR)");
     return;
    }
-   const coincide=[...new Set(x.candidatos)].filter(cand=>igual(x.campo,cand,v));
-   if(coincide.length!==1)return;
    const c=x.l[x.campo];
-   x.l[x.campo]={...c,literal:coincide[0],valor:coincide[0],motivos:(c.motivos||[]).filter(m=>!/^Relecturas fiables distintas/.test(m)),
+   x.l[x.campo]={...c,literal:m.valor,valor:m.valor,motivos:(c.motivos||[]).filter(t=>!/^Relecturas fiables distintas/.test(t)),
     resolucion:{metodo:"vision_coincide_ocr",confianza:0.95,lectura_inicial:c.literal,
-     evidencias:["Visión del recorte de la celda: «"+v+"»","Coincide exactamente con una lectura OCR independiente de la misma celda",
+     evidencias:["Visión del recorte de la celda: «"+v+"»",m.regla==="espacios"?"Mismas letras y cifras que una lectura OCR de la celda («"+m.candidato+"»), salvo espacios":
+      "Coincide "+(m.regla==="exacta"?"exactamente ":"(sin puntuación) ")+"con una lectura OCR independiente de la misma celda",
       ...(x.candidatos.length>1?["Lecturas OCR consideradas: "+[...new Set(x.candidatos)].join(" | ")]:[])]}};
    resueltos.push("linea "+x.l.fila+" "+x.campo+" (visión = OCR)");
   });
@@ -607,5 +640,5 @@ async function leerCabeceras(paginas,opciones={}){
  }
  return out;
 }
-return {extraerEscaneado,leerCabeceras,LECTURAS};
+return {extraerEscaneado,leerCabeceras,coincidenciaVision,LECTURAS};
 });

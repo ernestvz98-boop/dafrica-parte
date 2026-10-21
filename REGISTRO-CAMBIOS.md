@@ -3,6 +3,31 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Mejoras medidas sobre la lectura del usuario (sin nuevas lecturas)
+
+**Producción:** web publicada en `main` (versión `20261021lector15`; copia previa en
+`respaldo/main-antes-lector15`). Sin cambios en funciones Edge, datos ni STEL.
+
+Lectura del usuario (lector14): **15 códigos ABP validados con STEL**; 519 de 605 (85,8 %),
+**0 errores críticos**, 4 AUTO_OK todos correctos. Con los datos guardados en el JSON (catálogo,
+respuestas de visión y de STEL) se han medido aquí, sin pedir lecturas nuevas:
+
+- El catálogo de STEL **no contiene las referencias de los proveedores** (0 de 27): son artículos
+  propios de DAFRICA. No sirve para validar códigos impresos por el proveedor.
+- Visión ↔ OCR (`escaneado.coincidenciaVision`, común a cabecera y líneas): igualdad exacta
+  antes que sin puntuación («7.899,9000» frente a «7,899,9000»); descripciones con las mismas
+  letras y cifras salvo espacios o signos sueltos en los extremos; número «2026 /9294» unido.
+  Reproducido sobre la lectura del usuario: 6 aceptaciones nuevas, las 6 correctas.
+- CIF impreso ilegible con proveedor identificado por su nombre registrado: se completa si la
+  huella del CIF del perfil coincide con un único proveedor del catálogo completo de STEL
+  (verificado sobre la lectura del usuario: coincidencia única). Lo mismo que el registro privado.
+- Códigos con S/5, Z/2, B/8 o G/6 y sin O/0 ni I/1/l: se aceptan si la visión (otro motor) lee
+  exactamente lo mismo que el OCR; con O/0 o I/1 siguen en revisión (pares idénticos en muchas
+  fuentes). También se consultan a la visión aunque las relecturas del OCR concuerden.
+- Evaluador: un manuscrito no esperado y no leído cuenta como correcto (no como pendiente).
+- Regresiones nuevas en `vision.test.js` y `verificacion.test.js`. 209 pruebas.
+- Corpus sin visión: nativo 496 (91,0 %), perfiles públicos 494 (90,6 %), 0 críticos.
+
 ## 2026-10-21 · Análisis del objetivo del 95 % y lectura que se puede reproducir sin el usuario
 
 **Producción:** web publicada en `main` (versión `20261021lector14`; copia previa en

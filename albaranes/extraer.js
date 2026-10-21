@@ -1108,8 +1108,11 @@ function aplicarConfianza(salida,perfil){
   // OCR: un código que mezcla letras y dígitos con caracteres confundibles (O/0, S/5, I/1/l, B/8,
   // Z/2, G/6) no es fiable solo por OCR, ni con relecturas: todas confunden igual esos pares
   // (caso real «12SOP3456» leído «1250P3456» por todas las estrategias).
+  // Excepción: la visión del recorte (otro motor) lee exactamente lo mismo que el OCR y el código no
+  // tiene O/0 ni I/1/l, los pares que en muchas fuentes son idénticos (S/5, Z/2, B/8, G/6 no lo son).
   const ref=String(l.referencia?.valor||"");
-  if(salida.tipo_pdf!=="DIGITAL"&&/[A-Z]/i.test(ref)&&/\d/.test(ref)&&/[O0S5I1lB8Z2G6]/.test(ref)&&partes.referencia>0.85&&!l.referencia.validado_catalogo){
+  const confirmadoVision=l.referencia?.resolucion?.metodo==="vision_coincide_ocr"&&!/[O0I1l]/.test(ref);
+  if(salida.tipo_pdf!=="DIGITAL"&&/[A-Z]/i.test(ref)&&/\d/.test(ref)&&/[O0S5I1lB8Z2G6]/.test(ref)&&partes.referencia>0.85&&!l.referencia.validado_catalogo&&!confirmadoVision){
    partes.referencia=0.85;
    const m="Código alfanumérico con caracteres que el OCR confunde (O/0, S/5, I/1, B/8, Z/2, G/6): requiere validación";
    if(!(l.referencia.motivos||[]).includes(m))l.referencia.motivos=[...(l.referencia.motivos||[]),m];

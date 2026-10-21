@@ -76,3 +76,17 @@ test('proveedor identificado por la huella de su CIF (STEL sin CIF): valida art�
  assert.equal(r.lineas[0].referencia.valor,'1200P001');assert.equal(r.lineas[0].referencia.validado_catalogo,true);
  const s=documento();verificar(s,c);assert.ok(!s.lineas[0].referencia.validado_catalogo);
 });
+test('CIF impreso ilegible y proveedor por nombre registrado: se completa si la huella del perfil es única en el catálogo',()=>{
+ const {huella}=require('../albaranes/nif');
+ const doc=()=>leer([...fila(40,['PROVEEDOR',60],['FICTICIO,',115],['S.L.',165]),...fila(120,['ALBARÁN',60],['009999',120],['FECHA',300],['15/10/2026',340]),
+  ...fila(200,['CÓDIGO',60],['CONCEPTO',120],['CANTIDAD',400],['PRECIO',460],['DTO%',500],['IMPORTE',545]),
+  ...fila(218,['120OP001',60],['TUBO',120],['MULTICAPA',150],['2,00',420],['10,00',462],['50',510],['10,00',560])],
+  {registro:registroCon({nifs:[],huellas_nif:[huella(NIF)]})});
+ let r=doc();assert.equal(r.proveedor.via,'nombre_registrado');assert.equal(r.proveedor.nif,null);
+ verificar(r,catalogo());
+ assert.equal(r.proveedor.nif,NIF);assert.equal(r.proveedor.estado,'OK');assert.equal(r.proveedor.account_id,1);
+ // Huella repetida o ausente en el catálogo: no se completa.
+ for(const c of [(()=>{const x=catalogo();x.proveedores.push({...x.proveedores[0],id:2});return x;})(),(()=>{const x=catalogo();x.proveedores[0].nif='B24999993';return x;})()]){
+  r=doc();verificar(r,c);assert.equal(r.proveedor.nif,null);assert.notEqual(r.proveedor.estado,'OK');
+ }
+});
