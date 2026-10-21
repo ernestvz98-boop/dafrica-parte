@@ -59,10 +59,23 @@ Deno.serve(async(req:Request)=>{
   const r=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{Authorization:"Bearer "+clave,"Content-Type":"application/json"},
    body:JSON.stringify({model:Deno.env.get("OPENAI_VISION_MODEL")||"gpt-4o",store:false,instructions:impreso?INSTRUCCIONES_IMPRESO:INSTRUCCIONES,input:[{role:"user",content:contenido}],
     text:{format:{type:"json_schema",name:impreso?"celdas":"manuscritos",strict:true,schema:impreso?ESQUEMA_IMPRESO:ESQUEMA}}}),signal:AbortSignal.timeout(60000)});
-  if(!r.ok)return json({error:"Servicio de visión no disponible",status:r.status},502);
+  if(!r.ok){
+   // Solo el código y el tipo del error de OpenAI (p. ej. insufficient_quota): nunca su mensaje,
+   // que puede incluir parte de la clave.
+   const e=await r.json().catch(()=>null);
+   const codigo=String(e?.error?.code||e?.error?.type||"").replace(/[^\w.-]/g,"").slice(0,60);
+   console.error("albaranes-manuscritos: OpenAI respondió "+r.status+(codigo?" ("+codigo+")":""));
+   return json({error:"Servicio de visión no disponible: OpenAI "+r.status+(codigo?" "+codigo:""),status:r.status,codigo},502);
+  }
   const raw=await r.json();
   const texto=raw.output?.flatMap((x:any)=>Array.isArray(x.content)?x.content:[])?.find((x:any)=>x.type==="output_text")?.text;
-  const datos=JSON.parse(String(texto||"{}"));
+  let datos:any;
+  try{datos=JSON.parse(String(texto||"{}"));}
+  catch{console.error("albaranes-manuscritos: respuesta de visión sin JSON válido");return json({error:"Respuesta de visión no válida"},502);}
   return json({recortes:Array.isArray(datos.recortes)?datos.recortes:[],uso:raw.usage||null});
- }catch(_e){return json({error:"No se pudo leer los manuscritos"},502);}
+ }catch(e){
+  const tipo=String((e as any)?.name||"Error").slice(0,40);
+  console.error("albaranes-manuscritos: excepción "+tipo);
+  return json({error:"No se pudo leer los manuscritos ("+tipo+")"},502);
+ }
 });

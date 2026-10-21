@@ -3,6 +3,27 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Primera lectura con la sesión del usuario: visión y catálogo
+
+**Producción:** desplegadas `albaranes-manuscritos` v2 y `compras-catalogo-lectura` v2 (solo
+lectura; sin cambios de esquema ni de datos; sin escrituras en STEL). Web publicada en `main`
+(versión `20261021lector7`; copia previa en `respaldo/main-antes-lector7`).
+
+- Lectura del usuario (1 PDF = `lote-b2`, 11 albaranes, 196 campos): separación 11/11,
+  **162 correctos y automáticos (82,7 %), 0 errores críticos**; 10 de 11 proveedores
+  verificados por el CIF en el catálogo de STEL. Mismo PDF sin sesión: 167 (85,2 %); la
+  diferencia es el renderizado del navegador, no la segunda fase.
+- **Visión: 19 de 19 consultas fallidas** (502 en menos de un segundo). Desde ayer a las 10:25
+  fallan también las otras funciones que usan OpenAI (`compras-lote-piloto`); lo más probable es
+  la cuenta o la clave de OpenAI. La función no registraba el motivo: ahora devuelve y registra
+  el código de OpenAI (p. ej. `insufficient_quota`), nunca su mensaje (puede llevar parte de la
+  clave), y la pantalla lo muestra.
+- **Catálogo incompleto** (4677 artículos): la consulta se cortaba en 50 páginas de STEL; sin
+  catálogo completo no se valida ningún código (no se puede garantizar coincidencia única).
+  Ahora: hasta 200 páginas, 4 a la vez mientras llegan completas y después de una en una, sin
+  huecos ni duplicados (regresión); devuelve `diagnostico` con páginas y motivo; la pantalla
+  espera hasta 150 s y muestra el motivo si sigue incompleto.
+
 ## 2026-10-21 · «Pedidos y alertas» ya no ofrece el piloto antiguo de lectura
 
 **Producción:** publicado en `main` (copia previa en `respaldo/main-antes-lector6`).

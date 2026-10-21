@@ -7,7 +7,18 @@ const req=(body={},auth=true)=>new Request('https://test.invalid',{method:'POST'
 test('paginación hasta página vacía, aunque STEL reduzca el tamaño solicitado',async()=>{
  const {leerPaginas}=await mod(),starts=[];
  const r=await leerPaginas(async url=>{const n=Number(new URL(url).searchParams.get('start'));starts.push(n);return response(n<2?[{id:n+1}]:[])},'products','ficticia');
- assert.deepEqual(starts,[0,1,2]);assert.equal(r.completo,true);assert.equal(r.filas.length,2);
+ // Tras la primera página corta se sigue de una en una desde las filas leídas (1, 2).
+ assert.deepEqual(starts.slice(-2),[1,2]);assert.equal(r.completo,true);assert.equal(r.filas.length,2);
+});
+test('catálogo grande: páginas completas en paralelo, sin huecos ni duplicados, hasta la página vacía',async()=>{
+ const {leerPaginas}=await mod(),TOTAL=1234;
+ const r=await leerPaginas(async url=>{const u=new URL(url),n=Number(u.searchParams.get('start')),l=Number(u.searchParams.get('limit'));
+  return response(Array.from({length:Math.max(0,Math.min(l,TOTAL-n))},(_,i)=>({id:n+i+1})));},'products','ficticia');
+ assert.equal(r.completo,true);assert.equal(r.filas.length,TOTAL);
+ assert.deepEqual(r.filas.map(x=>x.id),Array.from({length:TOTAL},(_,i)=>i+1));
+ // Con el límite antiguo (50 páginas) un catálogo mayor queda incompleto y lo dice.
+ const corto=await leerPaginas(async url=>{const n=Number(new URL(url).searchParams.get('start'));return response(Array.from({length:100},(_,i)=>({id:n+i+1})));},'products','ficticia',{maxPaginas:50});
+ assert.equal(corto.completo,false);assert.equal(corto.motivo,'limite_paginas');
 });
 test('paginación repetida, interrumpida o al límite nunca se anuncia completa',async()=>{
  const {leerPaginas}=await mod();

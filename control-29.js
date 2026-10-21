@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261021lector6";
+const VERSION_LECTOR="20261021lector7";
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -70,13 +70,15 @@ function montar(root){
      motores.vision.activa=true;motores.vision.llamadas++;
      try{return (await sb("/functions/v1/albaranes-manuscritos",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({recortes,modo}),signal:AbortSignal.timeout(70000)}))?.recortes||[];}
-     catch(e){motores.vision.fallos++;throw e;}
+     catch(e){motores.vision.fallos++;motores.vision.ultimo_error=String(e?.message||e).slice(0,160);throw e;}
     };
    // Catálogo STEL de SOLO LECTURA (proveedores y artículos, sin precios): una consulta por
    // ejecución, solo en memoria. Valida CIF y referencias O/0, S/5… con coincidencia única.
    const catalogo=lib.verificacion&&typeof sb==="function"?
-    await sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(65000)}).catch(()=>null):null;
-   if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo});
+    await sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(150000)})
+     .catch(e=>{motores.catalogo.error=String(e?.message||e).slice(0,160);return null;}):null;
+   if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo,
+    motivo:catalogo.diagnostico?.articulos?.motivo||null,paginas:catalogo.diagnostico?.articulos?.paginas??null});
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
@@ -111,8 +113,8 @@ function montar(root){
   const n=e=>r.documentos.filter(d=>d.estado_documento===e).length;
   const ETIQ={AUTO_OK:"AUTO_OK · verificado",REVISAR:'<span class="error">REVISAR</span>',ERROR_DOCUMENTO:'<b class="error">ERROR_DOCUMENTO</b>'};
   const m=r.motores,v=m?.vision,cat=m?.catalogo;
-  const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?esc(cat.articulos)+' artículos'+(cat.completo?'':' (incompleto)'):'<b>no disponible</b>')+
-   ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas)':esc(v.llamadas)+' consultas')+
+  const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?esc(cat.articulos)+' artículos'+(cat.completo?'':' (<b>incompleto</b>'+(cat.motivo?': '+esc(cat.motivo):'')+'; sin catálogo completo no se validan códigos)'):'<b>no disponible</b>'+(cat.error?' ('+esc(cat.error)+')':''))+
+   ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas'+(v.ultimo_error?': '+esc(v.ultimo_error):'')+')':esc(v.llamadas)+' consultas')+
    (cat.disponible&&(!v.activa||!v.fallos)?'':'. Sin ellos, los campos dudosos quedan en REVISAR.')+'</p>';
   $("lalResumen").innerHTML='<p><b>'+esc(r.documentos.length)+'</b> documentos: <b>'+esc(n("AUTO_OK"))+'</b> AUTO_OK · <b>'+
    esc(n("REVISAR"))+'</b> REVISAR · <b>'+esc(n("ERROR_DOCUMENTO"))+'</b> ERROR_DOCUMENTO</p>'+segunda+

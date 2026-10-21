@@ -33,7 +33,8 @@ function evaluarWeb(lectura,carpeta){
  // Segunda fase realmente disponible en esa lectura (sin sesión, visión y catálogo no participan).
  const m=lectura.motores,v=m?.vision,c=m?.catalogo;
  const motores=!m?"segunda fase no informada":"catálogo STEL "+(c.disponible?c.articulos+" artículos":"NO disponible")+
-  " · visión "+(!v.activa?"sin consultas":v.fallos?"NO disponible ("+v.fallos+"/"+v.llamadas+" fallidas)":v.llamadas+" consultas");
+  (c.disponible&&!c.completo?" (incompleto"+(c.motivo?": "+c.motivo:"")+")":"")+(c.error?" ("+c.error+")":"")+
+  " · visión "+(!v.activa?"sin consultas":v.fallos?"NO disponible ("+v.fallos+"/"+v.llamadas+" fallidas"+(v.ultimo_error?": "+v.ultimo_error:"")+")":v.llamadas+" consultas");
  return {corpus:"lectura web ("+(lectura.archivos||[]).map(a=>a.nombre).join(", ")+"; "+motores+")",informes,pendientes,sinRevisar};
 }
 
