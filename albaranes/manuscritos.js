@@ -325,5 +325,64 @@ async function leerManuscritos(paginas,resultado,vision,ctx={}){
  return {...v,obraImpresa,obraEscrita,recortes:recortes.map((x,i)=>({pagina:x.pagina,caja:x.caja,lectura:lecturas.find(l=>l.indice===i)||null}))};
 }
 
-return {detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,FORMATOS};
+/*
+ * Estado del albarán según sus manuscritos: un código de obra o de STEL leído pero sin validar
+ * (REVISAR, AMBIGUO, o una anotación sin el formato) impide AUTO_OK. Tras una validación posterior
+ * (catálogo, lote, STEL) se recalcula el estado base (extraer.finalizar) y se vuelve a aplicar.
+ */
+const PREFIJO_PENDIENTE="Código manuscrito sin validar";
+function pendientes(m){
+ return m?["obra","stel"].filter(k=>m[k]&&(["REVISAR","AMBIGUO"].includes(m[k].estado)||(m[k].estado==="VACIO"&&m[k].literal))):[];
+}
+function aplicarEstado(r){
+ if(!r?.manuscritos)return r;
+ r.incidencias=(r.incidencias||[]).filter(i=>!String(i).startsWith(PREFIJO_PENDIENTE));
+ const p=pendientes(r.manuscritos);
+ if(p.length){
+  if(r.estado==="AUTO_OK")r.estado="REVISAR";
+  r.incidencias.push(PREFIJO_PENDIENTE+": "+p.map(k=>(k==="obra"?"obra":"STEL")+" «"+(r.manuscritos[k].literal||r.manuscritos[k].valor)+"» ("+r.manuscritos[k].estado+")").join(", "));
+ }
+ return r;
+}
+
+/*
+ * Código STEL manuscrito («ABP26 2702») contrastado con el albarán de compra de STEL de SOLO
+ * LECTURA: se acepta una interpretación si STEL tiene exactamente un albarán con esa referencia,
+ * del mismo proveedor (nombre de la cuenta) y con la misma fecha o con el número del proveedor
+ * en su referencia externa. Si valida más de una interpretación, no se resuelve.
+ * consultar(referencia) → [{fullReference, supplier, date, extraReference}] (función Edge).
+ */
+const canonNombre=t=>String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z0-9]/g,"").replace(/(SLU|SAU|SL|SA)$/,"");
+function fechaStel(v){
+ if(v==null||v==="")return null;
+ if(typeof v==="number"||/^\d{10,13}$/.test(String(v))){const n=Number(v);const d=new Date(n<1e12?n*1000:n);return isNaN(d)?null:d.toISOString().slice(0,10);}
+ const m=String(v).match(/^(\d{4}-\d{2}-\d{2})/);if(m)return m[1];
+ const d=new Date(v);return isNaN(d)?null:d.toISOString().slice(0,10);
+}
+async function validarStel(r,consultar,{proveedorNombre=null}={}){
+ const m=r?.manuscritos?.stel;
+ if(!m||!["REVISAR","AMBIGUO"].includes(m.estado)||typeof consultar!=="function")return false;
+ const nombre=proveedorNombre||r.proveedor?.nombre;
+ if(!nombre)return false;
+ const alternativas=[...new Set((m.resolucion?.alternativas||[]).map(canon).filter(c=>FORMATOS.stel.test(c)))];
+ const validas=[];
+ for(const c of alternativas){
+  const docs=(await consultar(formatoStel(c)))||[];
+  const exactos=docs.filter(d=>canon(d.fullReference)===c);
+  if(exactos.length!==1)continue;
+  const d=exactos[0];
+  const mismoProv=canonNombre(d.supplier)!==""&&canonNombre(d.supplier)===canonNombre(nombre);
+  const mismaFecha=r.fecha?.estado==="OK"&&!!r.fecha.valor&&fechaStel(d.date)===r.fecha.valor;
+  const mismoNum=!!r.numero?.valor&&!!d.extraReference&&canon(d.extraReference)===canon(r.numero.valor);
+  if(mismoProv&&(mismaFecha||mismoNum))validas.push({c,ev:"Albarán de compra STEL "+d.fullReference+" (solo lectura): proveedor «"+d.supplier+"»"+
+   (mismaFecha?", misma fecha "+r.fecha.valor:"")+(mismoNum?", referencia del proveedor «"+d.extraReference+"»":"")});
+ }
+ if(validas.length!==1)return false;
+ const x=validas[0];
+ r.manuscritos.stel={...m,valor:formatoStel(x.c),estado:"OK",confianza:0.95,motivos:[],
+  resolucion:{...m.resolucion,metodo:"vision_recorte_albaran_stel",evidencias:[...(m.resolucion?.evidencias||[]),x.ev]}};
+ return true;
+}
+
+return {detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,fechaStel,FORMATOS};
 });

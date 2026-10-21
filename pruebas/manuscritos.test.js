@@ -124,3 +124,39 @@ test("prefijo PRY cortado o borroso («Y12345»): las 5 cifras con tipo PRY vale
  const s=validarCodigos([vista("12345",[["12345",0.92]])],{obraImpresa:["PISCINAS FICTICIAS 12345"]});
  assert.notEqual(s.obra.estado,"OK");
 });
+
+test("un código manuscrito leído pero sin validar impide AUTO_OK; validado, deja de bloquear",()=>{
+ const {aplicarEstado}=require("../albaranes/manuscritos.js");
+ const r={estado:"AUTO_OK",incidencias:[],manuscritos:{obra:{valor:"PRY00123",literal:"PRY00123",estado:"REVISAR"},stel:{valor:null,literal:"",estado:"VACIO"}}};
+ aplicarEstado(r);
+ assert.equal(r.estado,"REVISAR");assert.ok(r.incidencias.some(i=>/Código manuscrito sin validar: obra «PRY00123»/.test(i)));
+ // Validado (y estado base recalculado por extraer.finalizar): ya no lo baja ni deja la incidencia.
+ r.manuscritos.obra.estado="OK";r.estado="AUTO_OK";aplicarEstado(r);
+ assert.equal(r.estado,"AUTO_OK");assert.equal(r.incidencias.length,0);
+ // Ambiguo o sin el formato: tampoco AUTO_OK. Nada detectado: no cambia el estado.
+ for(const m of [{valor:null,literal:"PRYO0999",estado:"AMBIGUO"},{valor:null,literal:"ABP69999",estado:"VACIO"}]){
+  const x={estado:"AUTO_OK",manuscritos:{obra:m,stel:{estado:"VACIO",literal:""}}};assert.equal(aplicarEstado(x).estado,"REVISAR");
+ }
+ assert.equal(aplicarEstado({estado:"AUTO_OK",manuscritos:{obra:{estado:"VACIO",literal:""},stel:{estado:"VACIO",literal:""}}}).estado,"AUTO_OK");
+});
+
+test("código STEL manuscrito: se valida con el albarán de compra de STEL (solo lectura) del mismo proveedor y fecha o número",async()=>{
+ const {validarStel}=require("../albaranes/manuscritos.js");
+ const base=()=>({fecha:{estado:"OK",valor:"2026-10-14"},numero:{valor:"600.111"},proveedor:{nombre:"PROVEEDOR FICTICIO, S.L."},
+  manuscritos:{stel:{valor:"ABP26-1234",literal:"ABP26 1234",estado:"REVISAR",resolucion:{alternativas:["ABP261234"]}}}});
+ const stel={"ABP26-1234":[{fullReference:"ABP26-1234",supplier:"Proveedor Ficticio SL",date:"2026-10-14",extraReference:""}],
+  "ABP26-7234":[{fullReference:"ABP26-7234",supplier:"Proveedor Ficticio SL",date:"2026-10-14",extraReference:""}]};
+ const consultar=async c=>stel[c]||[];
+ let r=base();assert.equal(await validarStel(r,consultar),true);
+ assert.equal(r.manuscritos.stel.estado,"OK");assert.equal(r.manuscritos.stel.resolucion.metodo,"vision_recorte_albaran_stel");
+ // Otro proveedor, o ni fecha ni número coinciden: no se valida.
+ r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],supplier:"OTRO PROVEEDOR"}]),false);assert.equal(r.manuscritos.stel.estado,"REVISAR");
+ r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],date:"2026-09-01"}]),false);
+ // Número del proveedor en la referencia externa de STEL: también vale.
+ r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],date:"2026-09-01",extraReference:"600111"}]),true);
+ // Dos interpretaciones (1/7) que STEL valida ambas: no se resuelve.
+ r=base();r.manuscritos.stel={valor:null,literal:"ABP26 ?234",estado:"AMBIGUO",resolucion:{alternativas:["ABP261234","ABP267234"]}};
+ assert.equal(await validarStel(r,consultar),false);assert.equal(r.manuscritos.stel.estado,"AMBIGUO");
+ // Varias coincidencias exactas en STEL: no es única.
+ r=base();assert.equal(await validarStel(r,async()=>[...stel["ABP26-1234"],...stel["ABP26-1234"]]),false);
+});

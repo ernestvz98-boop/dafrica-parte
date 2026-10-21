@@ -284,9 +284,18 @@ async function segundaFase(principal,paginas,lecturas,opciones){
  // Líneas: código y descripción leídos con poca confianza (no hay cuadre que los confirme).
  const pendientes=[];
  for(const l of principal.lineas){
+  // Código con texto pegado («1300000001 “ Montañte»): no se sabe dónde empieza la descripción.
+  // Relectura y visión solo confirman los caracteres DENTRO de la casilla, no sus límites: una
+  // descripción recortada («Pladur M48/35…» sin «Montante») se confirmaría. Queda en revisión.
+  const frontera=/\s/.test(String(l.referencia?.literal||"").trim());
   for(const campo of ["referencia","descripcion"]){
    const c=l[campo];
    if(!c||c.estado!=="OK"||(c.confianza??1)>=0.9||!c.caja)continue;
+   if(frontera){
+    const m="Frontera entre código y descripción dudosa (el código lleva texto: «"+l.referencia.literal+"»): no se confirma por relectura ni visión";
+    if(!(c.motivos||[]).includes(m))l[campo]={...c,motivos:[...(c.motivos||[]),m]};
+    continue;
+   }
    const r=await resolverCampo(pag,campo,[c.caja],{perfil,opcionesFecha,literal:c.literal});
    // Sin resolver: candidato a la comprobación por un segundo motor (visión del recorte).
    if(!r||r.conflicto)pendientes.push({l,campo,candidatos:[c.valor??c.literal,...(r?.conflicto||[]),...(campo==="referencia"?c.alternativas_ocr||[]:[])].filter(Boolean)});
@@ -570,7 +579,8 @@ async function extraerEscaneado(paginas,opciones={}){
  // Anotaciones manuscritas (códigos de obra y de STEL): solo con un motor de visión de recortes.
  if(opciones.vision){
   try{principal.manuscritos=await M("manuscritos").leerManuscritos(paginas,principal,opciones.vision,
-   {catalogoObras:opciones.catalogoObras||null,albaranStel:opciones.albaranStel||null});}
+   {catalogoObras:opciones.catalogoObras||null,albaranStel:opciones.albaranStel||null});
+   M("manuscritos").aplicarEstado(principal);}
   catch(e){principal.manuscritos=null;principal.incidencias=[...(principal.incidencias||[]),"No se han podido leer los manuscritos: "+String(e?.message||e).slice(0,120)];}
  }
  principal.orientacion=orientacion;

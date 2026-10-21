@@ -3,6 +3,32 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Primera lectura con visión activa: 1 error crítico y AUTO_OK con manuscritos pendientes
+
+**Producción:** web publicada en `main` (versión `20261021lector8`; copia previa en
+`respaldo/main-antes-lector8`). Sin cambios en funciones Edge, base de datos ni STEL (la
+consulta de albaranes de STEL ya existía: `stel-albaranes-consulta`, solo lectura).
+
+Lectura del usuario con saldo en OpenAI (3 PDF, 30 albaranes): visión 48/48 consultas
+correctas; ahora se evalúan también los manuscritos (605 campos): 506 correctos y automáticos
+(83,6 %), **1 error crítico** y 10 AUTO_OK con algún campo pendiente.
+
+- **Error crítico:** «Montante» quedó pegado al código («1300000001 “ Montañte») y la casilla
+  de la descripción empezaba en «Pladur…»; la visión del recorte coincidió con una lectura OCR
+  y se aceptó la descripción cortada. La coincidencia confirma los caracteres de la casilla, no
+  sus límites. Corrección: si el código lleva texto pegado, ni la relectura ni la visión
+  confirman código o descripción (quedan en revisión). Regresión en `vision.test.js`.
+- **AUTO_OK con manuscritos pendientes:** un código de obra o de STEL leído pero sin validar
+  (REVISAR, AMBIGUO o sin formato) ya no permite AUTO_OK (`manuscritos.aplicarEstado`); sobre
+  la lectura del usuario, los 10 AUTO_OK habrían quedado en REVISAR. La pantalla recalcula el
+  estado de cada albarán tras catálogo, STEL y lote.
+- **Códigos ABP sin evidencia:** los 30 ABP leídos eran correctos pero ninguno estaba validado.
+  Ahora se contrastan con el albarán de compra de STEL (solo lectura): exactamente uno con esa
+  referencia, del mismo proveedor y con la misma fecha o con el número del proveedor como
+  referencia externa. Si validan dos interpretaciones, no se resuelve. Regresiones en
+  `manuscritos.test.js`. La pantalla informa de consultas y validados.
+- Pruebas: 200 superadas. Corpus sin visión sin cambios (0 críticos en los 4 modos).
+
 ## 2026-10-21 · Lectura de los 3 PDF reales con la sesión del usuario
 
 **Producción:** desplegada `compras-catalogo-lectura` v3 (solo lectura). Web sin cambios.

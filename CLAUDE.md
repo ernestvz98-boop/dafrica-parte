@@ -46,6 +46,9 @@ Edge). El repositorio es **público**.
   plausibles, no se resuelve. Cada resolución guarda método, confianza y evidencias.
 - Un NIF válido no registrado se conserva pero queda en revisión. DAFRICA nunca es el emisor.
 - Visión solo sobre recortes de anotaciones manuscritas (o de un campo dudoso), nunca la página.
+- Relectura y visión confirman los caracteres de una casilla, no sus límites: si el código lleva
+  texto pegado, la descripción no se confirma por esa vía.
+- Un código manuscrito (obra o STEL) leído pero sin validar impide AUTO_OK.
 
 ## Proceso ante cada fallo real
 

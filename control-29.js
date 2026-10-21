@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261021lector7";
+const VERSION_LECTOR="20261021lector8";
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -77,6 +77,17 @@ function montar(root){
    const catalogo=lib.verificacion&&typeof sb==="function"?
     await sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(150000)})
      .catch(e=>{motores.catalogo.error=String(e?.message||e).slice(0,160);return null;}):null;
+   // Albaranes de compra de STEL (SOLO LECTURA) para validar los códigos ABP manuscritos.
+   const stelAlb={consultas:0,validados:0,fallos:0};motores.stel_albaranes=stelAlb;
+   const consultarStel=typeof sb!=="function"?null:async ref=>{
+    const pedir=async x=>{stelAlb.consultas++;
+     try{return (await sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({fullReference:x}),signal:AbortSignal.timeout(30000)}))?.documents||[];}
+     catch(e){stelAlb.fallos++;stelAlb.ultimo_error=String(e?.message||e).slice(0,160);return [];}};
+    const docs=await pedir(ref);
+    return docs.length?docs:await pedir(ref.replace(/-/g,""));
+   };
+   const nombreProveedor=x=>(x?.proveedor?.account_id!=null&&(catalogo?.proveedores||[]).find(p=>String(p.id)===String(x.proveedor.account_id))?.nombre)||x?.proveedor?.nombre||null;
    if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo,
     motivo:catalogo.diagnostico?.articulos?.motivo||null,paginas:catalogo.diagnostico?.articulos?.paginas??null});
    for(const [i,f] of lista.entries()){
@@ -93,6 +104,8 @@ function montar(root){
      resultado.archivos.push({nombre:f.name,paginas:fuente.numPaginas,...r.resumen});
      for(const d of r.documentos){
       if(catalogo&&d.resultado?._ctx)lib.verificacion.verificar(d.resultado,catalogo);
+      if(consultarStel&&d.resultado?.manuscritos&&lib.manuscritos?.validarStel&&
+       await lib.manuscritos.validarStel(d.resultado,consultarStel,{proveedorNombre:nombreProveedor(d.resultado)}))stelAlb.validados++;
       resultado.documentos.push({archivo:f.name,...d});
      }
      for(const e of r.errores)resultado.errores.push({archivo:f.name,...e});
@@ -104,6 +117,12 @@ function montar(root){
    // Coherencia de los códigos de obra entre todos los PDF leídos juntos.
    const man=resultado.documentos.map(d=>d.resultado?.manuscritos).filter(Boolean);
    if(man.length&&lib.manuscritos)lib.manuscritos.coherenciaLote(man);
+   // Estado final de cada albarán tras catálogo, STEL y lote: un manuscrito sin validar impide AUTO_OK.
+   for(const d of resultado.documentos){
+    const x=d.resultado;if(!x)continue;
+    if(x.manuscritos&&lib.manuscritos?.aplicarEstado){if(x._ctx)lib.extraer.finalizar(x);lib.manuscritos.aplicarEstado(x);}
+    d.estado_documento=lib.lector.estadoDocumento(x);
+   }
    ultimo=resultado;pintar(resultado);
    estado.textContent=(detener?"Lectura detenida. ":"Lectura terminada. ")+resultado.documentos.length+" albaranes en "+resultado.archivos.length+" PDF.";
   }catch(e){estado.textContent="No se ha podido leer: "+(e?.message||e);}
@@ -115,6 +134,8 @@ function montar(root){
   const m=r.motores,v=m?.vision,cat=m?.catalogo;
   const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?esc(cat.articulos)+' artículos'+(cat.completo?'':' (<b>incompleto</b>'+(cat.motivo?': '+esc(cat.motivo):'')+'; sin catálogo completo no se validan códigos)'):'<b>no disponible</b>'+(cat.error?' ('+esc(cat.error)+')':''))+
    ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas'+(v.ultimo_error?': '+esc(v.ultimo_error):'')+')':esc(v.llamadas)+' consultas')+
+   (m.stel_albaranes?' · albaranes STEL (códigos ABP): '+esc(m.stel_albaranes.validados)+' validados en '+esc(m.stel_albaranes.consultas)+' consultas'+
+    (m.stel_albaranes.fallos?' (<b>'+esc(m.stel_albaranes.fallos)+' fallidas</b>'+(m.stel_albaranes.ultimo_error?': '+esc(m.stel_albaranes.ultimo_error):'')+')':''):'')+
    (cat.disponible&&(!v.activa||!v.fallos)?'':'. Sin ellos, los campos dudosos quedan en REVISAR.')+'</p>';
   $("lalResumen").innerHTML='<p><b>'+esc(r.documentos.length)+'</b> documentos: <b>'+esc(n("AUTO_OK"))+'</b> AUTO_OK · <b>'+
    esc(n("REVISAR"))+'</b> REVISAR · <b>'+esc(n("ERROR_DOCUMENTO"))+'</b> ERROR_DOCUMENTO</p>'+segunda+

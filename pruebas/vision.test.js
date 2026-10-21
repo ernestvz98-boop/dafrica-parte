@@ -92,3 +92,24 @@ test("número en conflicto: una visión que no es ningún candidato OCR, o que n
   assert.ok(r.numero.estado!=="OK"||(r.numero.confianza??0)<0.9,texto);
  }
 });
+
+// Error crítico real (lectura web, 2026-10-21): «Montante» quedó pegado al código y la casilla de la
+// descripción empezaba en «Pladur…»; la visión del recorte coincidía con el OCR y se aceptó cortada.
+test("código con texto pegado: la visión del recorte no confirma una descripción cuyos límites son dudosos",async()=>{
+ const pag=[...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300000001",30],["Montante",83,40],["ESPUMA",140,60],["PU",175,60],["750ml",190,60],["2,00",420],["10,000",462],["50",510],["10,00",560])];
+ let n=0;const variantes=["ESPUMA PU 750ml","ESPUMA PU 750m1"];
+ const paginas=[{numero:1,anchoPx:595,altoPx:842,dpi:72,recortePng:()=>"data:image/png;base64,AAAA",
+  async ocr({region=null}={}){
+   if(!region)return pag;
+   const [x,y,ww,h]=region;
+   if(ww<595&&x>125&&x<200){const t=variantes[(n++)%variantes.length];return [{texto:t,conf:85,x0:2,x1:80,y0:2,y1:10}];}
+   return pag.filter(p=>p.x0>=x&&p.x1<=x+ww&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+  }}];
+ const vision=async recortes=>recortes.map((_,i)=>({indice:i,texto:"ESPUMA PU 750ml"}));
+ const r=await extraerEscaneado(paginas,{registro:registroCon(),hoy:HOY,vision});
+ const l=r.lineas[0];
+ assert.match(l.referencia.literal,/\s/,"precondición: el código lleva texto pegado");
+ assert.notEqual(l.descripcion.resolucion?.metodo,"vision_coincide_ocr");
+ assert.ok(l.descripcion.confianza<0.9||l.descripcion.estado!=="OK");
+ assert.ok(l.descripcion.motivos.some(m=>/Frontera entre código y descripción/.test(m)));
+});
