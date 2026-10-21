@@ -9,8 +9,11 @@ const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:
  * se anuncia completo si se repite un id, falla una consulta o se alcanza el límite de páginas;
  * `motivo` dice por qué.
  */
-export async function leerPaginas(fetcher,ruta,clave,{maxPaginas=200,simultaneas=1,tam=100,esperas=[1500,4000,8000],dormir=ms=>new Promise(r=>setTimeout(r,ms))}={}){
+export async function leerPaginas(fetcher,ruta,clave,{maxPaginas=200,simultaneas=1,tam=100,desde=0,esperas=[1500,4000,8000],dormir=ms=>new Promise(r=>setTimeout(r,ms))}={}){
  const filas=[],ids=new Set();let paginas=0;
+ // Ids de la primera y de la última página leídas: el navegador los usa para comprobar que una
+ // lectura reanudada (`desde`) empalma exactamente con la anterior.
+ let idsInicio=null,idsFinal=[];
  const pedir=async inicio=>{
   paginas++;
   const url=new URL('https://app.stelorder.com/app/'+ruta);url.searchParams.set('limit',String(tam));url.searchParams.set('start',String(inicio));
@@ -24,15 +27,19 @@ export async function leerPaginas(fetcher,ruta,clave,{maxPaginas=200,simultaneas
   const lote=await r.json();if(!Array.isArray(lote))throw Error('Catálogo inválido');
   return lote;
  };
- const anadir=lote=>{for(const x of lote){
-  if(!x||x.id==null||ids.has(String(x.id)))throw Error('Paginación repetida o inválida');
-  ids.add(String(x.id));filas.push(x);
- }};
+ const fin=(completo,motivo)=>({filas,completo,paginas,siguiente:desde+filas.length,ids_inicio:idsInicio||[],ids_final:idsFinal,...(motivo?{motivo}:{})});
+ const anadir=lote=>{
+  for(const x of lote){
+   if(!x||x.id==null||ids.has(String(x.id)))throw Error('Paginación repetida o inválida');
+   ids.add(String(x.id));filas.push(x);
+  }
+  if(lote.length){const l=lote.map(x=>String(x.id));if(!idsInicio)idsInicio=l;idsFinal=l;}
+ };
  try{
   // Páginas completas (en paralelo solo si se pide expresamente).
   let enParalelo=true;
   while(enParalelo&&paginas<maxPaginas){
-   const n=Math.min(simultaneas,maxPaginas-paginas),base=filas.length;
+   const n=Math.min(simultaneas,maxPaginas-paginas),base=desde+filas.length;
    const lotes=await Promise.all(Array.from({length:n},(_,j)=>pedir(base+j*tam)));
    for(const lote of lotes){
     if(lote.length===tam){anadir(lote);continue;}
@@ -41,12 +48,12 @@ export async function leerPaginas(fetcher,ruta,clave,{maxPaginas=200,simultaneas
   }
   // De una en una desde las filas ya leídas, hasta una página vacía.
   while(paginas<maxPaginas){
-   const lote=await pedir(filas.length);
-   if(!lote.length)return {filas,completo:true,paginas};
+   const lote=await pedir(desde+filas.length);
+   if(!lote.length)return fin(true);
    anadir(lote);
   }
-  return {filas,completo:false,paginas,motivo:'limite_paginas'};
- }catch(e){return {filas,completo:false,paginas,motivo:String(e?.message||e).slice(0,80)};}
+  return fin(false,'limite_paginas');
+ }catch(e){return fin(false,String(e?.message||e).slice(0,80));}
 }
 export async function handler(req,{fetcher=fetch,env}={}){
  if(req.method==='OPTIONS')return new Response(null,{headers:cors});
@@ -64,14 +71,20 @@ export async function handler(req,{fetcher=fetch,env}={}){
   const p=await permisos.json();
   if(!Array.isArray(p)||!p.some(x=>x.codigo==='costes.ver'))return json({error:'Sin permiso de lectura de costes'},403);
   const input=await req.json().catch(()=>null);
-  if(!input||Object.keys(input).length)return json({error:'Esta consulta no recibe archivos ni documentos'},400);
-  // Proveedores y después artículos: nunca dos consultas a STEL a la vez.
-  const s=await leerPaginas(fetcher,'suppliers',stel,{maxPaginas:20});
-  const a=await leerPaginas(fetcher,'products',stel);
+  // Solo admite {} o {desde: N} (reanudar el catálogo de artículos en la fila N): nada más.
+  const claves=input?Object.keys(input):null;
+  const desde=input?.desde;
+  if(!input||claves.some(k=>k!=='desde')||(desde!==undefined&&!(Number.isInteger(desde)&&desde>=0&&desde<=1000000)))
+   return json({error:'Esta consulta no recibe archivos ni documentos'},400);
+  // Proveedores y después artículos: nunca dos consultas a STEL a la vez. Al reanudar (desde > 0)
+  // no se repiten los proveedores: el navegador ya los tiene guardados.
+  const s=desde?{filas:[],completo:false,paginas:0,motivo:'no_solicitado'}:await leerPaginas(fetcher,'suppliers',stel,{maxPaginas:20});
+  const a=await leerPaginas(fetcher,'products',stel,{desde:desde||0});
   const activo=x=>x.deleted!==true&&x.inactive!==true;
   return json({solo_lectura:true,persistido:false,escritura_supabase:false,escritura_stel:false,
    proveedores_completo:s.completo,articulos_completo:a.completo,
    diagnostico:{proveedores:{paginas:s.paginas,motivo:s.motivo||null},articulos:{paginas:a.paginas,motivo:a.motivo||null}},
+   articulos_desde:desde||0,articulos_siguiente:a.siguiente,articulos_ids_inicio:a.ids_inicio,articulos_ids_final:a.ids_final,
    proveedores:s.filas.filter(activo).map(x=>({id:x.id,nombre:String(x.name||x['fiscal-name']||''),nif:String(x['tax-identification-number']||'')})),
    articulos:a.filas.filter(activo).map(x=>({id:x.id,referencia:String(x.reference||''),descripcion:String(x.name||'')}))});
  }catch{return json({error:'Consulta de catálogo no disponible',persistido:false},502);}

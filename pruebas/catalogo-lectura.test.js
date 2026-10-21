@@ -72,3 +72,19 @@ test('STEL rechaza un momento (403/429): se reintenta con espera y la lectura si
  const malo=await leerPaginas(async()=>response({},403),'products','ficticia',{dormir:async()=>{}});
  assert.equal(malo.completo,false);assert.match(malo.motivo,/403/);
 });
+test('lectura reanudable: «desde» continúa en esa fila y devuelve los ids para comprobar el empalme',async()=>{
+ const {leerPaginas,handler}=await mod(),TOTAL=350;
+ const stel=async url=>{const u=new URL(url),n=Number(u.searchParams.get('start'));return response(Array.from({length:Math.max(0,Math.min(100,TOTAL-n))},(_,i)=>({id:n+i+1})));};
+ const corte=await leerPaginas(stel,'products','ficticia',{maxPaginas:2});
+ assert.equal(corte.completo,false);assert.equal(corte.siguiente,200);assert.deepEqual(corte.ids_final,Array.from({length:100},(_,i)=>String(101+i)));
+ // Se reanuda releyendo la última página ya leída: su primera página debe ser idéntica.
+ const sigue=await leerPaginas(stel,'products','ficticia',{desde:corte.siguiente-corte.ids_final.length});
+ assert.equal(sigue.completo,true);assert.deepEqual(sigue.ids_inicio,corte.ids_final);assert.equal(sigue.siguiente,TOTAL);
+ // La función solo admite {} o {desde: entero ≥ 0}.
+ const env=k=>({SUPABASE_URL:'https://test.invalid',SUPABASE_ANON_KEY:'a',STEL_API_KEY:'c'})[k];
+ for(const body of [{desde:-1},{desde:'5'},{desde:1,otra:1}]){
+  const r=await handler(new Request('https://test.invalid',{method:'POST',headers:{authorization:'Bearer x','Content-Type':'application/json'},body:JSON.stringify(body)}),
+   {env,fetcher:async u=>u.includes('stelorder')?(()=>{throw Error('no')})():response(u.endsWith('/user')?{id:1}:[{codigo:'costes.ver'}])});
+  assert.equal(r.status,400);
+ }
+});

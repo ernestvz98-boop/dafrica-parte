@@ -3,6 +3,27 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Catálogo STEL guardado en el navegador y reanudable (cupo de consultas de STEL)
+
+**Producción:** desplegada `compras-catalogo-lectura` v4 (solo lectura). Web publicada en `main`
+(versión `20261021lector9`; copia previa en `respaldo/main-antes-lector9`).
+
+- Hecho: la lectura del usuario de las 10:19 ya usaba la v3 (de una en una, con reintentos) y
+  STEL volvió a responder 403 en la página 46. Por la mañana se descargaban 50 páginas sin
+  error; desde las 09:33 STEL corta hacia la página 45: es un cupo de consultas que se agota,
+  porque cada lectura descargaba el catálogo entero (50–60 consultas).
+- `albaranes/catalogo.js` (nuevo): el catálogo completo se guarda 24 h en el navegador (solo
+  referencias, descripciones y nombres/CIF de proveedores; sin precios). Si la descarga se corta,
+  la siguiente lectura la reanuda (`{desde: N}`), releyendo la última página guardada: solo se
+  empalma si trae exactamente los mismos artículos; si no, se descarta y se empieza de cero.
+  Partes de más de 6 h no se empalman. Si STEL no responde, se usa lo guardado sin más consultas.
+- La función admite solo `{}` o `{desde: entero}`; al reanudar no repite los proveedores y
+  devuelve los ids de la primera y última página para el empalme.
+- Todos los scripts del lector con la misma versión (`verificacion.js`, `lotes-pdf.js` y
+  `control-27.js` aún llevaban versiones antiguas y el navegador podía usar copias viejas).
+- Pruebas: 204 superadas (`catalogo-cache.test.js` nuevo: reanudación, catálogo cambiado,
+  caducidad, STEL sin respuesta; `catalogo-lectura.test.js`: `desde` y validación de entrada).
+
 ## 2026-10-21 · Primera lectura con visión activa: 1 error crítico y AUTO_OK con manuscritos pendientes
 
 **Producción:** web publicada en `main` (versión `20261021lector8`; copia previa en

@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261021lector8";
+const VERSION_LECTOR="20261021lector9";
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -74,8 +74,11 @@ function montar(root){
     };
    // Catálogo STEL de SOLO LECTURA (proveedores y artículos, sin precios): una consulta por
    // ejecución, solo en memoria. Valida CIF y referencias O/0, S/5… con coincidencia única.
-   const catalogo=lib.verificacion&&typeof sb==="function"?
-    await sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(150000)})
+   // Guardado 24 h en este navegador y reanudable si STEL corta (limita el número de consultas).
+   const consultarCatalogo=cuerpo=>sb("/functions/v1/compras-catalogo-lectura",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(cuerpo),signal:AbortSignal.timeout(150000)});
+   const catalogo=lib.verificacion&&lib.catalogo&&typeof sb==="function"?
+    await lib.catalogo.obtenerCatalogo({consultar:consultarCatalogo,almacen:lib.catalogo.almacenLocal()})
      .catch(e=>{motores.catalogo.error=String(e?.message||e).slice(0,160);return null;}):null;
    // Albaranes de compra de STEL (SOLO LECTURA) para validar los códigos ABP manuscritos.
    const stelAlb={consultas:0,validados:0,fallos:0};motores.stel_albaranes=stelAlb;
@@ -89,7 +92,7 @@ function montar(root){
    };
    const nombreProveedor=x=>(x?.proveedor?.account_id!=null&&(catalogo?.proveedores||[]).find(p=>String(p.id)===String(x.proveedor.account_id))?.nombre)||x?.proveedor?.nombre||null;
    if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo,
-    motivo:catalogo.diagnostico?.articulos?.motivo||null,paginas:catalogo.diagnostico?.articulos?.paginas??null});
+    motivo:catalogo.diagnostico?.articulos?.motivo||null,paginas:catalogo.diagnostico?.articulos?.paginas??null,origen:catalogo.origen||null});
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
@@ -132,7 +135,7 @@ function montar(root){
   const n=e=>r.documentos.filter(d=>d.estado_documento===e).length;
   const ETIQ={AUTO_OK:"AUTO_OK · verificado",REVISAR:'<span class="error">REVISAR</span>',ERROR_DOCUMENTO:'<b class="error">ERROR_DOCUMENTO</b>'};
   const m=r.motores,v=m?.vision,cat=m?.catalogo;
-  const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?esc(cat.articulos)+' artículos'+(cat.completo?'':' (<b>incompleto</b>'+(cat.motivo?': '+esc(cat.motivo):'')+'; sin catálogo completo no se validan códigos)'):'<b>no disponible</b>'+(cat.error?' ('+esc(cat.error)+')':''))+
+  const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?esc(cat.articulos)+' artículos'+({cache:' (guardado en este navegador)',reanudado:' (descarga reanudada)',parcial_sin_avance:' (STEL no ha respondido; se usa lo guardado)'}[cat.origen]||'')+(cat.completo?'':' (<b>incompleto</b>'+(cat.motivo?': '+esc(cat.motivo):'')+'; sin catálogo completo no se validan códigos)'):'<b>no disponible</b>'+(cat.error?' ('+esc(cat.error)+')':''))+
    ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas'+(v.ultimo_error?': '+esc(v.ultimo_error):'')+')':esc(v.llamadas)+' consultas')+
    (m.stel_albaranes?' · albaranes STEL (códigos ABP): '+esc(m.stel_albaranes.validados)+' validados en '+esc(m.stel_albaranes.consultas)+' consultas'+
     (m.stel_albaranes.fallos?' (<b>'+esc(m.stel_albaranes.fallos)+' fallidas</b>'+(m.stel_albaranes.ultimo_error?': '+esc(m.stel_albaranes.ultimo_error):'')+')':''):'')+
