@@ -3,6 +3,39 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Validación final de lector18 (sin servicios reales): 95 % NO alcanzado, Fase 1 sin congelar
+
+**Producción:** sin cambios (ni web, ni funciones, ni datos).
+
+No ha sido posible ejecutar la lectura desde DAFRICA Control con visión y STEL reales: hace falta
+una sesión de usuario y no se ha creado ninguna cuenta temporal (bloqueado por los permisos de la
+sesión de trabajo). Las tablas `lector_obras` y `lector_referencias_confirmadas` siguen vacías (no
+se han importado obras ni tarifas). Medido:
+
+| Grupo | Campos | Correctos automáticos | Correctos en revisión | Incorrectos (marcados) | Sin valor (marcados) | Otros |
+|---|---|---|---|---|---|---|
+| Cabecera | 90 | 88 | 0 | 0 | 2 | 0 |
+| Manuscritos | 60 | 22 | 12 | 10 | 15 | 1 |
+| Referencias/descripciones | 118 | 90 | 11 | 14 | 0 | 3 |
+| Económicos | 337 | 326 | 4 | 2 | 5 | 0 |
+| **Total** | **605** | **526 (86,9 %)** | 27 | 26 | 22 | 4 |
+
+Última lectura real del usuario (visión y STEL reales) con lo que añaden lector15–18 después de
+leer, reproducido con los datos guardados en el JSON. **0 errores críticos.** Solo campos impresos,
+sin visión: OCR nativo 496/545 (91,0 %), motor de la web (tesseract.js) 493/545 (90,5 %), 0 críticos.
+
+Lo que falta no se puede resolver con código sin evidencia independiente:
+- ABP: 13 de 15 pendientes tienen proveedor verificado, fecha y número → los resolvería la
+  búsqueda por número en STEL (lector18) en una lectura real (+13, ~89 %).
+- Obra: 10 lecturas correctas sin validar → lista de obras importada (+~10, ~91 %); 13 ilegibles o
+  mal leídas → etiquetas QR o un modelo de visión mejor.
+- Códigos con O/0 e I/1 (11 correctos en revisión, varios incorrectos marcados): tarifa del
+  proveedor o confirmación (+~11, ~93 %).
+- Irreducibles del papel: fecha manuscrita, número cruzado por una firma, cantidad tapada.
+
+Nota de pruebas: `--motor=navegador` usa imágenes exportadas de UN PDF (`.cache/navegador`); con
+varios PDF mezcla páginas. No afecta al lector.
+
 ## 2026-10-21 · ABP por el título de STEL, catálogo de obras, tarifas y etiquetas QR (lector18)
 
 **Producción:** web en `main` (versión `20261021lector18`; copia previa en
