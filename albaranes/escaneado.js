@@ -615,7 +615,7 @@ async function extraerEscaneado(paginas,opciones={}){
  // Anotaciones manuscritas (códigos de obra y de STEL): solo con un motor de visión de recortes.
  if(opciones.vision){
   try{principal.manuscritos=await M("manuscritos").leerManuscritos(paginas,principal,opciones.vision,
-   {catalogoObras:opciones.catalogoObras||null,albaranStel:opciones.albaranStel||null});
+   {catalogoObras:opciones.catalogoObras||null,albaranStel:opciones.albaranStel||null,compararModelos:opciones.compararModelos||null});
    M("manuscritos").aplicarEstado(principal);}
   catch(e){principal.manuscritos=null;principal.incidencias=[...(principal.incidencias||[]),"No se han podido leer los manuscritos: "+String(e?.message||e).slice(0,120)];}
  }

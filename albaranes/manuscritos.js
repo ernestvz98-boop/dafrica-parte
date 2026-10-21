@@ -343,8 +343,38 @@ async function leerManuscritos(paginas,resultado,vision,ctx={}){
   // Anotación corta impresa o escrita en la tabla («Vegas», «OBRA VEGAS»), no nombres ni cifras.
   .filter(t=>t.split(/\s+/).length<=3&&!/\d/.test(t)&&palabrasObra(t).size)];
  const obraEscrita=lecturas.filter(l=>l.tipo==="OTRO"&&!l.tachado&&palabrasObra(l.texto_literal).size).map(l=>l.texto_literal);
- const v=validarCodigos(lecturas,{...ctx,obraImpresa,obraEscrita,proveedorId:resultado.proveedor?.id,numero:resultado.numero?.valor,fecha:resultado.fecha?.valor});
- return {...v,obraImpresa,obraEscrita,recortes:recortes.map((x,i)=>({pagina:x.pagina,caja:x.caja,lectura:lecturas.find(l=>l.indice===i)||null}))};
+ const ctxValidar={...ctx,obraImpresa,obraEscrita,proveedorId:resultado.proveedor?.id,numero:resultado.numero?.valor,fecha:resultado.fecha?.valor};
+ const v=validarCodigos(lecturas,ctxValidar);
+ const salida={...v,obraImpresa,obraEscrita,recortes:recortes.map((x,i)=>({pagina:x.pagina,caja:x.caja,lectura:lecturas.find(l=>l.indice===i)||null}))};
+ if(ctx.compararModelos)salida.comparacion=await compararModelos(recortes,v,ctxValidar,ctx.compararModelos);
+ return salida;
+}
+
+/*
+ * PRUEBA de otros modelos de visión sobre los MISMOS recortes (solo para medir; no cambia el
+ * resultado). Cada modelo pasa por la misma validación (validarCodigos) que el principal; la
+ * validación posterior con STEL y la coherencia del lote se aplican después en el navegador a
+ * todos por igual. opciones: {modelos:[…], vision(pngs, modelo) → {recortes, uso}}.
+ */
+const copiaCodigo=m=>m?{valor:m.valor??null,literal:m.literal??null,estado:m.estado,confianza:m.confianza??null,
+ resolucion:m.resolucion?{metodo:m.resolucion.metodo||null,alternativas:m.resolucion.alternativas||[]}:null}:null;
+async function compararModelos(recortes,principal,ctxValidar,{modelos=[],vision}={}){
+ const out={principal:{obra:copiaCodigo(principal.obra),stel:copiaCodigo(principal.stel)},modelos:{}};
+ if(typeof vision!=="function")return out;
+ await Promise.all(modelos.map(async modelo=>{
+  const lecturas=[],uso={input_tokens:0,output_tokens:0,llamadas:0};
+  try{
+   for(let i=0;i<recortes.length;i+=8){
+    const r=await vision(recortes.slice(i,i+8).map(x=>x.png),modelo);
+    uso.llamadas++;uso.input_tokens+=r?.uso?.input_tokens||0;uso.output_tokens+=r?.uso?.output_tokens||0;
+    for(const x of r?.recortes||[])if(Number.isInteger(x.indice)&&recortes[i+x.indice])lecturas.push({...x,indice:i+x.indice});
+   }
+   const v=validarCodigos(lecturas,ctxValidar);
+   out.modelos[modelo]={obra:copiaCodigo(v.obra),stel:copiaCodigo(v.stel),uso,
+    lecturas:lecturas.map(l=>({indice:l.indice,tipo:l.tipo,tachado:!!l.tachado,texto_literal:String(l.texto_literal||"").slice(0,60),lecturas:(l.lecturas||[]).slice(0,4)}))};
+  }catch(e){out.modelos[modelo]={error:String(e?.message||e).slice(0,160),uso};}
+ }));
+ return out;
 }
 
 /*

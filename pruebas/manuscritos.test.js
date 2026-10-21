@@ -112,6 +112,28 @@ test("flujo completo: a visión solo llegan recortes pequeños de la anotación,
  assert.ok(w<0.3*2480&&h<0.05*3508,"recorte "+w+"×"+h);
 });
 
+test("prueba de modelos: cada modelo se valida igual sobre los mismos recortes y el resultado no cambia",async()=>{
+ const g=lienzo();escribir(g,300,400);
+ const pagina={numero:1,anchoPx:2480,altoPx:3508,gris:()=>g,recortePng:()=>"data:image/png;base64,AAAA"};
+ const resultado={_pags:[{numero:1,lineas:[{texto:"OBRA: PISCINAS FICTICIAS 12345",y:100,alto:8,celdas:[]}]}],lineas_ignoradas:[],proveedor:{id:"A"}};
+ const lectura=codigo=>recortes=>recortes.map((_,i)=>({indice:i,texto_literal:codigo,tachado:false,tipo:"PRY",lecturas:[{codigo,confianza:0.95}]}));
+ const pedidos=[];
+ const compararModelos={modelos:["m-bueno","m-malo","m-roto"],vision:async(pngs,modelo)=>{
+  pedidos.push(modelo);
+  if(modelo==="m-roto")throw Error("Modelo no disponible");
+  return {recortes:lectura(modelo==="m-bueno"?"PRY12345":"PRY12845")(pngs),uso:{input_tokens:100,output_tokens:10}};
+ }};
+ const m=await leerManuscritos([pagina],resultado,async r=>lectura("PRY12345")(r),{compararModelos});
+ assert.equal(m.obra.valor,"PRY12345");assert.equal(m.obra.estado,"OK");
+ assert.deepEqual(pedidos.sort(),["m-bueno","m-malo","m-roto"]);
+ assert.equal(m.comparacion.principal.obra.valor,"PRY12345");
+ assert.equal(m.comparacion.modelos["m-bueno"].obra.estado,"OK");
+ // Otra cifra: sin la obra impresa que lo corrobore no se acepta.
+ assert.notEqual(m.comparacion.modelos["m-malo"].obra.estado,"OK");
+ assert.equal(m.comparacion.modelos["m-bueno"].uso.input_tokens,100);
+ assert.match(m.comparacion.modelos["m-roto"].error,/no disponible/);
+});
+
 test("código escrito de un trazo continuo (dos componentes) también se detecta",()=>{
  const g=lienzo();
  // Dos trazos en zigzag de ~10 mm cada uno (ninguna raya recta larga).

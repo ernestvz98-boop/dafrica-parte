@@ -10,7 +10,10 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261021lector15";
+const VERSION_LECTOR="20261021lector17";
+// PRUEBA (no activa nada): modelos de visión que se comparan con el principal sobre los mismos
+// recortes de manuscritos, solo si se marca la casilla. El resultado no cambia.
+const MODELOS_COMPARAR=["gpt-4.1","gpt-5","gpt-5.1","o4-mini"];
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -42,6 +45,8 @@ function montar(root){
   '<p class="muted">Lee PDF digitales y escaneados de cualquier número de páginas en este navegador, separa cada albarán y comprueba cantidades, precios, descuentos, importes y totales. Solo acepta automáticamente lo que valida; lo demás queda marcado para revisión. Para los campos dudosos consulta el catálogo de STEL en solo lectura y, solo con recortes pequeños (nunca la página), un motor de visión cuya lectura se acepta únicamente si la confirman el OCR, el formato o el catálogo; nunca precios, cantidades ni importes. <b>No guarda nada, no envía el PDF y no crea nada en STEL.</b></p>'+
   '<label for="lalArchivos">PDF de albaranes (uno o varios)</label>'+
   '<input type="file" id="lalArchivos" accept=".pdf,application/pdf" multiple>'+
+  (has("costes.editar")?'<label style="display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="lalComparar" style="width:auto"> '+
+   'Prueba: comparar otros modelos de visión con los manuscritos ('+esc(MODELOS_COMPARAR.join(", "))+'). Tarda más y tiene coste; no cambia el resultado.</label>':'')+
   '<div style="display:flex;gap:8px;margin:10px 0"><button type="button" class="btn" id="lalLeer">Leer albaranes</button>'+
   '<button type="button" class="btn secondary" id="lalCancelar" disabled>Detener</button></div>'+
   '<progress id="lalBarra" max="1" value="0" style="width:100%;display:none"></progress>'+
@@ -68,10 +73,22 @@ function montar(root){
    const vision=lib.config?.vision===false||typeof sb!=="function"?null:
     async(recortes,{modo="manuscrito"}={})=>{
      motores.vision.activa=true;motores.vision.llamadas++;
-     try{return (await sb("/functions/v1/albaranes-manuscritos",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({recortes,modo}),signal:AbortSignal.timeout(70000)}))?.recortes||[];}
-     catch(e){motores.vision.fallos++;motores.vision.ultimo_error=String(e?.message||e).slice(0,160);throw e;}
+     try{
+      const resp=await sb("/functions/v1/albaranes-manuscritos",{method:"POST",headers:{"Content-Type":"application/json"},
+       body:JSON.stringify({recortes,modo}),signal:AbortSignal.timeout(130000)});
+      const u=motores.vision.uso||(motores.vision.uso={modelo:null,input_tokens:0,output_tokens:0});
+      u.modelo=resp?.modelo||u.modelo;u.input_tokens+=resp?.uso?.input_tokens||0;u.output_tokens+=resp?.uso?.output_tokens||0;
+      return resp?.recortes||[];
+     }catch(e){motores.vision.fallos++;motores.vision.ultimo_error=String(e?.message||e).slice(0,160);throw e;}
     };
+   // Prueba de otros modelos sobre los mismos recortes de manuscritos (casilla; no cambia nada).
+   const compararModelos=vision&&$("lalComparar")?.checked?{modelos:MODELOS_COMPARAR,
+    vision:async(recortes,modelo)=>{
+     const c=motores.comparacion_vision||(motores.comparacion_vision={modelos:MODELOS_COMPARAR,llamadas:0,fallos:0});c.llamadas++;
+     try{return await sb("/functions/v1/albaranes-manuscritos",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({recortes,modo:"manuscrito",modelo}),signal:AbortSignal.timeout(130000)});}
+     catch(e){c.fallos++;c.ultimo_error=modelo+": "+String(e?.message||e).slice(0,160);throw e;}
+    }}:null;
    // Catálogo STEL de SOLO LECTURA (proveedores y artículos, sin precios): una consulta por
    // ejecución, solo en memoria. Valida CIF y referencias O/0, S/5… con coincidencia única.
    // Guardado 24 h en este navegador y reanudable si STEL corta (limita el número de consultas).
@@ -82,9 +99,15 @@ function montar(root){
    const catalogo=lib.verificacion&&lib.catalogo&&typeof sb==="function"?
     await lib.catalogo.obtenerCatalogo({consultar:consultarCatalogo,almacen:lib.catalogo.almacenLocal()})
      .catch(e=>{motores.catalogo.error=String(e?.message||e).slice(0,160);return null;}):null;
+   // Códigos de proveedor confirmados por una persona en revisiones anteriores (sin precios).
+   const confirmadas=typeof sb==="function"&&lib.confirmadas?
+    await sb("/rest/v1/lector_referencias_confirmadas?select=proveedor_clave,referencia,descripcion,confirmado_en&limit=20000").catch(()=>null):null;
+   motores.confirmadas={cargadas:Array.isArray(confirmadas)?confirmadas.length:null,aplicadas:0};
    // Albaranes de compra de STEL (SOLO LECTURA) para validar los códigos ABP manuscritos.
    const stelAlb={consultas:0,validados:0,fallos:0};motores.stel_albaranes=stelAlb;
+   const cacheStel=new Map();
    const consultarStel=typeof sb!=="function"?null:async ref=>{
+    if(cacheStel.has(ref))return cacheStel.get(ref);
     const pedir=async x=>{stelAlb.consultas++;
      try{
       const resp=await sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -96,7 +119,9 @@ function montar(root){
      }catch(e){stelAlb.fallos++;stelAlb.ultimo_error=String(e?.message||e).slice(0,160);return [];}};
     // STEL guarda la referencia sin guion («ABP262661»): se pide así primero (medido 2026-10-21).
     const docs=await pedir(ref.replace(/-/g,""));
-    return docs.length?docs:await pedir(ref);
+    const final=docs.length?docs:await pedir(ref);
+    cacheStel.set(ref,final);
+    return final;
    };
    const nombreProveedor=x=>(x?.proveedor?.account_id!=null&&(catalogo?.proveedores||[]).find(p=>String(p.id)===String(x.proveedor.account_id))?.nombre)||x?.proveedor?.nombre||null;
    if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo,
@@ -107,7 +132,7 @@ function montar(root){
     const bytes=new Uint8Array(await f.arrayBuffer());
     const fuente=await lib.motorNavegador.abrirFuente(pdfjs,bytes,{alProgresar:t=>{estado.textContent=f.name+" · "+t;}});
     try{
-     const r=await lib.lector.leerPdf(fuente,{registro:lib.proveedores.REGISTRO,vision,tamLote:5,cancelado:()=>detener,
+     const r=await lib.lector.leerPdf(fuente,{registro:lib.proveedores.REGISTRO,vision,compararModelos,tamLote:5,cancelado:()=>detener,
       catalogoObras:catalogo?.obras_completo?catalogo.obras:null,
       alProgresar:e=>{
        barra.max=e.total;barra.value=e.pagina||e.total;
@@ -120,6 +145,15 @@ function montar(root){
       if(consultarStel&&d.resultado?.manuscritos&&lib.manuscritos?.validarStel&&
        await lib.manuscritos.validarStel(d.resultado,consultarStel,{proveedorNombre:nombreProveedor(d.resultado),
         diagnostico:x=>{(stelAlb.comparaciones||(stelAlb.comparaciones=[])).push(x);}}))stelAlb.validados++;
+      // Prueba de modelos: la misma validación con STEL para el principal y para cada modelo.
+      const cmp=d.resultado?.manuscritos?.comparacion;
+      if(cmp&&consultarStel&&lib.manuscritos?.validarStel)
+       for(const e of [cmp.principal,...Object.values(cmp.modelos||{})]){
+        if(!e?.stel)continue;
+        const falso={manuscritos:{stel:{...e.stel}},proveedor:d.resultado.proveedor,fecha:d.resultado.fecha,numero:d.resultado.numero};
+        if(await lib.manuscritos.validarStel(falso,consultarStel,{proveedorNombre:nombreProveedor(d.resultado)}))
+         e.stel={...e.stel,valor:falso.manuscritos.stel.valor,estado:falso.manuscritos.stel.estado,confianza:falso.manuscritos.stel.confianza,metodo_final:"vision_recorte_albaran_stel"};
+       }
       resultado.documentos.push({archivo:f.name,...d});
      }
      for(const e of r.errores)resultado.errores.push({archivo:f.name,...e});
@@ -134,7 +168,10 @@ function montar(root){
    // Estado final de cada albarán tras catálogo, STEL y lote: un manuscrito sin validar impide AUTO_OK.
    for(const d of resultado.documentos){
     const x=d.resultado;if(!x)continue;
-    if(x.manuscritos&&lib.manuscritos?.aplicarEstado){if(x._ctx)lib.extraer.finalizar(x);lib.manuscritos.aplicarEstado(x);}
+    const n=Array.isArray(confirmadas)&&x._ctx?lib.confirmadas.aplicar(x,confirmadas):0;
+    motores.confirmadas.aplicadas+=n;
+    if(x._ctx&&(n||x.manuscritos))lib.extraer.finalizar(x);
+    if(x.manuscritos&&lib.manuscritos?.aplicarEstado)lib.manuscritos.aplicarEstado(x);
     d.estado_documento=lib.lector.estadoDocumento(x);
    }
    // Catálogo usado (solo lectura, sin precios) dentro del JSON descargado: permite medir y ajustar
@@ -168,10 +205,39 @@ function montar(root){
   $("lalErrores").innerHTML=r.errores.length?'<details open><summary>'+esc(r.errores.length)+' error(es) de lectura</summary>'+
    r.errores.map(e=>'<p class="error">'+esc(e.archivo)+(e.paginas?.length?' · páginas '+esc(e.paginas.join(", ")):'')+': '+esc(e.error)+'</p>').join("")+'</details>':"";
   $("lalDocs").innerHTML=r.documentos.map((d,i)=>!d.resultado?'':'<details style="border:1px solid #d6dee8;border-radius:8px;padding:10px;margin:8px 0"><summary style="cursor:pointer;font-weight:bold">'+
-   (i+1)+' · '+esc(d.resultado?.proveedor?.nombre||"Proveedor no identificado")+' · '+esc(d.resultado?.numero?.valor||"sin número")+'</summary>'+pcRenderDeterminista(d.resultado)+'</details>').join("");
+   (i+1)+' · '+esc(d.resultado?.proveedor?.nombre||"Proveedor no identificado")+' · '+esc(d.resultado?.numero?.valor||"sin número")+'</summary>'+pcRenderDeterminista(d.resultado)+confirmarCodigos(d,i)+'</details>').join("");
+  $("lalDocs").onclick=async ev=>{
+   const b=ev.target.closest?.("button[data-lal-confirmar]");if(!b)return;
+   const lib=window.DafricaAlbaranes;
+   const [i,f]=b.dataset.lalConfirmar.split(":").map(Number),d=r.documentos[i],l=d?.resultado?.lineas?.[f];
+   const entrada=$("lalRef_"+i+"_"+f),estadoFila=$("lalRefEstado_"+i+"_"+f);
+   const referencia=String(entrada?.value||"").trim(),clave=lib.confirmadas.clave(d?.resultado?.proveedor);
+   if(!referencia||!clave||!l)return;
+   b.disabled=true;estadoFila.textContent="Guardando…";
+   try{
+    await sb("/rest/v1/lector_referencias_confirmadas?on_conflict=proveedor_clave,referencia",{method:"POST",
+     headers:{"Content-Type":"application/json",Prefer:"resolution=ignore-duplicates,return=minimal"},
+     body:JSON.stringify({proveedor_clave:clave,referencia,descripcion:String(l.descripcion?.valor||l.descripcion?.literal||"").slice(0,200)||null})});
+    estadoFila.textContent="✓ Confirmado: las próximas lecturas de este proveedor lo validarán solas.";
+   }catch(e){estadoFila.textContent="No se ha podido guardar: "+(e?.message||e);b.disabled=false;}
+  };
   const j=$("lalJson"),c=$("lalCsv");
   if(j)j.onclick=()=>descargar("albaranes.json","application/json",JSON.stringify(r,null,1));
   if(c)c.onclick=()=>descargar("albaranes-lineas.csv","text/csv;charset=utf-8",csv(r));
+ }
+ // Códigos pendientes de un albarán: la persona que revisa puede confirmarlos (o corregirlos) para
+ // que el lector los valide solo en adelante. Solo con permiso de edición de costes.
+ function confirmarCodigos(d,i){
+  const x=d.resultado,lib=window.DafricaAlbaranes;if(!x||!has("costes.editar")||!lib?.confirmadas)return "";
+  const pendientes=(x.lineas||[]).map((l,f)=>({l,f})).filter(({l})=>l.referencia?.literal&&!(l.referencia.estado==="OK"&&(l.referencia.confianza??0)>=0.9));
+  if(!pendientes.length)return "";
+  if(!lib.confirmadas.clave(x.proveedor))return '<p class="muted">Códigos pendientes: identifica antes el proveedor para poder confirmarlos.</p>';
+  return '<div style="margin-top:8px"><b>Confirmar códigos</b> <span class="muted">(revisa el código con el papel; corrígelo si hace falta)</span>'+
+   pendientes.map(({l,f})=>'<div style="display:flex;gap:6px;align-items:center;margin:4px 0;flex-wrap:wrap">'+
+    '<input id="lalRef_'+i+'_'+f+'" value="'+esc(l.referencia.valor||l.referencia.literal)+'" style="width:190px">'+
+    '<span class="muted">'+esc(l.descripcion?.valor||"")+'</span>'+
+    '<button type="button" class="btn secondary" data-lal-confirmar="'+i+':'+f+'">Confirmar código</button>'+
+    '<span id="lalRefEstado_'+i+'_'+f+'" class="muted"></span></div>').join("")+'</div>';
  }
  function csv(r){
   const q=v=>{const s=v==null?"":String(v);return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};

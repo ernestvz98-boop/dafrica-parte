@@ -8,6 +8,18 @@
 })(globalThis,function(root,req){
  const M=k=>req?require('./'+k+'.js'):root.DafricaAlbaranes[k];
  const codigo=v=>String(v||'').trim().toUpperCase().replace(/\s/g,'');
+ const nombreArticulo=v=>M('articulos').descripcionNormalizada(v);
+ // Descripción compatible: las mismas cifras (medidas) y la mayoría de las palabras leídas
+ // presentes en la otra (el OCR puede perder o deformar alguna palabra).
+ function descripcionCompatible(ocr,ref){
+  const a=nombreArticulo(ocr),b=nombreArticulo(ref);if(!a||!b)return false;
+  if(a===b)return true;
+  const cifras=t=>new Set((t.match(/\d+(?:,\d+)?/g)||[]));
+  const ca=cifras(a),cb=cifras(b);
+  if(ca.size!==cb.size||[...ca].some(x=>!cb.has(x)))return false;
+  const pa=a.split(' ').filter(w=>w.length>2&&!/^\d/.test(w)),pb=new Set(b.split(' '));
+  return pa.length>0&&pa.filter(w=>pb.has(w)).length/pa.length>=0.6;
+ }
  function verificar(det,catalogo){
   if(!det?._ctx)return det;
   const p=det.proveedor;
@@ -36,17 +48,7 @@
   const nombre=v=>M('articulos').descripcionNormalizada(v);
   // Clases de caracteres que el OCR confunde en códigos impresos (O/0, S/5, I/1, B/8, Z/2, G/6).
   const clase=v=>codigo(v).replace(/O/g,'0').replace(/S/g,'5').replace(/I/g,'1').replace(/B/g,'8').replace(/Z/g,'2').replace(/G/g,'6');
-  // Descripción compatible con el nombre del catálogo: las mismas cifras (medidas) y la mayoría de
-  // las palabras leídas presentes en el nombre (el OCR puede perder o deformar alguna palabra).
-  const compatible=(ocr,cat)=>{
-   const a=nombre(ocr),b=nombre(cat);if(!a||!b)return false;
-   if(a===b)return true;
-   const cifras=t=>new Set((t.match(/\d+(?:,\d+)?/g)||[]));
-   const ca=cifras(a),cb=cifras(b);
-   if(ca.size!==cb.size||[...ca].some(x=>!cb.has(x)))return false;
-   const pa=a.split(' ').filter(w=>w.length>2&&!/^\d/.test(w)),pb=new Set(b.split(' '));
-   return pa.length>0&&pa.filter(w=>pb.has(w)).length/pa.length>=0.6;
-  };
+  const compatible=descripcionCompatible;
   // Artículos: proveedor verificado en el catálogo o identificado con seguridad por la huella de su CIF.
   if(catalogo.articulos_completo&&(p?.account_id!=null||(p?.estado==='OK'&&p?.via==='nif'))){
    for(const l of det.lineas){
@@ -79,5 +81,5 @@
   det.comprobacion_automatica={catalogo_disponible:true,motivos};
   return det;
  }
- return {verificar};
+ return {verificar,descripcionCompatible};
 });

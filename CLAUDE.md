@@ -67,6 +67,7 @@ evaluación del corpus (`node pruebas/evaluar.js --incluir-sin-revisar`, tambié
 | `albaranes/manuscritos.js` / `vision.js` | anotaciones manuscritas: detección, recortes, validación |
 | `albaranes/verificacion.js` | contraste con el catálogo STEL de solo lectura |
 | `albaranes/catalogo.js` | catálogo STEL en el navegador: caché 24 h y descarga reanudable con empalme comprobado |
+| `albaranes/confirmadas.js` | códigos de proveedor confirmados por una persona (tabla `lector_referencias_confirmadas`, sin precios) |
 | `albaranes/motor-navegador.js` | pdf.js + tesseract.js en el navegador (renderizado bajo demanda) |
 | `control-29.js` | módulo «Lector de albaranes» del menú (permiso `costes.ver`) |
 | `pruebas/` | `npm test`, evaluador, corpus sintético; ver `pruebas/LEEME.md` |

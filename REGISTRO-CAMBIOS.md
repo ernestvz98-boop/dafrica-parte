@@ -3,6 +3,33 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-21 · Códigos confirmados por una persona y prueba de modelos de visión
+
+**Producción:** web en `main` (versión `20261021lector17`; copia previa en
+`respaldo/main-antes-lector17`). Base de datos: tabla nueva `public.lector_referencias_confirmadas`
+(migración `supabase/migraciones/20261021_lector_referencias_confirmadas.sql`; RLS: leer con
+`costes.ver`, insertar y borrar con `costes.editar`; para revertir:
+`drop table public.lector_referencias_confirmadas;`). Función Edge `albaranes-manuscritos` v3:
+`modelo` opcional de una lista cerrada y consumo (`uso`) en la respuesta; sin `modelo`, igual que antes.
+Sin cambios en STEL.
+
+- **Memoria de códigos confirmados** (`albaranes/confirmadas.js`): en cada albarán con códigos
+  pendientes, quien tenga `costes.editar` puede confirmar (o corregir) el código con el papel. Se
+  guarda proveedor + código + descripción (nunca precios). En lecturas siguientes del mismo
+  proveedor, un código leído igual (o con una única coincidencia por clases O/0, S/5…) y con
+  descripción compatible se valida solo (`referencia_confirmada`, confianza 0,97). Dos
+  coincidencias posibles o descripción distinta: sigue en revisión.
+- **Prueba de modelos de visión** (casilla en el módulo, solo `costes.editar`): los mismos
+  recortes de manuscritos se leen además con gpt-4.1, gpt-5, gpt-5.1 y o4-mini; cada uno pasa la
+  misma validación (formato, obra impresa, catálogo, STEL) y se guarda en
+  `manuscritos.comparacion` con su consumo. **No cambia el resultado.** Informe:
+  `node pruebas/comparar-vision.js albaranes.json` (aciertos, errores aceptados, revisión, coste).
+- Consumo del modelo principal en `motores.vision.uso`; consultas a STEL repetidas en una misma
+  lectura se sirven de memoria.
+- Comprobado en Chromium con la aplicación completa: botón «Confirmar código», guardado (POST) y
+  validación automática en la segunda lectura; comparación de modelos sin errores de JavaScript.
+- Pruebas nuevas: `confirmadas.test.js`, `comparar-vision.test.js`, comparación en `manuscritos.test.js`.
+
 ## 2026-10-21 · Mejoras medidas sobre la lectura del usuario (sin nuevas lecturas)
 
 **Producción:** web publicada en `main` (versión `20261021lector15`; copia previa en

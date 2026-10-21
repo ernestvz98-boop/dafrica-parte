@@ -1112,7 +1112,7 @@ function aplicarConfianza(salida,perfil){
   // tiene O/0 ni I/1/l, los pares que en muchas fuentes son idénticos (S/5, Z/2, B/8, G/6 no lo son).
   const ref=String(l.referencia?.valor||"");
   const confirmadoVision=l.referencia?.resolucion?.metodo==="vision_coincide_ocr"&&!/[O0I1l]/.test(ref);
-  if(salida.tipo_pdf!=="DIGITAL"&&/[A-Z]/i.test(ref)&&/\d/.test(ref)&&/[O0S5I1lB8Z2G6]/.test(ref)&&partes.referencia>0.85&&!l.referencia.validado_catalogo&&!confirmadoVision){
+  if(salida.tipo_pdf!=="DIGITAL"&&/[A-Z]/i.test(ref)&&/\d/.test(ref)&&/[O0S5I1lB8Z2G6]/.test(ref)&&partes.referencia>0.85&&!l.referencia.validado_catalogo&&!l.referencia.validado_confirmada&&!confirmadoVision){
    partes.referencia=0.85;
    const m="Código alfanumérico con caracteres que el OCR confunde (O/0, S/5, I/1, B/8, Z/2, G/6): requiere validación";
    if(!(l.referencia.motivos||[]).includes(m))l.referencia.motivos=[...(l.referencia.motivos||[]),m];
