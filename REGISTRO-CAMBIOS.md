@@ -28,6 +28,10 @@ Lectura del usuario (3 PDF, 30 albaranes, visión, STEL, 103 obras, comparación
   también las casillas impresas). Pendiente de aprobación del usuario para cambiar el modelo.
 - Lo que falta para el 95 %: códigos y descripciones de artículos (O/0 e I/1 sin tarifa ni
   confirmación) y manuscritos sin detectar.
+- Robot (solo lectura): llega a Compras → Albaranes de proveedor (lista con referencia ABP,
+  proveedor, título; algunos títulos llevan el código PRY). Abrir un albarán concreto por el
+  buscador no es fiable todavía (abrió otro documento; nada guardado ni enviado). Guardia: «bloquear»
+  entre las palabras de escritura; `ListarProyectos` en la lista cerrada.
 
 ## 2026-10-22 · Robot de STEL (solo lectura) en marcha: lista de proyectos leída y cargada
 

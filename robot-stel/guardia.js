@@ -27,14 +27,14 @@ const ENTRADA=/(^|\/)(login|log-in|auth|signin|sign-in|session|sessions|token|oa
 const esStel=host=>/(^|\.)stelorder\.com$/i.test(host);
 const CANAL=/^\/app\/(ControladorMultiempresa|FrontController)$/;
 // Lista cerrada: solo se añaden operaciones de LECTURA revisadas (nombre y efecto).
-const OPERACIONES_LECTURA=new Set(["comprobarLogin","cargarPlanesSuscripcion"]);
+const OPERACIONES_LECTURA=new Set(["comprobarLogin","cargarPlanesSuscripcion","ListarProyectos"]);
 const OPERACIONES_ENTRADA=new Set(["realizarLogin"]);
 // Regla de lectura: nombres que EMPIEZAN por un verbo de consulta (y sin palabra de escritura en
 // ninguna parte, ver ESCRITURA). «cargar» no entra: en español también es «subir».
 const VERBO_LECTURA=/^(obtener|listar|buscar|consultar|comprobar|contar|leer|ver|mostrar|get|list|search|count|find|fetch)(?=[A-Z_]|$)/;
 const AUTENTICACION=/(login|codigo|verific|autentic|doblefactor|2fa|otp)/i;
 // Doble barrera: un nombre de escritura nunca pasa, aunque se añadiera por error a la lista.
-const ESCRITURA=/(guardar|grabar|crear|nuev|insert|modific|editar|actualiz|borrar|elimin|anular|enviar|firmar|cerrar|duplic|convert|import|subir|asign|vincul|cambiar|marcar|desmarcar|aplicar|generar|registrar|alta|baja|save|create|update|delete|remove|send|set[A-Z])/i;
+const ESCRITURA=/(guardar|grabar|crear|nuev|insert|modific|editar|actualiz|borrar|elimin|anular|enviar|firmar|cerrar|duplic|convert|import|subir|asign|vincul|cambiar|marcar|desmarcar|aplicar|generar|registrar|alta|baja|bloque|lock|save|create|update|delete|remove|send|set[A-Z])/i;
 // Plantillas de pantalla: `POST /app/Html` con un único campo `id=<ruta>.html` (lectura pura).
 const PLANTILLA=/^\/app\/Html$/;
 function soloPlantilla(cuerpo){

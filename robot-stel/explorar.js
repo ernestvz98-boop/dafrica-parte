@@ -118,7 +118,32 @@ async function explorar(salida){
   // Secciones a visitar por su ancla (STEL_WEB_VISITAR="#main_proyectos,…"): sin pulsar botones.
   // Captura y texto visible en la carpeta de salida (fuera del repositorio).
   informe.visitas=[];
-  for(const ancla of String(process.env.STEL_WEB_VISITAR||"").split(",").map(x=>x.trim()).filter(x=>/^#[A-Za-z0-9_]+$/.test(x))){
+  // También «texto:Albaranes de proveedor»: enlace de submenú con ese texto exacto (navegación).
+  for(const ancla of String(process.env.STEL_WEB_VISITAR||"").split(",").map(x=>x.trim()).filter(x=>/^#[A-Za-z0-9_]+$/.test(x)||/^texto:[\wÁÉÍÓÚÑáéíóúñ ]{3,60}$/.test(x)||/^abrir:[A-Z0-9-]{4,20}$/.test(x))){
+   if(ancla.startsWith("abrir:")){
+    // Abrir UN documento por su referencia: se escribe en el buscador de la lista (sin guardar nada)
+    // y se abre la fila. Solo lectura: la guardia sigue cortando cualquier escritura.
+    const ref=ancla.slice(6);
+    const buscador=p.locator('input[type="search"],input[placeholder*="Buscar" i],input[placeholder*="Search" i]').first();
+    if(await buscador.count()){await buscador.fill(ref);await buscador.press("Enter").catch(()=>{});}
+    await p.waitForTimeout(8000);
+    const fila=p.locator("tr").filter({hasText:ref}).first();
+    if(await fila.count())await fila.click({timeout:10000}).catch(()=>{});
+    await p.waitForTimeout(12000);
+    const nombre="documento";
+    await captura(nombre);fs.writeFileSync(path.join(salida,nombre+".txt"),await p.locator("body").innerText().catch(()=>""));
+    informe.visitas.push({ancla:"abrir",captura:nombre+".png",texto:nombre+".txt"});
+    continue;
+   }
+   if(ancla.startsWith("texto:")){
+    const t=ancla.slice(6),enl=p.locator("a").filter({hasText:new RegExp("^\\s*"+t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\s*$")}).first();
+    if(await enl.count())await enl.click({timeout:10000}).catch(()=>{});
+    await p.waitForTimeout(12000);
+    const nombre="visita-"+t.replace(/[^A-Za-z]+/g,"_");
+    await captura(nombre);fs.writeFileSync(path.join(salida,nombre+".txt"),await p.locator("body").innerText().catch(()=>""));
+    informe.visitas.push({ancla,captura:nombre+".png",texto:nombre+".txt"});
+    continue;
+   }
    // Solo enlaces del menú principal (navegación); nunca botones de acción.
    const enlace=p.locator('a[href="'+ancla+'"]').first();
    try{if(await enlace.count())await enlace.click({timeout:10000});else await p.evaluate(a=>{location.hash=a;},ancla);}

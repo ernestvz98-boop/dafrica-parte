@@ -69,3 +69,9 @@ test("tablas paginadas: la operación en la dirección pasa por las mismas regla
  assert.equal(g.permitido("POST",U+"eliminarProyecto","lectura","sEcho=1"),false);
  assert.equal(g.permitido("POST","https://app.stelorder.com/app/FrontController","lectura","sEcho=1"),false);
 });
+
+test("bloquear documentos no pasa; ListarProyectos sí (lista cerrada)",()=>{
+ const g=require("../robot-stel/guardia.js"),U="https://app.stelorder.com/app/FrontController";
+ assert.equal(g.permitido("POST",U,"lectura","operacion=ListarProyectos"),true);
+ for(const op of ["obtenerYBloquearDocumento","bloquearDocumento","desbloquearDocumento"])assert.equal(g.permitido("POST",U,"lectura","operacion="+op),false,op);
+});
