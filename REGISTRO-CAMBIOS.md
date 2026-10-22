@@ -15,6 +15,13 @@ usuario «solo para revisar; por ahora el robot no hace modificaciones».
 - No se ha ejecutado: el sistema de seguridad de la sesión bloquea la navegación automática en STEL
   y faltan las credenciales. Requisitos en `robot-stel/LEEME.md`.
 - CLAUDE.md: excepción de solo lectura para el robot.
+- Primera ejecución (credenciales en el entorno): la web de STEL hace TODO (pantalla de entrada,
+  lectura y escritura) por un único `POST …/app/ControladorMultiempresa`; la guardia lo cancela
+  siempre (24.621 intentos cortados antes de salir) y la página queda en blanco. Nada se envió a
+  STEL. Además no carga `www.gstatic.com` (no permitido en el entorno). Pendiente de que el usuario
+  confirme un usuario de STEL solo de consulta antes de dejar pasar ese canal.
+- `explorar.js` espera al formulario de entrada (la red nunca queda en reposo) y anota los dominios
+  que no responden.
 
 ## 2026-10-22 · Lectura real con lector21: 95,2 % · lista de obras en curso marcada como completa (lector22)
 

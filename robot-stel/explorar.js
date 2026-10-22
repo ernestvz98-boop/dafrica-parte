@@ -26,7 +26,7 @@ async function explorar(salida){
  fs.mkdirSync(salida,{recursive:true});
  const {chromium}=cargarPlaywright();
  const navegador=await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM?{executablePath:process.env.PLAYWRIGHT_CHROMIUM}:{});
- const informe={inicio:new Date().toISOString(),entrada:null,url_final:null,leidas:{},canceladas:{},capturas:[],menu:[]};
+ const informe={inicio:new Date().toISOString(),entrada:null,url_final:null,leidas:{},canceladas:{},fallidas:{},capturas:[],menu:[]};
  let fase="entrada";
  try{
   const contexto=await navegador.newContext();
@@ -37,15 +37,20 @@ async function explorar(salida){
    return ruta.continue();
   });
   const p=await contexto.newPage();
+  // Peticiones que no llegan (p. ej. dominios no permitidos en el entorno): solo el dominio.
+  p.on("requestfailed",r=>{let h;try{h=new URL(r.url()).hostname;}catch{h="?";}const k=h+" · "+String(r.failure()?.errorText||"").slice(0,40);informe.fallidas[k]=(informe.fallidas[k]||0)+1;});
   const captura=async nombre=>{const f=path.join(salida,nombre+".png");await p.screenshot({path:f,fullPage:true});informe.capturas.push(path.basename(f));};
-  await p.goto(INICIO,{waitUntil:"networkidle",timeout:60000});
+  // La web de STEL nunca deja la red en reposo: se espera al formulario de entrada.
+  await p.goto(INICIO,{waitUntil:"domcontentloaded",timeout:60000});
+  await p.waitForSelector('input[type="password"]',{timeout:60000}).catch(()=>{});
   await captura("1-entrada");
+  if(!(await p.locator('input[type="password"]').count())){informe.entrada="sin_formulario_de_entrada";return informe;}
   // Entrada: primer campo de usuario visible y el de contraseña; Intro (sin pulsar otros botones).
   const campoUsuario=p.locator('input[type="email"],input[name*="user" i],input[name*="email" i],input[id*="user" i],input[id*="email" i],input[type="text"]').first();
   const campoClave=p.locator('input[type="password"]').first();
   await campoUsuario.fill(usuario);await campoClave.fill(clave);
-  await Promise.all([p.waitForLoadState("networkidle",{timeout:60000}).catch(()=>{}),campoClave.press("Enter")]);
-  await p.waitForTimeout(5000);
+  await campoClave.press("Enter");
+  await p.waitForTimeout(15000);
   fase="lectura";
   informe.entrada=(await p.locator('input[type="password"]').count())===0?"aparentemente_correcta":"sigue_pidiendo_contrasena";
   informe.url_final=rutaSinDatos(p.url());
