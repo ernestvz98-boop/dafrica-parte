@@ -126,3 +126,89 @@ Una ejecución sin finalizar durante más de dos horas se advierte como no confi
 un informe de otro día no acredita una revisión de hoy. Hay paginación del historial
 y filtros locales por texto y recomendación. Un fallo de lectura no se muestra
 como si hubiera cero licitaciones.
+
+## Presentación y estudios condicionados
+
+El selector de recomendación contiene las cuatro opciones reales. Las fuentes de
+una ficha admiten URLs HTTPS o los objetos del registro general. El historial
+identifica revisión diaria, estudio complementario, hora y estado. Si hay una
+revisión EN_CURSO o un fallo reciente, se abre el último informe útil finalizado
+disponible en esa página y se advierte del estado más reciente. No se convierte
+una ejecución vacía en un resultado de cero oportunidades. El usuario puede
+seleccionar la revisión en curso; se relee cada 30 segundos mientras permanece
+abierta, visible, autorizada y con menos de dos horas desde el inicio.
+
+El panel compara oferta, coste, resultado y margen BASE. Los filtros económicos
+permiten localizar modelos, costes pendientes, pérdidas y vencimientos próximos.
+Los vencimientos sin zona horaria mantienen `presentacion_limite: null`; pueden
+añadir `presentacion_fecha` (día válido AAAA-MM-DD) y `presentacion_texto` (fecha,
+hora publicada y advertencia de zona no confirmada). El aviso usa días de
+calendario de Madrid sin inventar un instante de cierre.
+
+Una simulación puede conservar `cobertura: PARCIAL` porque los precios comerciales
+no están confirmados. Solo se muestra un resultado condicionado cuando existe
+un modelo completo bajo supuestos, identificado expresamente mediante:
+
+```json
+{
+  "modelo_economico": {
+    "alcance": "TODAS_LAS_FAMILIAS_MODELADAS",
+    "oferta_hipotetica": true,
+    "validacion_comercial": "PENDIENTE",
+    "familias": {
+      "materiales": "INCLUIDA_EN_PARTIDAS",
+      "mano_obra": "INCLUIDA_EN_PARTIDAS",
+      "maquinaria": "INCLUIDA_EN_PARTIDAS",
+      "subcontratas": "INCLUIDA_EN_PARTIDAS",
+      "desplazamientos": "PROVISIONADA",
+      "residuos": "INCLUIDA_EN_PARTIDAS",
+      "seguridad": "INCLUIDA_EN_PARTIDAS",
+      "indirectos": "PROVISIONADA",
+      "contingencia": "PROVISIONADA",
+      "financiacion": "PROVISIONADA",
+      "garantias": "PROVISIONADA"
+    }
+  }
+}
+```
+
+Este objeto va dentro de `estimacion`. El analista debe justificar cada familia
+con cantidades, referencias o provisiones defendibles. La interfaz no certifica
+esa evidencia: comprueba tres escenarios distintos, la misma oferta positiva,
+costes positivos, todas las familias representadas y que la suma de las partidas
+BASE coincida con su coste (tolerancia de redondeo 0,02). Recalcula beneficio y
+margen; no confía en el resultado recibido. No basta con marcar PARCIAL o añadir
+una bandera si falta el modelo. Los informes anteriores sin estos metadatos
+conservan su comportamiento. No se cambia la cobertura para forzar un resultado.
+Las simulaciones muestran su advertencia y las pérdidas mantienen su signo.
+
+Para una ficha sin coste suficiente puede añadirse `estimacion.umbrales_economicos`
+con `oferta_hipotetica_sin_iva`, `margenes_objetivo_pct` y `supuesto`. La interfaz
+recalcula coste máximo = oferta × (1 − margen / 100). Es un objetivo de gestión,
+no un gasto estimado, beneficio previsto ni propuesta de baja.
+
+La descarga de texto se genera localmente y vuelve a comprobar `costes.ver`.
+No escribe en Supabase, no consulta STEL y no envía el informe a otra aplicación.
+
+## Validación aislada del módulo
+
+```sh
+node --check control-30.js
+node --test pruebas/licitaciones.test.js
+npm ci --prefix pruebas/licitaciones-ui --ignore-scripts
+npm test --prefix pruebas/licitaciones-ui
+```
+
+Las pruebas DOM usan Linkedom con dependencia y lock propios; no cambian las
+dependencias del lector. Ejecutan los controladores reales con datos sintéticos
+para comprobar filtros, fuentes, pérdidas, historial, ejecuciones vacías, permisos,
+fallos y escape de contenido. No sustituyen una prueba visual o del motor de un
+navegador. La prueba adicional `pruebas/licitaciones.navegador.cjs` requiere
+Playwright y Chromium disponibles externamente; usa los mismos datos sintéticos
+y puede guardar capturas con `LICITACIONES_SCREENSHOT_DIR`. No forma parte de las
+pruebas del lector ni se conecta con servicios reales.
+
+La recuperación de una ejecución interrumpida corresponde al proceso de revisión:
+la interfaz puede advertir y refrescar, pero carece de permiso de escritura para
+cerrarla. Una interrupción total del proceso necesita recuperación posterior;
+no se promete un cierre inmediato mediante una página que solo hace SELECT.
