@@ -50,3 +50,19 @@ test('consulta por referencia completa: sigue funcionando igual',async()=>{
   return response(NOTAS.filter(n=>n['full-reference']===new URL(url).searchParams.get('full-reference')));}});
  const d=await r.json();assert.equal(d.exactMatch,true);assert.equal(d.documents[0].accountId,3);
 });
+
+test('proveedor con miles de albaranes: con el filtro se lee desde el final de su lista y termina completo (fallo real)',async()=>{
+ const {buscarNotas}=await mod();
+ // 3.000 albaranes de la cuenta 5, del más antiguo (2018) al más nuevo (octubre de 2026), y 40 de la cuenta 6.
+ const muchas=Array.from({length:3000},(_,i)=>{const f=new Date(Date.UTC(2018,0,1)+Math.floor(i*1.0)*864e5).toISOString().slice(0,10);
+  return {id:i+1,'full-reference':'ABP'+i,'account-id':5,date:f+'T00:00:00+0000','creation-date':f+'T09:00:00+0000',title:String(i)};});
+ const ultimo=muchas.at(-1).date.slice(0,10);
+ const otras=Array.from({length:40},(_,i)=>({id:5000+i,'full-reference':'ABQ'+i,'account-id':6,date:ultimo+'T00:00:00+0000','creation-date':ultimo,title:'x'}));
+ const todas=[...otras,...muchas],consultas=[];
+ const r=await buscarNotas(async(url,op)=>{consultas.push(url);const u=new URL(url),s=Number(u.searchParams.get('start')),l=Number(u.searchParams.get('limit')),c=u.searchParams.get('account-id');
+  const lista=c?todas.filter(n=>String(n['account-id'])===c):todas;return response(lista.slice(s,s+l));},'k',
+  {cuentas:[5,6],desde:new Date(Date.parse(ultimo)-20*864e5).toISOString().slice(0,10),hasta:ultimo,dormir:async()=>{}});
+ assert.equal(r.metodo,'filtro_cuenta');assert.equal(r.completo,true,JSON.stringify({...r,notas:r.notas.length}));
+ assert.equal(r.notas.filter(n=>n.accountId===5).length,21);assert.equal(r.notas.filter(n=>n.accountId===6).length,40);
+ assert.ok(consultas.length<40,'consultas: '+consultas.length);
+});

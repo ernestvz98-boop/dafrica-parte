@@ -165,13 +165,16 @@ test("un código manuscrito leído pero sin validar impide AUTO_OK; validado, de
  aplicarEstado(r);
  assert.equal(r.estado,"REVISAR");assert.ok(r.incidencias.some(i=>/Código manuscrito sin validar: obra «PRY00123»/.test(i)));
  // Validado (y estado base recalculado por extraer.finalizar): ya no lo baja ni deja la incidencia.
- r.manuscritos.obra.estado="OK";r.estado="AUTO_OK";aplicarEstado(r);
+ r.manuscritos.obra.estado="OK";r.manuscritos.stel={valor:"ABP26-1234",literal:"ABP26 1234",estado:"OK"};r.estado="AUTO_OK";aplicarEstado(r);
  assert.equal(r.estado,"AUTO_OK");assert.equal(r.incidencias.length,0);
- // Ambiguo o sin el formato: tampoco AUTO_OK. Nada detectado: no cambia el estado.
+ // Ambiguo o sin el formato: tampoco AUTO_OK.
  for(const m of [{valor:null,literal:"PRYO0999",estado:"AMBIGUO"},{valor:null,literal:"ABP69999",estado:"VACIO"}]){
   const x={estado:"AUTO_OK",manuscritos:{obra:m,stel:{estado:"VACIO",literal:""}}};assert.equal(aplicarEstado(x).estado,"REVISAR");
  }
- assert.equal(aplicarEstado({estado:"AUTO_OK",manuscritos:{obra:{estado:"VACIO",literal:""},stel:{estado:"VACIO",literal:""}}}).estado,"AUTO_OK");
+ // Nada detectado: la anotación puede existir sin haberse visto (fallo real: obra y ABP escritos
+ // no detectados en albaranes dados por AUTO_OK). Tampoco AUTO_OK.
+ const nada=aplicarEstado({estado:"AUTO_OK",manuscritos:{obra:{estado:"VACIO",literal:""},stel:{valor:"ABP26-1234",estado:"OK"}}});
+ assert.equal(nada.estado,"REVISAR");assert.ok(nada.incidencias.some(i=>/no detectado: obra/.test(i)));
 });
 
 test("código STEL manuscrito: se valida con el albarán de compra de STEL (solo lectura) del mismo proveedor y fecha o número",async()=>{

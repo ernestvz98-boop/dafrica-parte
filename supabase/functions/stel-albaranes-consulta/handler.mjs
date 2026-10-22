@@ -9,9 +9,11 @@
  *   lleva el número del albarán del proveedor, la fecha y la obra («123.456 03/03/2026 OBRA FICTICIA»),
  *   así que el navegador encuentra el ABP de un albarán leído sin depender de la letra a mano.
  *   Primero se prueba el filtro por cuenta de STEL y se COMPRUEBA que se ha aplicado (todas las
- *   filas de esa cuenta); si STEL lo ignora, se leen los albaranes más recientes desde el final de
- *   la lista (STEL pagina del más antiguo al más nuevo), de una consulta en una.
+ *   filas de esa cuenta); si STEL lo ignora, se usa la lista sin filtro. En los dos casos se lee
+ *   desde el FINAL de la lista (STEL pagina del más antiguo al más nuevo), de una consulta en una.
  * 2026-10-21: v4 (modo buscar). Versiones anteriores: solo fullReference.
+ * 2026-10-22: v5. Con el filtro, cada proveedor se lee desde el final de su lista (fallo real: un
+ *   proveedor con más de 2.000 albaranes agotaba el límite de páginas leyendo desde el principio).
  */
 const cors={"Access-Control-Allow-Origin":"https://ernestvz98-boop.github.io","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...cors,"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}});
@@ -32,7 +34,7 @@ export function resumen(x){
 
 // GET con reintentos: STEL responde 403/429 cuando se agota su cupo o hay consultas simultáneas.
 // maxConsultas: tope por llamada (cupo de STEL y tiempo máximo de la función).
-function cliente(fetcher,clave,{esperas=[1500,4000],dormir=ms=>new Promise(r=>setTimeout(r,ms)),maxConsultas=70}={}){
+function cliente(fetcher,clave,{esperas=[1500,4000],dormir=ms=>new Promise(r=>setTimeout(r,ms)),maxConsultas=110}={}){
  const estado={consultas:0};
  const get=async params=>{
   if(estado.consultas>=maxConsultas)throw Error("limite_consultas");
@@ -62,6 +64,30 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
  const delasCuentas=new Set(cuentas.map(String));
  const fin=(metodo,completo,notas,extra={})=>({metodo,completo,notas:notas.map(resumen),consultas:estado.consultas,...extra});
  try{
+  // Un albarán de esas fechas no puede haberse creado antes: al leer hacia atrás se para cuando
+  // una página entera se creó antes de `desde` (con 2 días de margen).
+  const limite=new Date(Date.parse(desde)-2*864e5).toISOString().slice(0,10);
+  let paginas=0;
+  // Final de una lista (con o sin filtro): galope desde lo ya conocido y búsqueda binaria; después,
+  // páginas hacia atrás hasta las fechas anteriores. `filtro`: parámetros fijos de la consulta.
+  const leerDesdeElFinal=async(filtro,{conocido=-1,pista=null,valida=()=>true}={})=>{
+   const hay=async n=>n>=0&&(await get({...filtro,limit:1,start:n})).length>0;
+   let lo=conocido,hi;
+   if(Number.isInteger(pista)&&pista>0&&pista-1>lo&&await hay(pista-1)){lo=pista-1;let paso=50;hi=lo+paso;
+    while(await hay(hi)){lo=hi;paso*=2;hi=lo+paso;if(paso>1e6)break;}}
+   else{hi=Math.max(1000,2*(lo+1));while(await hay(hi)){lo=hi;hi*=2;if(hi>2e6)break;}}
+   while(hi-lo>1){const m=Math.floor((lo+hi)/2);if(await hay(m))lo=m;else hi=m;}
+   const total=lo+1,filas=[];
+   for(let inicio=Math.max(0,total-tam);;inicio=Math.max(0,inicio-tam)){
+    if(paginas>=maxPaginas)throw Error("limite_paginas");
+    const f=await get({...filtro,limit:tam,start:inicio});paginas++;
+    if(!f.every(valida))throw Error("filtro_inconsistente");
+    filas.push(...f);
+    if(inicio===0||!f.some(x=>dia(x["creation-date"]||x.date)>=limite))break;
+   }
+   return {filas,total};
+  };
+  const unicas=filas=>{const v=new Set();return filas.filter(x=>!v.has(String(x.id))&&v.add(String(x.id)));};
   // 1. Filtro por cuenta, si STEL lo aplica de verdad.
   let aplicado=null;
   for(const c of cuentas){
@@ -72,40 +98,18 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
    if(!aplicado)break;
    const notas=[];
    for(const cuenta of cuentas){
-    let filas=cuenta===c?p:await get({"account-id":cuenta,limit:tam,start:0}),paginas=1;
-    if(!filas.every(x=>String(x["account-id"])===String(cuenta)))return fin("filtro_cuenta",false,[],{motivo:"filtro_inconsistente"});
-    notas.push(...filas.filter(enIntervalo));
-    while(filas.length===tam){
-     if(paginas>=maxPaginas)return fin("filtro_cuenta",false,notas,{motivo:"limite_paginas"});
-     filas=await get({"account-id":cuenta,limit:tam,start:paginas*tam});paginas++;
-     notas.push(...filas.filter(enIntervalo));
-    }
+    const valida=x=>String(x["account-id"])===String(cuenta);
+    const primera=cuenta===c?p:await get({"account-id":cuenta,limit:tam,start:0});
+    if(!primera.every(valida))return fin("filtro_cuenta",false,[],{motivo:"filtro_inconsistente"});
+    // Lista corta: ya está entera. Larga: desde el final.
+    const filas=primera.length<tam?primera:(await leerDesdeElFinal({"account-id":cuenta},{conocido:tam-1,valida})).filas;
+    notas.push(...unicas(filas).filter(enIntervalo));
    }
    return fin("filtro_cuenta",true,notas);
   }
-  // 2. Sin filtro: final de la lista (galope desde la pista y búsqueda binaria) y lectura hacia atrás.
-  const hay=async n=>n>=0&&(await get({limit:1,start:n})).length>0;
-  let lo,hi;
-  if(Number.isInteger(pista)&&pista>0&&await hay(pista-1)){
-   lo=pista-1;let paso=50;hi=lo+paso;
-   while(await hay(hi)){lo=hi;paso*=2;hi=lo+paso;if(paso>1e6)break;}
-  }else{
-   lo=-1;hi=1000;
-   while(await hay(hi)){lo=hi;hi*=2;if(hi>2e6)break;}
-  }
-  while(hi-lo>1){const m=Math.floor((lo+hi)/2);if(await hay(m))lo=m;else hi=m;}
-  const total=lo+1,notas=[];
-  // Un albarán de esas fechas no puede haberse creado antes: se para cuando una página entera
-  // se creó antes de `desde` (con 2 días de margen).
-  const limite=new Date(Date.parse(desde)-2*864e5).toISOString().slice(0,10);
-  let paginas=0;
-  for(let inicio=Math.max(0,total-tam);;inicio=Math.max(0,inicio-tam)){
-   if(paginas>=maxPaginas)return fin("recientes",false,notas,{total,motivo:"limite_paginas"});
-   const filas=await get({limit:tam,start:inicio});paginas++;
-   notas.push(...filas.filter(x=>enIntervalo(x)&&(!delasCuentas.size||delasCuentas.has(String(x["account-id"])))));
-   const recientes=filas.some(x=>dia(x["creation-date"]||x.date)>=limite);
-   if(inicio===0||!recientes)break;
-  }
+  // 2. Sin filtro: la lista completa desde el final.
+  const {filas,total}=await leerDesdeElFinal({},{pista});
+  const notas=unicas(filas).filter(x=>enIntervalo(x)&&(!delasCuentas.size||delasCuentas.has(String(x["account-id"]))));
   return fin("recientes",true,notas,{total});
  }catch(e){return fin("error",false,[],{motivo:String(e?.message||e).slice(0,80)});}
 }

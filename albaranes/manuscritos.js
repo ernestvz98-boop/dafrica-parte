@@ -387,13 +387,21 @@ const PREFIJO_PENDIENTE="Código manuscrito sin validar";
 function pendientes(m){
  return m?["obra","stel"].filter(k=>m[k]&&(["REVISAR","AMBIGUO"].includes(m[k].estado)||(m[k].estado==="VACIO"&&m[k].literal))):[];
 }
+// Ningún código detectado (ni leído): la anotación puede existir y no haberse visto (fallo real,
+// 2026-10-22: un código de obra y un ABP escritos no detectados en albaranes dados por AUTO_OK).
+const PREFIJO_FALTA="Código manuscrito no detectado";
 function aplicarEstado(r){
  if(!r?.manuscritos)return r;
- r.incidencias=(r.incidencias||[]).filter(i=>!String(i).startsWith(PREFIJO_PENDIENTE));
+ r.incidencias=(r.incidencias||[]).filter(i=>!String(i).startsWith(PREFIJO_PENDIENTE)&&!String(i).startsWith(PREFIJO_FALTA));
  const p=pendientes(r.manuscritos);
  if(p.length){
   if(r.estado==="AUTO_OK")r.estado="REVISAR";
   r.incidencias.push(PREFIJO_PENDIENTE+": "+p.map(k=>(k==="obra"?"obra":"STEL")+" «"+(r.manuscritos[k].literal||r.manuscritos[k].valor)+"» ("+r.manuscritos[k].estado+")").join(", "));
+ }
+ const faltan=["obra","stel"].filter(k=>!r.manuscritos[k]||(r.manuscritos[k].estado==="VACIO"&&!r.manuscritos[k].literal));
+ if(faltan.length){
+  if(r.estado==="AUTO_OK")r.estado="REVISAR";
+  r.incidencias.push(PREFIJO_FALTA+": "+faltan.map(k=>k==="obra"?"obra (PRY)":"STEL (ABP)").join(", ")+"; comprueba el papel");
  }
  return r;
 }

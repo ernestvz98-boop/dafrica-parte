@@ -3,6 +3,38 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Lectura real con lector18: dos correcciones (lector19)
+
+**Producción:** web en `main` (versión `20261022lector19`; copia previa en
+`respaldo/main-antes-lector19`). Función Edge `stel-albaranes-consulta` v5 (solo lectura).
+
+Lectura del usuario con lector18 (2 PDF, 19 albaranes, visión y STEL reales; sin obras ni tarifas
+importadas y sin la casilla de comparar modelos): **358/387 (92,5 %), 0 errores críticos**.
+
+| Grupo | Campos | Correctos automáticos | Correctos en revisión | Incorrectos (marcados) | Sin valor (marcados) | Otros |
+|---|---|---|---|---|---|---|
+| Cabecera | 57 | 56 | 0 | 0 | 1 | 0 |
+| Manuscritos | 38 | 21 | 3 | 8 | 5 | 1 |
+| Referencias/descripciones | 80 | 73 | 1 | 3 | 0 | 3 |
+| Económicos | 212 | 208 | 1 | 1 | 2 | 0 |
+
+Fallos reales y corrección:
+1. **Dos albaranes AUTO_OK con un código manuscrito no detectado** (obra en uno, ABP en otro; ningún
+   valor erróneo aceptado, pero el albarán no iba a revisión). Ahora, con la visión activa, un
+   albarán sin código de obra o sin ABP detectado no puede ser AUTO_OK (`manuscritos.aplicarEstado`,
+   incidencia «Código manuscrito no detectado»). Reproducido sobre la lectura: AUTO_OK con algún error
+   2 → 0 (quedan 3 AUTO_OK, todos correctos). Regresión en `manuscritos.test.js`.
+2. **La búsqueda del albarán de compra en STEL quedó incompleta** (`limite_paginas`): el filtro por
+   proveedor funciona, pero cada proveedor se leía desde su albarán más antiguo y uno con miles de
+   albaranes agotó el límite antes de llegar a las fechas recientes; sin búsqueda completa no se
+   aplica. v5 lee cada proveedor desde el final de su lista (galope + búsqueda binaria + páginas
+   hacia atrás). Regresión con 3.000 albaranes de un proveedor en `stel-compras-consulta.test.js`.
+   Con lo que sí llegó: 2 ABP resueltos, los 2 correctos.
+
+Pendiente para el 95 %: obra (11 de los 29 fallos; 7 lecturas de visión erróneas, ninguna
+aceptada) → lista de obras importada y prueba de modelos de visión; ABP no detectados → búsqueda por
+número (v5) en la próxima lectura. 244 pruebas; corpus 91,0 % / 90,6 % / 93,3 %, 0 críticos.
+
 ## 2026-10-21 · Validación final de lector18 (sin servicios reales): 95 % NO alcanzado, Fase 1 sin congelar
 
 **Producción:** sin cambios (ni web, ni funciones, ni datos).
