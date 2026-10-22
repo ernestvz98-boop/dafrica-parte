@@ -44,19 +44,19 @@ test("PRY validado por el número de la obra impresa («PISCINAS … 12345»)",(
 });
 
 test("PRY sin ninguna validación externa: se propone pero no se acepta automáticamente",()=>{
- const r=validarCodigos([vista("PRY00123",[["PRY00123",0.97]])],{});
+ const r=validarCodigos([vista("PRY90123",[["PRY90123",0.97]])],{});
  assert.equal(r.obra.estado,"REVISAR");assert.ok(r.obra.confianza<0.9);
 });
 
 test("dos interpretaciones plausibles (1/7) y ninguna validada: no se resuelve",()=>{
- const r=validarCodigos([vista("PRY0011?",[["PRY00123",0.6],["PRY00127",0.4]])],{});
+ const r=validarCodigos([vista("PRY9012?",[["PRY90123",0.6],["PRY90127",0.4]])],{});
  assert.equal(r.obra.estado,"AMBIGUO");assert.equal(r.obra.valor,null);
 });
 
 test("de dos interpretaciones, la que existe en el catálogo de obras se acepta; la otra queda como alternativa",()=>{
- const r=validarCodigos([vista("PRY0011?",[["PRY00123",0.6],["PRY00127",0.4]])],{catalogoObras:[{codigo:"PRY00123",nombre:"OBRA FICTICIA"}]});
- assert.equal(r.obra.estado,"OK");assert.equal(r.obra.valor,"PRY00123");
- assert.deepEqual(r.obra.resolucion.alternativas.sort(),["PRY00123","PRY00127"]);
+ const r=validarCodigos([vista("PRY9012?",[["PRY90123",0.6],["PRY90127",0.4]])],{catalogoObras:[{codigo:"PRY90123",nombre:"OBRA FICTICIA"}]});
+ assert.equal(r.obra.estado,"OK");assert.equal(r.obra.valor,"PRY90123");
+ assert.deepEqual(r.obra.resolucion.alternativas.sort(),["PRY90123","PRY90127"]);
 });
 
 test("una anotación tachada no se usa, pero queda pendiente: impide AUTO_OK",()=>{
@@ -79,17 +79,17 @@ test("coherencia del lote: el código se extiende desde un albarán donde está 
  const doc=(obra,cod,impresa=[],escrita=[],validado=false)=>({obraImpresa:impresa,obraEscrita:escrita,obra:validado?
   {valor:cod,estado:"OK",confianza:0.95,resolucion:{metodo:"vision_recorte_validada",evidencias:["Visión","Coincide con el número de la obra impresa"]}}:
   {valor:cod,estado:"REVISAR",confianza:0.8,resolucion:{evidencias:[]}}});
- const a=doc("","PRY00456",["MOLINO FICTICIA 00456"],[],true),b=doc("","PRY00456",[],["Molino"]),c=doc("","PRY00055",["OBRA NAVE"]);
+ const a=doc("","PRY90456",["MOLINO FICTICIA 90456"],[],true),b=doc("","PRY90456",[],["Molino"]),c=doc("","PRY90055",["OBRA NAVE"]);
  assert.equal(coherenciaLote([a,b,c]),1);
  assert.equal(b.obra.estado,"OK");assert.equal(b.obra.resolucion.metodo,"vision_recorte_coherencia_lote");assert.equal(c.obra.estado,"REVISAR");
- const x=doc("","PRY00456",["MOLINO FICTICIA 00456"],[],true),y=doc("","PRY00456",["Molino"]),z=doc("","PRY00453",["Molino"]);
+ const x=doc("","PRY90456",["MOLINO FICTICIA 90456"],[],true),y=doc("","PRY90456",["Molino"]),z=doc("","PRY90453",["Molino"]);
  assert.equal(coherenciaLote([x,y,z]),0);
 });
 
 test("coherencia del lote: dos lecturas de visión iguales sin validar NO se confirman entre sí (fallo real 88 → 38)",()=>{
  const doc=(cod,impresa)=>({obraImpresa:impresa,obraEscrita:[],obra:{valor:cod,estado:"REVISAR",confianza:0.8,resolucion:{evidencias:[]}}});
  // Misma letra, mismo motor: los dos albaranes de la obra ficticia se leen igual de mal.
- const a=doc("PRY00031",["OBRA MOLINO FICTICIO"]),b=doc("PRY00031",["MOLINO FICTICIO"]);
+ const a=doc("PRY90031",["OBRA MOLINO FICTICIO"]),b=doc("PRY90031",["MOLINO FICTICIO"]);
  assert.equal(coherenciaLote([a,b]),0);
  assert.equal(a.obra.estado,"REVISAR");assert.equal(b.obra.estado,"REVISAR");
 });
@@ -161,9 +161,9 @@ test("prefijo PRY cortado o borroso («Y12345»): las 5 cifras con tipo PRY vale
 
 test("un código manuscrito leído pero sin validar impide AUTO_OK; validado, deja de bloquear",()=>{
  const {aplicarEstado}=require("../albaranes/manuscritos.js");
- const r={estado:"AUTO_OK",incidencias:[],manuscritos:{obra:{valor:"PRY00123",literal:"PRY00123",estado:"REVISAR"},stel:{valor:null,literal:"",estado:"VACIO"}}};
+ const r={estado:"AUTO_OK",incidencias:[],manuscritos:{obra:{valor:"PRY90123",literal:"PRY90123",estado:"REVISAR"},stel:{valor:null,literal:"",estado:"VACIO"}}};
  aplicarEstado(r);
- assert.equal(r.estado,"REVISAR");assert.ok(r.incidencias.some(i=>/Código manuscrito sin validar: obra «PRY00123»/.test(i)));
+ assert.equal(r.estado,"REVISAR");assert.ok(r.incidencias.some(i=>/Código manuscrito sin validar: obra «PRY90123»/.test(i)));
  // Validado (y estado base recalculado por extraer.finalizar): ya no lo baja ni deja la incidencia.
  r.manuscritos.obra.estado="OK";r.manuscritos.stel={valor:"ABP26-1234",literal:"ABP26 1234",estado:"OK"};r.estado="AUTO_OK";aplicarEstado(r);
  assert.equal(r.estado,"AUTO_OK");assert.equal(r.incidencias.length,0);
@@ -199,13 +199,13 @@ test("código STEL manuscrito: se valida con el albarán de compra de STEL (solo
 });
 
 test("una sola lectura PRY: existir en el catálogo no basta; hace falta que el nombre de la obra coincida con el albarán",()=>{
- const catalogoObras=[{codigo:"PRY00123",nombre:"REFORMA NAVE FICTICIA"},{codigo:"PRY00124",nombre:"VIVIENDA INVENTADA"}];
- const solo=validarCodigos([vista("PRY00123",[["PRY00123",0.95]])],{catalogoObras});
+ const catalogoObras=[{codigo:"PRY90123",nombre:"REFORMA NAVE FICTICIA"},{codigo:"PRY90124",nombre:"VIVIENDA INVENTADA"}];
+ const solo=validarCodigos([vista("PRY90123",[["PRY90123",0.95]])],{catalogoObras});
  assert.equal(solo.obra.estado,"REVISAR");
- const conObra=validarCodigos([vista("PRY00123",[["PRY00123",0.95]])],{catalogoObras,obraImpresa:["OBRA: NAVE POLIGONO"]});
+ const conObra=validarCodigos([vista("PRY90123",[["PRY90123",0.95]])],{catalogoObras,obraImpresa:["OBRA: NAVE POLIGONO"]});
  assert.equal(conObra.obra.estado,"OK");assert.match(conObra.obra.resolucion.evidencias.join(" "),/NAVE/);
  // Nombre de otra obra: no corrobora.
- const otra=validarCodigos([vista("PRY00123",[["PRY00123",0.95]])],{catalogoObras,obraEscrita:["Vivienda"]});
+ const otra=validarCodigos([vista("PRY90123",[["PRY90123",0.95]])],{catalogoObras,obraEscrita:["Vivienda"]});
  assert.equal(otra.obra.estado,"REVISAR");
 });
 
@@ -252,17 +252,66 @@ test("obra por nombre: número de obra impreso + nombre en el catálogo + lectur
 });
 test("obra por nombre: lectura a una cifra solo con el catálogo completo y una sola obra con ese nombre",()=>{
  const {validarCodigos}=require("../albaranes/manuscritos.js");
- const v=[{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY 00038",lecturas:[{codigo:"PRY00038",confianza:0.95}]}];
- const cat=[{codigo:"PRY00088",nombre:"ALAMEDA FICTICIA DEL VALLE"},{codigo:"PRY00038",nombre:"GIRASOL FICTICIO"},{codigo:"PRY00012",nombre:"OTRA ALAMEDA FICTICIA"}];
+ const v=[{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY 90038",lecturas:[{codigo:"PRY90038",confianza:0.95}]}];
+ const cat=[{codigo:"PRY90088",nombre:"ALAMEDA FICTICIA DEL VALLE"},{codigo:"PRY90038",nombre:"GIRASOL FICTICIO"},{codigo:"PRY90012",nombre:"OTRA ALAMEDA FICTICIA"}];
  const ctx={catalogoObras:cat,obraEscrita:["ALAMEDA DEL VALLE"]};
  // Catálogo incompleto: no.
  assert.notEqual(validarCodigos(v,{...ctx,catalogoObrasCompleto:false}).obra.estado,"OK");
- // Completo: la única obra con «ALAMEDA» a una cifra de lo leído (00012 está a más de una).
+ // Completo: la única obra con «ALAMEDA» a una cifra de lo leído (90012 está a más de una).
  const r=validarCodigos(v,{...ctx,catalogoObrasCompleto:true}).obra;
- assert.equal(r.valor,"PRY00088");assert.equal(r.estado,"OK");assert.equal(r.resolucion.metodo,"obra_nombre_catalogo");
+ assert.equal(r.valor,"PRY90088");assert.equal(r.estado,"OK");assert.equal(r.resolucion.metodo,"obra_nombre_catalogo");
  // Dos obras con ese nombre a una cifra: no se elige.
- const dos=[...cat,{codigo:"PRY00058",nombre:"ALAMEDA FICTICIA NORTE"}];
+ const dos=[...cat,{codigo:"PRY90058",nombre:"ALAMEDA FICTICIA NORTE"}];
  assert.notEqual(validarCodigos(v,{...ctx,catalogoObras:dos,catalogoObrasCompleto:true}).obra.estado,"OK");
  // Sin nombre de obra en el albarán: no.
  assert.notEqual(validarCodigos(v,{catalogoObras:cat,catalogoObrasCompleto:true}).obra.estado,"OK");
+});
+
+// Prueba de fuerza 2026-10-22 (catálogo real de 103 obras, lecturas de visión falsas realistas):
+// una cifra mal leída o dos contiguas intercambiadas daban otra obra que existe y que comparte
+// con el albarán una palabra común a varias obras («HOSPITAL», «CENTRO»…), y se aceptaba.
+const leePry=c=>[{indice:0,tipo:"PRY",tachado:false,texto_literal:c,lecturas:[{codigo:c,confianza:0.99}]}];
+test("prueba de fuerza: una palabra común a dos obras de códigos confundibles no valida el código leído",()=>{
+ const cat=[{codigo:"PRY90124",nombre:"HOSPITAL FICTICIO GERENCIA"},{codigo:"PRY90127",nombre:"HOSPITAL FICTICIO CARDIOLOGIA"},{codigo:"PRY90150",nombre:"GIRASOL INVENTADO"}];
+ // En el albarán solo «HOSPITAL FICTICIO»: las dos coinciden igual y una cifra mal leída las confunde.
+ for(const c of ["PRY90124","PRY90127"])
+  assert.notEqual(validarCodigos(leePry(c),{catalogoObras:cat,catalogoObrasCompleto:true,obraImpresa:["HOSPITAL FICTICIO"]}).obra.estado,"OK");
+ // Con la palabra que las distingue, la del albarán se acepta y la otra no.
+ const ctx={catalogoObras:cat,catalogoObrasCompleto:true,obraEscrita:["Hospital ficticio cardiologia"]};
+ const r=validarCodigos(leePry("PRY90127"),ctx).obra;
+ assert.equal(r.estado,"OK");assert.equal(r.valor,"PRY90127");
+ assert.notEqual(validarCodigos(leePry("PRY90124"),ctx).obra.estado,"OK");
+});
+test("prueba de fuerza: nombre + lectura cercana solo si el nombre señala una única obra y no hay otra candidata",()=>{
+ const cat=[{codigo:"PRY90059",nombre:"SALA ENFRIADORA FICTICIA"},{codigo:"PRY90094",nombre:"ENFRIADORA INVENTADA"},{codigo:"PRY90010",nombre:"OTRA COSA"}];
+ const ctx=t=>({catalogoObras:cat,catalogoObrasCompleto:true,obraEscrita:[t]});
+ // Lee 90095 (no existe): «ENFRIADORA» es de las dos obras; no se elige ninguna.
+ assert.notEqual(validarCodigos(leePry("PRY90095"),ctx("enfriadora")).obra.estado,"OK");
+ // El nombre completo señala 90059 (cifras intercambiadas), pero 90094 está a una cifra: dos candidatas.
+ assert.notEqual(validarCodigos(leePry("PRY90095"),ctx("sala enfriadora ficticia")).obra.estado,"OK");
+ // Sin la otra obra cerca, el intercambio de cifras se corrige con el nombre.
+ const r=validarCodigos(leePry("PRY90095"),{catalogoObras:[cat[0],cat[2]],catalogoObrasCompleto:true,obraEscrita:["sala enfriadora ficticia"]}).obra;
+ assert.equal(r.valor,"PRY90059");assert.equal(r.estado,"OK");assert.equal(r.resolucion.metodo,"obra_nombre_catalogo");
+});
+test("prueba de fuerza: de dos lecturas, la que existe solo vale si con cualquier cifra en la dudosa no existe otra obra",()=>{
+ const lee2=(a,b)=>[{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY9012?",lecturas:[{codigo:a,confianza:0.6},{codigo:b,confianza:0.5}]}];
+ // «1 o 7»: solo existe 90121, pero 90124 (otra cifra en esa posición) también es una obra.
+ const cat=[{codigo:"PRY90121",nombre:"OBRA FICTICIA UNO"},{codigo:"PRY90124",nombre:"OBRA FICTICIA DOS"}];
+ assert.notEqual(validarCodigos(lee2("PRY90121","PRY90127"),{catalogoObras:cat,catalogoObrasCompleto:true}).obra.estado,"OK");
+ // Una obra a una mala lectura de alguna de las lecturas (aquí, cifras intercambiadas) también lo impide.
+ assert.notEqual(validarCodigos(lee2("PRY90121","PRY90127"),{catalogoObras:[cat[0],{codigo:"PRY90172",nombre:"OTRA"}],catalogoObrasCompleto:true}).obra.estado,"OK");
+ // Sin otra obra posible, se acepta la que existe.
+ const r=validarCodigos(lee2("PRY90121","PRY90127"),{catalogoObras:[cat[0]],catalogoObrasCompleto:true}).obra;
+ assert.equal(r.estado,"OK");assert.equal(r.valor,"PRY90121");
+});
+test("prueba de fuerza: la coherencia del lote no extiende un código si otra obra confundible coincide igual con el nombre",()=>{
+ const cat=[{codigo:"PRY90124",nombre:"HOSPITAL FICTICIO GERENCIA"},{codigo:"PRY90127",nombre:"HOSPITAL FICTICIO CARDIOLOGIA"}];
+ const doc=(cod,escrita,validado)=>({obraImpresa:[],obraEscrita:escrita,obra:validado?
+  {valor:cod,estado:"OK",confianza:0.95,resolucion:{metodo:"vision_recorte_validada",evidencias:["Visión","Obra del catálogo"]}}:
+  {valor:cod,estado:"REVISAR",confianza:0.8,resolucion:{evidencias:[]}}});
+ const a=doc("PRY90124",["Hospital ficticio gerencia"],true),b=doc("PRY90124",["Hospital ficticio"]);
+ assert.equal(coherenciaLote([a,b],{catalogoObras:cat}),0);assert.equal(b.obra.estado,"REVISAR");
+ // Sin obra confundible en el catálogo, la regla de siempre.
+ const c=doc("PRY90124",["Hospital ficticio gerencia"],true),d=doc("PRY90124",["Hospital ficticio"]);
+ assert.equal(coherenciaLote([c,d],{catalogoObras:[cat[0]]}),1);assert.equal(d.obra.estado,"OK");
 });

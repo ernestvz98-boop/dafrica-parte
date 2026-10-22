@@ -56,6 +56,11 @@ Edge). El repositorio es **público**.
 - Un catálogo de obras incompleto (`lector_obras`) solo valida un código con el nombre de la obra;
   «solo una de las lecturas existe en el catálogo» y «lectura a una cifra de la única obra con ese
   nombre» exigen el catálogo completo (STEL o lista marcada como completa en `lector_ajustes`).
+- El nombre de la obra solo es prueba si ninguna obra de código confundible (una cifra distinta o
+  dos contiguas intercambiadas) coincide con el albarán igual o más («HOSPITAL», «CENTRO» son de
+  varias obras); «solo una de las lecturas existe» exige que, con cualquier cifra en la posición
+  dudosa, no exista otra obra. Todo cambio en estas reglas pasa `node pruebas/prueba-fuerza-obras.js`
+  con el catálogo real (`pruebas/corpus-real/obras.tsv`): 0 lecturas falsas aceptadas.
 
 ## Proceso ante cada fallo real
 

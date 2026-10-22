@@ -205,6 +205,15 @@ haber verificado el catálogo real ni haber conseguido lectura perfecta del manu
 - `pruebas/lector.test.js` (separación, PDF de 120 páginas, errores, cancelación, mixtos),
   `pruebas/manuscritos.test.js` y `pruebas/proveedor.test.js` usan datos ficticios.
 
+## Prueba de fuerza de los códigos de obra
+
+`node pruebas/prueba-fuerza-obras.js [obras.tsv]` ataca las reglas de aceptación de los códigos de
+obra manuscritos con lecturas de visión FALSAS realistas (una cifra mal leída, dos contiguas
+intercambiadas, dos lecturas sin la buena, coherencia del lote) para cada obra del catálogo con su
+nombre en el albarán, y cuenta las aceptadas (error crítico; debe ser 0). Con el catálogo real
+(`pruebas/corpus-real/obras.tsv`, «código<TAB>nombre», fuera de git) o, sin él, con el catálogo
+ficticio denso que usa `pruebas/prueba-fuerza-obras.test.js` en `npm test`.
+
 ## Lectura de la web (con visión y catálogo)
 
 La visión de recortes y el catálogo STEL de solo lectura exigen la sesión de un usuario con

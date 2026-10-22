@@ -216,7 +216,7 @@ function montar(root){
    }
    // Coherencia de los códigos de obra entre todos los PDF leídos juntos.
    const man=resultado.documentos.map(d=>d.resultado?.manuscritos).filter(Boolean);
-   if(man.length&&lib.manuscritos)lib.manuscritos.coherenciaLote(man);
+   if(man.length&&lib.manuscritos)lib.manuscritos.coherenciaLote(man,{catalogoObras});
    // Códigos confirmados por una persona y tarifas importadas: solo los que hacen falta.
    let confirmadas=null;
    if(typeof sb==="function"&&lib.confirmadas){

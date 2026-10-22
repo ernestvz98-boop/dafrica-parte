@@ -161,7 +161,7 @@ async function leerPdf(fuente,opciones={}){
  await cerrar();
  // Anotaciones manuscritas: la coherencia del lote se aplica con todos los albaranes leídos.
  const conObra=documentos.filter(d=>d.resultado?.manuscritos);
- if(conObra.length)M("manuscritos").coherenciaLote(conObra.map(d=>d.resultado.manuscritos));
+ if(conObra.length)M("manuscritos").coherenciaLote(conObra.map(d=>d.resultado.manuscritos),{catalogoObras:opciones.catalogoObras||null});
  // Cada página del PDF está en exactamente un documento (o queda sin procesar si se canceló).
  const vistas=documentos.flatMap(d=>d.paginas);
  const resumen={

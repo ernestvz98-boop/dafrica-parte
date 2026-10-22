@@ -3,7 +3,7 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
-## 2026-10-22 · Visión de los manuscritos con gpt-5.1 (lector24)
+## 2026-10-22 · Visión de los manuscritos con gpt-5.1 y prueba de fuerza del catálogo de obras (lector24)
 
 **Producción:** web en `main` (versión `20261022lector24`). Sin cambios en funciones ni datos: la
 función `albaranes-manuscritos` ya admitía `gpt-5.1` en su lista cerrada de modelos.
@@ -12,13 +12,50 @@ función `albaranes-manuscritos` ya admitía `gpt-5.1` en su lista cerrada de mo
   PDF, misma validación): gpt-5.1 32 aceptados y correctos frente a 29 de gpt-4o, **0 erróneos en
   ambos**, y menor coste (unos 0,16 $ por los recortes de los 3 PDF).
 - Solo los recortes de manuscritos (`modo: "manuscrito"`) piden `gpt-5.1`; las casillas impresas
-  dudosas siguen con el modelo por defecto de la función hasta medirlo también. La validación no
-  cambia: lo que lee la visión se acepta solo con evidencia (formato, catálogo, STEL, lote, QR).
+  dudosas siguen con el modelo por defecto de la función hasta medirlo también.
 - El JSON guarda el consumo por uso (`motores.vision.por_modo`: modelo, consultas y tokens) y la
   pantalla muestra el modelo de cada uso. `pruebas/comparar-vision.js` compara el principal solo con
   sus consultas de manuscritos. La casilla de prueba compara ahora gpt-4o, gpt-4.1, gpt-5 y o4-mini.
-- Sin cambios en la biblioteca del lector (`albaranes/`): el corpus sin visión no cambia.
-- Verificado: `npm test` 264/264.
+- **Prueba de fuerza** (pedida por el usuario): lecturas de visión FALSAS realistas (una cifra mal
+  leída o dos contiguas intercambiadas, con confianza 0,99) contra las reglas de aceptación.
+  - Sobre los 30 albaranes reales de la sesión 9 (catálogo de 103 obras, albaranes de STEL
+    guardados): 2.514 lecturas falsas de obra y 3.528 de ABP, **0 aceptadas**.
+  - Con TODO el catálogo real (cada obra con su nombre en el albarán): encontró cuatro vías de
+    error crítico latente, que no aparecen en los 3 PDF.
+    - Palabra común a varias obras («HOSPITAL», «CENTRO», «CLIMATIZACIÓN»…) validaba otra obra que
+      existe a una cifra: 326 casos.
+    - «De dos lecturas, solo esta existe» cuando la cifra buena no estaba entre las lecturas: 11.246
+      de 11.246.
+    - Coherencia del lote con la misma palabra común: 7.284.
+    - Nombre + lectura a una cifra (regla b): 32.
+  - Corrección (`albaranes/manuscritos.js`):
+    - El nombre solo es prueba si ninguna obra confundible (una cifra o dos contiguas
+      intercambiadas) coincide con el albarán igual o más (`rivalPorNombre`).
+    - La regla b exige que el nombre señale UNA obra, la de más palabras en común y sin empate, y
+      que sea la única candidata cercana a lo leído; ahora también corrige dos cifras intercambiadas.
+    - «Solo esta existe» exige que, con cualquier cifra en la posición dudosa, no exista otra obra,
+      ni otra a una mala lectura de las lecturas.
+    - La coherencia del lote aplica la misma comprobación con el catálogo.
+  - Tras la corrección: **0 falsas aceptadas** en 55.000+ ataques. Con la lectura buena se aceptan
+    660 de 778 casos: el resto queda en revisión cuando el nombre no distingue entre dos obras de
+    código confundible, lo correcto según las reglas.
+- Proyección con las lecturas reales de gpt-5.1 de la sesión 9 y las reglas de lector24 (la
+  corrección no cambia nada en los 3 PDF): **546/605 (90,2 %)**, frente a 544/605 (89,9 %) con
+  gpt-4o; 0 críticos. Aun con una visión perfecta, 6 obras y 9 ABP no tienen evidencia
+  independiente (sin nombre de obra en el papel ni albarán de compra en STEL por número): el 95 %
+  depende sobre todo de referencias y descripciones de artículos (tarifas o confirmaciones).
+- Pruebas:
+  - 4 de regresión nuevas en `manuscritos.test.js`, que fallan con la regla anterior.
+  - La prueba de fuerza queda permanente: `pruebas/prueba-fuerza-obras.js`, con el catálogo real
+    fuera de git, y en `npm test` con un catálogo ficticio denso. Con las reglas anteriores daba 696,
+    4.862, 6.426 y 84 lecturas falsas aceptadas; ahora 0.
+  - Los códigos de obra de las pruebas que coincidían con números reales pasan a `PRY90xxx`.
+- Verificado:
+  - `npm test` 268/268.
+  - Corpus sin visión igual que antes (nativo 91,0 %, público 90,6 %, sintético 93,3 %; 0 críticos,
+    0 AUTO_OK con error).
+  - Chromium (3 PDF, servicios simulados): manuscritos con gpt-5.1 (30 consultas) y casillas
+    impresas con el modelo por defecto (16); 28 ABP correctos y 0 erróneos; 0 errores JS.
 
 ## 2026-10-22 · Lectura real de los 3 PDF con lector22 y corrección del cupo de STEL (lector23)
 

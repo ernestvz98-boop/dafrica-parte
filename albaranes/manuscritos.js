@@ -194,10 +194,18 @@ function validarCodigos(lecturas,ctx={}){
   // Existir en el catálogo de obras solo decide entre VARIAS lecturas de la visión (1/7): los
   // códigos PRY son correlativos y una cifra mal leída suele dar otro código que también existe.
   // Solo con el catálogo COMPLETO (el de STEL): en una lista parcial la lectura correcta puede faltar.
+  // Y solo si, con cualquier cifra en las posiciones en que las lecturas discrepan, esta es la única
+  // obra que existe: la cifra buena puede no estar entre las lecturas (prueba de fuerza 2026-10-22:
+  // «1 o 7» sobre un código que lleva otra cifra elegía la obra que existía).
   if(campo==="obra"&&lista.length>1&&ctx.catalogoObrasCompleto!==false){
    const enCatalogo=lista.filter(x=>(ctx.catalogoObras||[]).filter(o=>canon(o.codigo)===x.codigo).length===1);
-   if(enCatalogo.length===1&&!enCatalogo[0].evidencias.length)
-    enCatalogo[0].evidencias.push("De las lecturas "+lista.map(x=>x.codigo).join(" / ")+", solo esta existe en el catálogo de obras: «"+
+   // Tampoco si otra obra que no está entre las lecturas está a una mala lectura de alguna de ellas.
+   const leidas=new Set(lista.map(y=>y.codigo));
+   const unica=x=>{const dudosas=[...x.codigo].map((c,i)=>lista.some(y=>y.codigo[i]!==c)?i:-1).filter(i=>i>=0);
+    return !(ctx.catalogoObras||[]).some(o=>{const c=canon(o.codigo);if(leidas.has(c))return false;
+     return (c.length===x.codigo.length&&[...c].every((ch,i)=>ch===x.codigo[i]||dudosas.includes(i)))||lista.some(y=>confundibles(c,y.codigo));});};
+   if(enCatalogo.length===1&&!enCatalogo[0].evidencias.length&&unica(enCatalogo[0]))
+    enCatalogo[0].evidencias.push("De las lecturas "+lista.map(x=>x.codigo).join(" / ")+", solo esta existe en el catálogo de obras, con cualquier cifra en la dudosa: «"+
      (ctx.catalogoObras.find(o=>canon(o.codigo)===enCatalogo[0].codigo).nombre)+"»");
   }
   const validadas=lista.filter(x=>x.evidencias.length);
@@ -244,6 +252,25 @@ function codigosLeidos(lecturas){
  return [...out];
 }
 const cifrasDistintas=(a,b)=>{let n=0;for(let i=0;i<Math.max(a.length,b.length);i++)if(a[i]!==b[i])n++;return n;};
+// Dos códigos que una mala lectura confunde: una cifra distinta o dos cifras contiguas intercambiadas.
+function confundibles(a,b){
+ if(a===b||a.length!==b.length)return false;
+ const d=[];for(let i=0;i<a.length;i++)if(a[i]!==b[i])d.push(i);
+ return d.length===1||(d.length===2&&d[1]===d[0]+1&&a[d[0]]===b[d[1]]&&a[d[1]]===b[d[0]]);
+}
+// Palabras del nombre de una obra que también están en el albarán.
+const enComun=(nombre,palabras)=>[...palabrasObra(nombre)].filter(p=>palabras.has(p));
+/*
+ * Otra obra del catálogo que una mala lectura confunde con «codigo» y cuyo nombre coincide con el
+ * albarán tanto o más que el de «codigo»: entonces el nombre no decide entre las dos. Prueba de
+ * fuerza (2026-10-22) con el catálogo real: una cifra mal leída daba otra obra que también
+ * comparte «HOSPITAL», «CENTRO», «CLIMATIZACIÓN»… con el albarán, y se aceptaba.
+ */
+function rivalPorNombre(codigo,palabras,catalogo){
+ const propias=(catalogo||[]).filter(o=>canon(o.codigo)===codigo).map(o=>enComun(o.nombre,palabras).length);
+ const n=propias.length?Math.max(...propias):0;
+ return (catalogo||[]).find(o=>{if(!confundibles(canon(o.codigo),codigo))return false;const k=enComun(o.nombre,palabras).length;return k>0&&k>=n;})||null;
+}
 function obraPorNombre(lecturas,ctx={}){
  const cat=(ctx.catalogoObras||[]).filter(e=>FORMATOS.obra.test(canon(e.codigo)));
  if(!cat.length)return null;
@@ -267,14 +294,20 @@ function obraPorNombre(lecturas,ctx={}){
   if(!leidos.some(r=>cifrasDistintas(r,c)<=1))return null;
   return acepta(m[0],["Número de obra impreso «"+t+"» y obra «"+m[0].nombre+"» del catálogo con «"+comunes(m[0])+"» en el albarán"],"obra_impresa_catalogo");
  }
- // b) Lectura a una cifra del código de la única obra con ese nombre (catálogo completo).
+ // b) Lectura a una cifra (o con dos cifras contiguas intercambiadas) del código de la obra que el
+ // nombre señala (catálogo completo). El nombre debe señalar UNA obra, la que más palabras comparte
+ // con el albarán y sin empate: una palabra común a varias obras («HOSPITAL») no identifica ninguna.
  if(ctx.catalogoObrasCompleto!==true||!leidos.length)return null;
- const m=conNombre.filter(e=>{const c=canon(e.codigo);return !leidos.includes(c)&&leidos.some(r=>cifrasDistintas(r,c)===1);});
- if(m.length!==1)return null;
+ const puntos=e=>enComun(e.nombre,palabras).length,mejor=Math.max(...conNombre.map(puntos));
+ const mejores=conNombre.filter(e=>puntos(e)===mejor);
+ if(mejores.length!==1)return null;
+ const m=conNombre.filter(e=>{const c=canon(e.codigo);return !leidos.includes(c)&&leidos.some(r=>confundibles(r,c));});
+ if(m.length!==1||m[0]!==mejores[0])return null;
  // Si alguna lectura es exactamente otra obra con el mismo nombre, hay dos interpretaciones.
  if(leidos.some(r=>conNombre.some(e=>canon(e.codigo)===r)))return null;
- const r=leidos.find(x=>cifrasDistintas(x,canon(m[0].codigo))===1);
- return acepta(m[0],["La lectura «"+r+"» difiere en una cifra de la única obra del catálogo completo con «"+comunes(m[0])+"»: «"+m[0].nombre+"»"],"obra_nombre_catalogo");
+ const r=leidos.find(x=>confundibles(x,canon(m[0].codigo)));
+ return acepta(m[0],["La lectura «"+r+"» difiere en una cifra (o en dos contiguas intercambiadas) de la obra del catálogo completo que mejor coincide con el albarán («"+
+  comunes(m[0])+"»): «"+m[0].nombre+"»"],"obra_nombre_catalogo");
 }
 const vacio=motivos=>({valor:null,literal:"",estado:"VACIO",confianza:null,motivos});
 
@@ -290,8 +323,10 @@ function evidencias(campo,codigo,ctx){
   const cat=(ctx.catalogoObras||[]).filter(o=>canon(o.codigo)===codigo);
   if(cat.length===1){
    const delAlbaran=new Set([...[].concat(ctx.obraImpresa||[]),...[].concat(ctx.obraEscrita||[])].flatMap(t=>[...palabrasObra(t)]));
-   const comunes=[...palabrasObra(cat[0].nombre)].filter(p=>delAlbaran.has(p));
-   if(comunes.length)ev.push("Obra «"+cat[0].nombre+"» del catálogo de obras, con «"+comunes.join(", ")+"» también en el albarán");
+   const comunes=enComun(cat[0].nombre,delAlbaran);
+   // Solo si ninguna obra que una mala lectura confunde con esta coincide igual o más con el albarán.
+   if(comunes.length&&!rivalPorNombre(codigo,delAlbaran,ctx.catalogoObras))
+    ev.push("Obra «"+cat[0].nombre+"» del catálogo de obras, con «"+comunes.join(", ")+"» también en el albarán");
   }
  }else{
   const alb=typeof ctx.albaranStel==="function"?ctx.albaranStel(formatoStel(codigo)):null;
@@ -326,10 +361,12 @@ const palabrasDoc=d=>new Set([...[].concat(d.obraImpresa||[]),...[].concat(d.obr
  * Dos lecturas de visión que coinciden NO bastan: es el mismo motor sobre la letra del mismo autor
  * y se equivoca igual (fallo real: un código de obra «…88» leído «…38» en dos albaranes, 2026-10-21).
  * Si el lote se contradice, no se acepta nada por esta vía.
+ * Con el catálogo de obras, tampoco si otra obra que una mala lectura confunde con ese código
+ * coincide con el nombre del albarán tanto o más (rivalPorNombre).
  * docs: [{obraImpresa:[…], obraEscrita:[…], obra:{valor, estado, …}}] (se modifican).
  */
 const VALIDADA_INDEPENDIENTE=new Set(["vision_recorte_validada","etiqueta_qr","obra_impresa_catalogo","obra_nombre_catalogo"]);
-function coherenciaLote(docs){
+function coherenciaLote(docs,{catalogoObras=null}={}){
  const leidos=docs.filter(d=>d.obra?.valor&&["OK","REVISAR"].includes(d.obra.estado));
  let cambios=0;
  for(const d of leidos){
@@ -340,7 +377,7 @@ function coherenciaLote(docs){
   const iguales=afines.filter(o=>o.obra.valor===d.obra.valor);
   const distintos=afines.filter(o=>o.obra.valor!==d.obra.valor);
   const anclas=iguales.filter(o=>o.obra.estado==="OK"&&VALIDADA_INDEPENDIENTE.has(o.obra.resolucion?.metodo));
-  if(anclas.length&&!distintos.length){
+  if(anclas.length&&!distintos.length&&!rivalPorNombre(canon(d.obra.valor),mias,catalogoObras)){
    const comunes=[...new Set(iguales.flatMap(o=>[...palabrasDoc(o)].filter(p=>mias.has(p))))];
    d.obra={...d.obra,estado:"OK",confianza:0.93,motivos:[],
     resolucion:{...d.obra.resolucion,metodo:"vision_recorte_coherencia_lote",
