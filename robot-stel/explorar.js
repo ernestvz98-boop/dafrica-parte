@@ -29,7 +29,10 @@ async function explorar(salida){
  const informe={inicio:new Date().toISOString(),entrada:null,url_final:null,leidas:{},canceladas:{},fallidas:{},capturas:[],menu:[]};
  let fase="entrada";
  try{
-  const contexto=await navegador.newContext();
+  // Sesión recordada («Recordar este dispositivo»): cookies guardadas en un fichero FUERA del
+  // repositorio (STEL_WEB_ESTADO), para no pedir otro código en cada ejecución.
+  const estado=process.env.STEL_WEB_ESTADO||"";
+  const contexto=await navegador.newContext(estado&&fs.existsSync(estado)?{storageState:estado}:{});
   await contexto.route("**/*",ruta=>{
    const r=ruta.request(),cuerpo=r.postData()||"",op=operacion(cuerpo);
    // Solo el nombre de la operación, nunca el resto del cuerpo (puede llevar datos o credenciales).
@@ -46,13 +49,16 @@ async function explorar(salida){
   await p.goto(INICIO,{waitUntil:"domcontentloaded",timeout:60000});
   await p.waitForSelector('input[type="password"]',{timeout:60000}).catch(()=>{});
   await captura("1-entrada");
-  if(!(await p.locator('input[type="password"]').count())){informe.entrada="sin_formulario_de_entrada";return informe;}
+  const yaDentro=!(await p.locator('input[type="password"]').count());
+  if(yaDentro&&!estado){informe.entrada="sin_formulario_de_entrada";return informe;}
+  if(!yaDentro){
   // Entrada: primer campo de usuario visible y el de contraseña; Intro (sin pulsar otros botones).
   const campoUsuario=p.locator('input[type="email"],input[name*="user" i],input[name*="email" i],input[id*="user" i],input[id*="email" i],input[type="text"]').first();
   const campoClave=p.locator('input[type="password"]').first();
   await campoUsuario.fill(usuario);await campoClave.fill(clave);
   await campoClave.press("Enter");
   await p.waitForTimeout(15000);
+  }
   // Doble factor: STEL envía un código por correo. Se lee de STEL_WEB_CODIGO_FICHERO (lo escribe
   // quien recibe el correo) y se espera hasta 14 minutos a que cambie si STEL rechaza el anterior.
   const fichero=process.env.STEL_WEB_CODIGO_FICHERO||"";
@@ -70,6 +76,14 @@ async function explorar(salida){
    }
   }
   fase="lectura";
+  // Esperar a que la aplicación termine de cargar (deja de decir «Logging in» y no pide claves).
+  for(let i=0;i<30;i++){
+   const texto=await p.locator("body").innerText().catch(()=>"");
+   if(!/Logging in|Iniciando sesi/i.test(texto)&&!(await p.locator('input[type="password"]').count()))break;
+   await p.waitForTimeout(3000);
+  }
+  await p.waitForTimeout(20000);
+  if(estado)await contexto.storageState({path:estado});
   informe.entrada=(await p.locator('input[type="password"]').count())===0?"aparentemente_correcta":"sigue_pidiendo_contrasena";
   informe.url_final=rutaSinDatos(p.url());
   await captura("2-tras-entrar");
