@@ -217,7 +217,64 @@ function validarCodigos(lecturas,ctx={}){
    salida[campo]={valor:null,literal,estado:"AMBIGUO",confianza:0,motivos:["Interpretaciones plausibles sin validar: "+alternativas.join(" / ")],resolucion:{alternativas}};
   }
  }
+ // Obra por nombre + segunda prueba (número impreso o lectura a una cifra), si no quedó validada.
+ const o=salida.obra;
+ if(o&&o.estado!=="OK"&&!(o.motivos||[]).some(m=>/^(Varias interpretaciones validadas|Solo hay anotaciones tachadas)/.test(m))){
+  const r=obraPorNombre(lecturas,ctx);
+  if(r)salida.obra={...r,literal:o.literal||r.literal||""};
+ }
  return salida;
+}
+/*
+ * Obra identificada por su NOMBRE (impreso, escrito o del título del albarán de compra de STEL) en
+ * el catálogo de obras, más una segunda prueba independiente:
+ *  a) el número de obra impreso junto al nombre («OBRA … 12345») es el de esa obra del catálogo y
+ *     lo escrito a mano coincide o difiere en una cifra;
+ *  b) solo con el catálogo COMPLETO: una lectura de la visión difiere en UNA cifra del código de la
+ *     única obra del catálogo con ese nombre (fallo real: la visión lee una cifra mal, p. ej. 8 → 3).
+ * Si la letra a mano dice claramente otro código (más de una cifra distinta) o hay dos obras
+ * posibles, no se resuelve.
+ */
+function codigosLeidos(lecturas){
+ const out=new Set();
+ for(const v of (lecturas||[]).filter(l=>l.tipo==="PRY"&&!l.tachado))for(const l of v.lecturas||[]){
+  let c=canon(l.codigo);const parcial=c.match(/^(?:P?R?Y)(\d{5})$/);if(parcial)c="PRY"+parcial[1];
+  if(FORMATOS.obra.test(c))out.add(c);
+ }
+ return [...out];
+}
+const cifrasDistintas=(a,b)=>{let n=0;for(let i=0;i<Math.max(a.length,b.length);i++)if(a[i]!==b[i])n++;return n;};
+function obraPorNombre(lecturas,ctx={}){
+ const cat=(ctx.catalogoObras||[]).filter(e=>FORMATOS.obra.test(canon(e.codigo)));
+ if(!cat.length)return null;
+ const fuentes=[...[].concat(ctx.obraImpresa||[]),...[].concat(ctx.obraEscrita||[])];
+ const palabras=new Set(fuentes.flatMap(t=>[...palabrasObra(t)]));
+ if(!palabras.size)return null;
+ const conNombre=cat.filter(e=>[...palabrasObra(e.nombre)].some(w=>palabras.has(w)));
+ if(!conNombre.length)return null;
+ const leidos=codigosLeidos(lecturas);
+ const comunes=e=>[...palabrasObra(e.nombre)].filter(w=>palabras.has(w)).join(", ");
+ const acepta=(e,ev,metodo)=>({valor:canon(e.codigo),literal:"",estado:"OK",confianza:0.93,motivos:[],
+  resolucion:{metodo,evidencias:[...(leidos.length?["Visión: "+leidos.join(" / ")]:[]),...ev],alternativas:leidos}});
+ // a) Número de obra impreso junto al nombre.
+ for(const t of [].concat(ctx.obraImpresa||[])){
+  const num=cifrasObra(t);if(!num)continue;
+  const m=conNombre.filter(e=>canon(e.codigo).slice(3)===num);
+  if(m.length!==1)continue;
+  const c=canon(m[0].codigo);
+  // Además, un código escrito a mano compatible (como mucho una cifra distinta): sin él no se sabe
+  // si el albarán es de esa obra o solo la menciona (caso real: obra impresa sin código a mano).
+  if(!leidos.some(r=>cifrasDistintas(r,c)<=1))return null;
+  return acepta(m[0],["Número de obra impreso «"+t+"» y obra «"+m[0].nombre+"» del catálogo con «"+comunes(m[0])+"» en el albarán"],"obra_impresa_catalogo");
+ }
+ // b) Lectura a una cifra del código de la única obra con ese nombre (catálogo completo).
+ if(ctx.catalogoObrasCompleto!==true||!leidos.length)return null;
+ const m=conNombre.filter(e=>{const c=canon(e.codigo);return !leidos.includes(c)&&leidos.some(r=>cifrasDistintas(r,c)===1);});
+ if(m.length!==1)return null;
+ // Si alguna lectura es exactamente otra obra con el mismo nombre, hay dos interpretaciones.
+ if(leidos.some(r=>conNombre.some(e=>canon(e.codigo)===r)))return null;
+ const r=leidos.find(x=>cifrasDistintas(x,canon(m[0].codigo))===1);
+ return acepta(m[0],["La lectura «"+r+"» difiere en una cifra de la única obra del catálogo completo con «"+comunes(m[0])+"»: «"+m[0].nombre+"»"],"obra_nombre_catalogo");
 }
 const vacio=motivos=>({valor:null,literal:"",estado:"VACIO",confianza:null,motivos});
 
@@ -271,7 +328,7 @@ const palabrasDoc=d=>new Set([...[].concat(d.obraImpresa||[]),...[].concat(d.obr
  * Si el lote se contradice, no se acepta nada por esta vía.
  * docs: [{obraImpresa:[…], obraEscrita:[…], obra:{valor, estado, …}}] (se modifican).
  */
-const VALIDADA_INDEPENDIENTE=new Set(["vision_recorte_validada","etiqueta_qr"]);
+const VALIDADA_INDEPENDIENTE=new Set(["vision_recorte_validada","etiqueta_qr","obra_impresa_catalogo","obra_nombre_catalogo"]);
 function coherenciaLote(docs){
  const leidos=docs.filter(d=>d.obra?.valor&&["OK","REVISAR"].includes(d.obra.estado));
  let cambios=0;
@@ -461,7 +518,6 @@ function revalidarObra(r,{catalogoObras=null,catalogoObrasCompleto=false,obraSte
  const m=r?.manuscritos;
  if(!m||(m.obra?.estado==="OK")||!Array.isArray(m.recortes))return false;
  const lecturas=m.recortes.map(x=>x.lectura).filter(Boolean);
- if(!lecturas.some(l=>l.tipo==="PRY"))return false;
  const obraEscrita=[...(m.obraEscrita||[]),...(obraStel?[obraStel]:[])];
  const v=validarCodigos(lecturas,{catalogoObras,catalogoObrasCompleto,obraImpresa:m.obraImpresa||[],obraEscrita,
   proveedorId:r.proveedor?.id,numero:r.numero?.valor,fecha:r.fecha?.valor});
@@ -471,5 +527,5 @@ function revalidarObra(r,{catalogoObras=null,catalogoObrasCompleto=false,obraSte
  return true;
 }
 
-return {revalidarObra,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,fechaStel,FORMATOS};
+return {revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,fechaStel,FORMATOS};
 });

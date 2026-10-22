@@ -3,6 +3,26 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Obra por nombre + segunda prueba · lector21
+
+**Producción:** web en `main` (versión `20261022lector21`; copia previa en
+`respaldo/main-antes-lector21`). Base de datos: tabla `lector_ajustes` (migración
+`supabase/migraciones/20261022_lector_ajustes.sql`, RLS; reversión en el fichero).
+
+Causa principal de los fallos de obra en las lecturas reales: la visión lee el código con UNA cifra
+mal (p. ej. 8 → 3) y el nombre de la obra sí está en el albarán (impreso, escrito o en el título del
+albarán de compra de STEL). Nueva regla (`manuscritos.obraPorNombre`), solo con dos pruebas:
+- a) número de obra impreso junto al nombre = obra del catálogo con ese nombre, y lo escrito a mano
+  coincide o difiere en una cifra (sin código a mano no: caso real de una obra solo mencionada);
+- b) solo con el catálogo de obras COMPLETO: una única obra del catálogo con ese nombre a una cifra de
+  lo leído. Dos obras posibles, o una lectura que es exactamente otra obra con ese nombre: revisión.
+- Lista completa: casilla «Es el listado completo de proyectos de STEL» al importar (guarda el número
+  de obras en `lector_ajustes`); el lector la usa como completa si tiene al menos esas obras.
+- Medido offline sobre las dos últimas lecturas reales (lista real de 61 obras + las 2 obras de las
+  pruebas con nombre supuesto): lista incompleta +3 y +9 obras, completa +8 y +11, **todas
+  correctas, 0 erróneas**. Última lectura: 92,5 % → ~94,6 % solo por obra.
+- Pruebas nuevas en `manuscritos.test.js`. 246 pruebas; corpus 91,0 % / 90,6 %, 0 críticos; Chromium sin errores.
+
 ## 2026-10-22 · Lista de obras cargada (61 obras) · lector20
 
 **Producción:** web en `main` (versión `20261022lector20`, solo un texto de evidencia). Datos:

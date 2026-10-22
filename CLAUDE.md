@@ -50,7 +50,8 @@ Edge). El repositorio es **público**.
   texto pegado, la descripción no se confirma por esa vía.
 - Un código manuscrito (obra o STEL) leído pero sin validar impide AUTO_OK.
 - Un catálogo de obras incompleto (`lector_obras`) solo valida un código con el nombre de la obra;
-  «solo una de las lecturas existe en el catálogo» exige el catálogo completo de STEL.
+  «solo una de las lecturas existe en el catálogo» y «lectura a una cifra de la única obra con ese
+  nombre» exigen el catálogo completo (STEL o lista marcada como completa en `lector_ajustes`).
 
 ## Proceso ante cada fallo real
 

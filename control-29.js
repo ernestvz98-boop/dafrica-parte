@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261022lector20";
+const VERSION_LECTOR="20261022lector21";
 // PRUEBA (no activa nada): modelos de visión que se comparan con el principal sobre los mismos
 // recortes de manuscritos, solo si se marca la casilla. El resultado no cambia.
 const MODELOS_COMPARAR=["gpt-4.1","gpt-5","gpt-5.1","o4-mini"];
@@ -107,6 +107,8 @@ function montar(root){
    // Obras del lector (código PRY y nombre, importadas o confirmadas por una persona): catálogo de
    // obras cuando STEL no da el suyo completo. Incompleto: solo valida con el nombre de la obra.
    const obrasLector=typeof sb==="function"?await sb("/rest/v1/lector_obras?select=codigo,nombre&limit=20000").catch(()=>null):null;
+   // Marcada como el listado COMPLETO de proyectos de STEL (y con al menos esas obras cargadas).
+   const ajusteObras=typeof sb==="function"?(await sb("/rest/v1/lector_ajustes?select=valor&clave=eq.obras_lista_completa").catch(()=>null))?.[0]?.valor:null;
    motores.confirmadas={cargadas:null,aplicadas:0};
    // Albaranes de compra de STEL (SOLO LECTURA) para validar los códigos ABP manuscritos.
    const stelAlb={consultas:0,validados:0,fallos:0};motores.stel_albaranes=stelAlb;
@@ -132,9 +134,11 @@ function montar(root){
    if(catalogo)Object.assign(motores.catalogo,{disponible:true,articulos:(catalogo.articulos||[]).length,completo:!!catalogo.articulos_completo,
     motivo:catalogo.diagnostico?.articulos?.motivo||null,paginas:catalogo.diagnostico?.articulos?.paginas??null,origen:catalogo.origen||null,
     obras:(catalogo.obras||[]).length,obras_completo:!!catalogo.obras_completo,obras_motivo:catalogo.diagnostico?.obras?.motivo||null});
-   const catalogoObrasCompleto=!!catalogo?.obras_completo;
-   const catalogoObras=catalogoObrasCompleto?catalogo.obras:(Array.isArray(obrasLector)&&obrasLector.length?obrasLector:null);
+   const listaCompleta=Array.isArray(obrasLector)&&Number.isInteger(ajusteObras?.total)&&ajusteObras.total>0&&obrasLector.length>=ajusteObras.total;
+   const catalogoObrasCompleto=!!catalogo?.obras_completo||listaCompleta;
+   const catalogoObras=catalogo?.obras_completo?catalogo.obras:(Array.isArray(obrasLector)&&obrasLector.length?obrasLector:null);
    motores.catalogo.obras_lector=Array.isArray(obrasLector)?obrasLector.length:null;
+   motores.catalogo.obras_lector_completa=listaCompleta;
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
@@ -354,7 +358,8 @@ function montar(root){
   return '<details style="margin-top:14px;border-top:1px solid #d6dee8;padding-top:8px"><summary style="cursor:pointer;font-weight:bold">Datos de referencia del lector</summary>'+
    '<p class="muted">Mejoran la validación automática. Solo se guardan códigos, nombres y descripciones; nunca precios.</p>'+
    '<h4>Lista de obras</h4><p class="muted">CSV o Excel con columnas «Código» (PRY00000) y «Nombre» (por ejemplo, la lista de proyectos exportada de STEL). Con ella, un código de obra escrito a mano se valida si existe y su nombre coincide con la obra del albarán o del albarán de compra de STEL.</p>'+
-   '<input type="file" id="lalObrasArchivo" accept=".csv,.txt,.xlsx,.xls"> <button type="button" class="btn secondary" id="lalObrasImportar">Importar obras</button> <span class="muted" id="lalObrasEstado"></span>'+
+   '<input type="file" id="lalObrasArchivo" accept=".csv,.txt,.xlsx,.xls"> <label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" id="lalObrasCompleta" style="width:auto"> Es el listado completo de proyectos de STEL</label> '+
+   '<button type="button" class="btn secondary" id="lalObrasImportar">Importar obras</button> <span class="muted" id="lalObrasEstado"></span>'+
    '<h4>Tarifa o catálogo de un proveedor</h4><p class="muted">CSV o Excel con columnas «Código»/«Referencia» y «Descripción». Un código leído se valida si existe una sola vez en la tarifa de ese proveedor y la descripción coincide.</p>'+
    '<select id="lalTarifaProv"><option value="">Proveedor…</option>'+provs.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.nombre)+'</option>').join("")+'</select> '+
    '<input type="file" id="lalTarifaArchivo" accept=".csv,.txt,.xlsx,.xls"> <button type="button" class="btn secondary" id="lalTarifaImportar">Importar tarifa</button> <span class="muted" id="lalTarifaEstado"></span>'+
@@ -372,6 +377,10 @@ function montar(root){
     if(r.error){est.textContent=r.error;return;}
     if(!r.filas.length){est.textContent="No hay ninguna obra con código PRY y 5 cifras.";return;}
     await insertar("lector_obras","codigo",r.filas.map(x=>({...x,origen:"lista"})),n=>{est.textContent="Guardando "+n+" de "+r.filas.length+"…";});
+    // Listado completo: el lector puede usar la lectura a una cifra con el nombre de la obra.
+    if($("lalObrasCompleta").checked)
+     await sb("/rest/v1/lector_ajustes?on_conflict=clave",{method:"POST",headers:{"Content-Type":"application/json",Prefer:"resolution=merge-duplicates,return=minimal"},
+      body:JSON.stringify({clave:"obras_lista_completa",valor:{total:r.filas.length,fecha:new Date().toISOString().slice(0,10)}})});
     est.textContent="✓ "+r.filas.length+" obras importadas"+(r.repetidas?" · "+r.repetidas+" códigos con dos nombres distintos no importados":"")+(r.descartadas?" · "+r.descartadas+" filas sin código PRY válido":"")+".";
    }catch(e){est.textContent="No se ha podido importar: "+(e?.message||e);}
   };

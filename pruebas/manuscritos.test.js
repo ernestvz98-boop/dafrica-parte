@@ -237,3 +237,32 @@ test("catálogo de obras incompleto: «solo una de las lecturas existe» no deci
  const cat=[{codigo:"PRY12845",nombre:"PISCINA FICTICIA"}];
  assert.notEqual(validarCodigos(lect,{catalogoObras:cat,catalogoObrasCompleto:false}).obra.estado,"OK");
 });
+
+test("obra por nombre: número de obra impreso + nombre en el catálogo + lectura a mano a una cifra",()=>{
+ const {validarCodigos}=require("../albaranes/manuscritos.js");
+ const cat=[{codigo:"PRY26111",nombre:"PISCINAS FICTICIAS"},{codigo:"PRY26112",nombre:"OTRA OBRA"}];
+ const casi=[{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY 26171",lecturas:[{codigo:"PRY26171",confianza:0.9}]}];
+ const r=validarCodigos(casi,{catalogoObras:cat,catalogoObrasCompleto:false,obraImpresa:["PISCINAS FICTICIAS 26111"]});
+ assert.equal(r.obra.valor,"PRY26111");assert.equal(r.obra.estado,"OK");assert.equal(r.obra.resolucion.metodo,"obra_impresa_catalogo");
+ // Sin código a mano: la obra puede estar solo mencionada (caso real); no se acepta.
+ assert.notEqual(validarCodigos([],{catalogoObras:cat,obraImpresa:["PISCINAS FICTICIAS 26111"]}).obra.estado,"OK");
+ // La letra a mano dice claramente otra cosa (más de una cifra distinta): no.
+ const v=[{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY 99999",lecturas:[{codigo:"PRY99999",confianza:0.95}]}];
+ assert.notEqual(validarCodigos(v,{catalogoObras:cat,obraImpresa:["PISCINAS FICTICIAS 26111"]}).obra.estado,"OK");
+});
+test("obra por nombre: lectura a una cifra solo con el catálogo completo y una sola obra con ese nombre",()=>{
+ const {validarCodigos}=require("../albaranes/manuscritos.js");
+ const v=[{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY 00038",lecturas:[{codigo:"PRY00038",confianza:0.95}]}];
+ const cat=[{codigo:"PRY00088",nombre:"ALAMEDA FICTICIA DEL VALLE"},{codigo:"PRY00038",nombre:"GIRASOL FICTICIO"},{codigo:"PRY00012",nombre:"OTRA ALAMEDA FICTICIA"}];
+ const ctx={catalogoObras:cat,obraEscrita:["ALAMEDA DEL VALLE"]};
+ // Catálogo incompleto: no.
+ assert.notEqual(validarCodigos(v,{...ctx,catalogoObrasCompleto:false}).obra.estado,"OK");
+ // Completo: la única obra con «ALAMEDA» a una cifra de lo leído (00012 está a más de una).
+ const r=validarCodigos(v,{...ctx,catalogoObrasCompleto:true}).obra;
+ assert.equal(r.valor,"PRY00088");assert.equal(r.estado,"OK");assert.equal(r.resolucion.metodo,"obra_nombre_catalogo");
+ // Dos obras con ese nombre a una cifra: no se elige.
+ const dos=[...cat,{codigo:"PRY00058",nombre:"ALAMEDA FICTICIA NORTE"}];
+ assert.notEqual(validarCodigos(v,{...ctx,catalogoObras:dos,catalogoObrasCompleto:true}).obra.estado,"OK");
+ // Sin nombre de obra en el albarán: no.
+ assert.notEqual(validarCodigos(v,{catalogoObras:cat,catalogoObrasCompleto:true}).obra.estado,"OK");
+});
