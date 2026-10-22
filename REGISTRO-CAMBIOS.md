@@ -18,6 +18,9 @@ ven). Reversión: `delete from public.lector_obras where origen = 'lista';`.
   los 4 correctos, 0 erróneos.
 - Evidencia: «del catálogo de obras del lector» cuando la obra viene de `lector_obras` (antes decía
   «de STEL»).
+- Función Edge `stel-albaranes-consulta` v6 (solo lectura): el final de cada lista se acota a una
+  página en vez de al albarán exacto (unas 7 consultas menos a STEL por proveedor grande, para no
+  agotar su cupo). Mismas pruebas de regresión.
 
 ## 2026-10-22 · Lectura real con lector18: dos correcciones (lector19)
 

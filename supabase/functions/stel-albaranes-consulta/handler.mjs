@@ -14,6 +14,7 @@
  * 2026-10-21: v4 (modo buscar). Versiones anteriores: solo fullReference.
  * 2026-10-22: v5. Con el filtro, cada proveedor se lee desde el final de su lista (fallo real: un
  *   proveedor con más de 2.000 albaranes agotaba el límite de páginas leyendo desde el principio).
+ *   v6: el final se acota a una página (no al albarán exacto): unas 7 consultas menos por lista.
  */
 const cors={"Access-Control-Allow-Origin":"https://ernestvz98-boop.github.io","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...cors,"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}});
@@ -76,12 +77,14 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
    if(Number.isInteger(pista)&&pista>0&&pista-1>lo&&await hay(pista-1)){lo=pista-1;let paso=50;hi=lo+paso;
     while(await hay(hi)){lo=hi;paso*=2;hi=lo+paso;if(paso>1e6)break;}}
    else{hi=Math.max(1000,2*(lo+1));while(await hay(hi)){lo=hi;hi*=2;if(hi>2e6)break;}}
-   while(hi-lo>1){const m=Math.floor((lo+hi)/2);if(await hay(m))lo=m;else hi=m;}
-   const total=lo+1,filas=[];
-   for(let inicio=Math.max(0,total-tam);;inicio=Math.max(0,inicio-tam)){
+   // Basta acotar el final a menos de una página: la primera página leída (desde `lo`) lo contiene.
+   while(hi-lo>tam){const m=Math.floor((lo+hi)/2);if(await hay(m))lo=m;else hi=m;}
+   const filas=[];let total=null;
+   for(let inicio=Math.max(0,lo);;inicio=Math.max(0,inicio-tam)){
     if(paginas>=maxPaginas)throw Error("limite_paginas");
     const f=await get({...filtro,limit:tam,start:inicio});paginas++;
     if(!f.every(valida))throw Error("filtro_inconsistente");
+    if(total===null)total=inicio+f.length;
     filas.push(...f);
     if(inicio===0||!f.some(x=>dia(x["creation-date"]||x.date)>=limite))break;
    }
