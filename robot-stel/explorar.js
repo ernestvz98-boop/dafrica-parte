@@ -53,6 +53,22 @@ async function explorar(salida){
   await campoUsuario.fill(usuario);await campoClave.fill(clave);
   await campoClave.press("Enter");
   await p.waitForTimeout(15000);
+  // Doble factor: STEL envía un código por correo. Se lee de STEL_WEB_CODIGO_FICHERO (lo escribe
+  // quien recibe el correo) y se espera hasta 14 minutos a que cambie si STEL rechaza el anterior.
+  const fichero=process.env.STEL_WEB_CODIGO_FICHERO||"";
+  const campoCodigo=()=>p.locator('input[placeholder*="code" i],input[placeholder*="código" i],input[placeholder*="codigo" i]').first();
+  if(fichero&&await campoCodigo().count()){
+   informe.doble_factor="pedido";
+   const limite=Date.now()+14*60e3;let usado="";
+   while(Date.now()<limite&&await campoCodigo().count()&&await campoCodigo().isVisible().catch(()=>false)){
+    const codigo=fs.existsSync(fichero)?fs.readFileSync(fichero,"utf8").replace(/\D/g,""):"";
+    if(codigo&&codigo!==usado){
+     usado=codigo;await campoCodigo().fill(codigo);await campoCodigo().press("Enter");await p.waitForTimeout(8000);
+     informe.doble_factor=(await campoCodigo().count())&&(await campoCodigo().isVisible().catch(()=>false))?"codigo_rechazado_esperando_otro":"aceptado";
+     await captura("2b-tras-codigo");
+    }else await p.waitForTimeout(3000);
+   }
+  }
   fase="lectura";
   informe.entrada=(await p.locator('input[type="password"]').count())===0?"aparentemente_correcta":"sigue_pidiendo_contrasena";
   informe.url_final=rutaSinDatos(p.url());

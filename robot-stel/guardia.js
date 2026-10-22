@@ -29,6 +29,7 @@ const CANAL=/^\/app\/ControladorMultiempresa$/;
 // Lista cerrada: solo se añaden operaciones de LECTURA revisadas (nombre y efecto).
 const OPERACIONES_LECTURA=new Set(["comprobarLogin"]);
 const OPERACIONES_ENTRADA=new Set(["realizarLogin"]);
+const AUTENTICACION=/(login|codigo|verific|autentic|doblefactor|2fa|otp)/i;
 // Doble barrera: un nombre de escritura nunca pasa, aunque se añadiera por error a la lista.
 const ESCRITURA=/(guardar|grabar|crear|nuev|insert|modific|editar|actualiz|borrar|elimin|anular|enviar|firmar|cerrar|duplic|convert|import|subir|asign|vincul|cambiar|marcar|desmarcar|aplicar|generar|registrar|alta|baja|save|create|update|delete|remove|send|set[A-Z])/i;
 // Plantillas de pantalla: `POST /app/Html` con un único campo `id=<ruta>.html` (lectura pura).
@@ -47,7 +48,8 @@ function permitido(metodo,url,fase="lectura",cuerpo=""){
  if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&CANAL.test(u.pathname)){
   const op=operacion(cuerpo);
   if(!op||ESCRITURA.test(op))return false;
-  return OPERACIONES_LECTURA.has(op)||(fase==="entrada"&&OPERACIONES_ENTRADA.has(op));
+  // Entrada con código de verificación por correo (doble factor): solo operaciones de autenticación.
+  return OPERACIONES_LECTURA.has(op)||(fase==="entrada"&&(OPERACIONES_ENTRADA.has(op)||AUTENTICACION.test(op)));
  }
  if(fase==="entrada"&&m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&ENTRADA.test(u.pathname))return true;
  return false;

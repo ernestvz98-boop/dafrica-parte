@@ -46,3 +46,10 @@ test("realizarLogin solo durante la entrada",()=>{
  assert.equal(g.permitido("POST",U,"entrada","operacion=realizarLogin&x=1"),true);
  assert.equal(g.permitido("POST",U,"lectura","operacion=realizarLogin&x=1"),false);
 });
+
+test("código de verificación: solo en la entrada y nunca con nombre de escritura",()=>{
+ const g=require("../robot-stel/guardia.js"),U="https://app.stelorder.com/app/ControladorMultiempresa";
+ assert.equal(g.permitido("POST",U,"entrada","operacion=comprobarCodigoVerificacion"),true);
+ assert.equal(g.permitido("POST",U,"lectura","operacion=comprobarCodigoVerificacion"),false);
+ assert.equal(g.permitido("POST",U,"entrada","operacion=guardarCodigoVerificacion"),false);
+});
