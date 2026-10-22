@@ -315,3 +315,14 @@ test("prueba de fuerza: la coherencia del lote no extiende un código si otra ob
  const c=doc("PRY90124",["Hospital ficticio gerencia"],true),d=doc("PRY90124",["Hospital ficticio"]);
  assert.equal(coherenciaLote([c,d],{catalogoObras:[cat[0]]}),1);assert.equal(d.obra.estado,"OK");
 });
+test("prueba de fuerza: con la visión caída los códigos quedan sin comprobar y el albarán no es AUTO_OK",async()=>{
+ const {sinComprobar,validarStel}=require("../albaranes/manuscritos.js");
+ const r={estado:"AUTO_OK",incidencias:[],proveedor:{nombre:"PROVEEDOR FICTICIO",account_id:777},fecha:{estado:"OK",valor:"2026-10-14"},numero:{valor:"600.111"}};
+ sinComprobar(r,Error("Servicio de visión no disponible: OpenAI 500"));
+ assert.equal(r.estado,"REVISAR");assert.equal(r.manuscritos.sin_comprobar,true);
+ for(const k of ["obra","stel"]){assert.equal(r.manuscritos[k].estado,"REVISAR");assert.equal(r.manuscritos[k].valor,null);}
+ assert.ok(r.incidencias.some(i=>/No se han podido leer los manuscritos/.test(i)));
+ assert.ok(r.incidencias.some(i=>/sin validar: obra «sin leer»/.test(i)));
+ // Sin lecturas, la comprobación de ABP contra STEL no tiene nada que validar.
+ assert.equal(await validarStel(r,async()=>[{fullReference:"ABP261234",supplier:"x",accountId:777,date:"2026-10-14"}]),false);
+});

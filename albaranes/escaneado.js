@@ -617,7 +617,7 @@ async function extraerEscaneado(paginas,opciones={}){
   try{principal.manuscritos=await M("manuscritos").leerManuscritos(paginas,principal,opciones.vision,
    {catalogoObras:opciones.catalogoObras||null,catalogoObrasCompleto:opciones.catalogoObrasCompleto,albaranStel:opciones.albaranStel||null,compararModelos:opciones.compararModelos||null});
    M("manuscritos").aplicarEstado(principal);}
-  catch(e){principal.manuscritos=null;principal.incidencias=[...(principal.incidencias||[]),"No se han podido leer los manuscritos: "+String(e?.message||e).slice(0,120)];}
+  catch(e){M("manuscritos").sinComprobar(principal,e);}
  }
  // Etiqueta de obra con QR pegada en el albarán (código exacto, impreso): con jsQR disponible.
  if(typeof opciones.qr==="function"){
