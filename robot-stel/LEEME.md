@@ -15,3 +15,13 @@ Requisitos para ponerlo en marcha (los decide el usuario):
 2. `STEL_WEB_USUARIO` y `STEL_WEB_CLAVE` en los ajustes del entorno de Claude Code (Editar → variables).
 3. Permiso en Claude Code para ejecutar `node robot-stel/…` (el sistema de seguridad de la sesión
    bloquea por defecto la navegación automática en STEL).
+
+Uso actual (sesión recordada en un fichero fuera del repositorio):
+
+```
+STEL_WEB_ESTADO=<fichero-sesion.json> STEL_WEB_CODIGO_FICHERO=<fichero-codigo.txt> \
+STEL_WEB_VISITAR="#main_proyectos" STEL_WEB_TABLAS="listarProyectosPaginado" \
+node robot-stel/explorar.js <carpeta-salida>
+```
+
+Si STEL pide el código de verificación, se escribe en `<fichero-codigo.txt>` (el robot espera 14 min).

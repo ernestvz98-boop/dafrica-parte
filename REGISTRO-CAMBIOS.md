@@ -3,6 +3,26 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Robot de STEL (solo lectura) en marcha: lista de proyectos leída y cargada
+
+**Producción:** sin cambios en la web ni en funciones. Datos: 42 obras más en `lector_obras` (103 en
+total) y `lector_ajustes.obras_lista_completa.total = 103`. Reversión: borrar las filas de origen
+«lista» añadidas hoy y restaurar el total.
+
+- Entrada con doble factor (código por correo que pasa el usuario) y sesión recordada guardada fuera
+  del repositorio. La web necesita `firebase`, `google` y `Stripe`: el robot les da sustitutos vacíos
+  sin salir a Internet (el entorno no permite esos dominios).
+- Guardia: dos canales (`ControladorMultiempresa`, `FrontController`); operación en el cuerpo o en la
+  dirección (tablas paginadas); pasan solo la lista cerrada (`comprobarLogin`, `cargarPlanesSuscripcion`;
+  en la entrada `realizarLogin` y autenticación) y los nombres que EMPIEZAN por verbo de consulta
+  (obtener, listar, buscar, consultar, comprobar, contar…) sin palabra de escritura. Bloqueadas y no
+  enviadas, p. ej., `obtenerNuevasNotificacionesPUSH` («Nuevas»). Navegación solo por enlaces del menú.
+- Lectura: `listarProyectosPaginado` (la misma petición con 1.000 filas): 116 proyectos «desde el año
+  pasado», 81 con código PRY + 5 cifras; las 3 obras de las pruebas están (dos faltaban
+  en la lista del usuario). Nada modificado en STEL.
+- Medido offline con el catálogo real completo: lectura del usuario de hoy (1 PDF) 95,2 % → **97,1 %**,
+  la de ayer (2 PDF) 92,5 % → 94,1 % (sin la búsqueda de STEL ya corregida); 0 erróneos.
+
 ## 2026-10-22 · Robot de STEL Order (solo lectura): preparado, sin ejecutar
 
 **Producción:** sin cambios (la web no carga el robot; ni funciones ni datos). Aprobado por el

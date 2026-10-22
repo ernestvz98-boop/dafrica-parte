@@ -22,7 +22,8 @@ Edge). El repositorio es **público**.
   registrar el valor de ningún secreto. Antes de escribir en STEL, acceso solo de lectura.
 - Excepción aprobada por el usuario (2026-10-22): el robot de la web de STEL (`robot-stel/`) **solo
   para revisar**. Toda petición pasa por `robot-stel/guardia.js` (cualquier escritura se cancela);
-  credenciales solo en variables del entorno; no pulsa botones salvo la entrada.
+  credenciales solo en variables del entorno; no pulsa botones salvo la entrada y los enlaces del
+  menú principal (navegación).
 - No contratar servicios externos (OCR, visión) sin mostrar antes resultados y costes.
 
 ## Datos reales

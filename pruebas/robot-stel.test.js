@@ -53,3 +53,19 @@ test("código de verificación: solo en la entrada y nunca con nombre de escritu
  assert.equal(g.permitido("POST",U,"lectura","operacion=comprobarCodigoVerificacion"),false);
  assert.equal(g.permitido("POST",U,"entrada","operacion=guardarCodigoVerificacion"),false);
 });
+
+test("verbos de consulta por los dos canales; nunca con palabra de escritura; «cargar» no",()=>{
+ const g=require("../robot-stel/guardia.js");
+ for(const U of ["https://app.stelorder.com/app/ControladorMultiempresa","https://app.stelorder.com/app/FrontController"]){
+  for(const op of ["obtenerParametrosConfiguracion","listarProyectos","buscarAlbaranesCompra","consultarDocumento","getProjects"])assert.equal(g.permitido("POST",U,"lectura","operacion="+op),true,op);
+  for(const op of ["obtenerYGuardarDocumento","listarParaEliminar","cargarFichero","obtenerx","verificarYModificar","guardarProyecto","set"])assert.equal(g.permitido("POST",U,"lectura","operacion="+op),false,op);
+ }
+ assert.equal(g.permitido("POST","https://app.stelorder.com/app/OtroControlador","lectura","operacion=obtenerTodo"),false);
+});
+
+test("tablas paginadas: la operación en la dirección pasa por las mismas reglas",()=>{
+ const g=require("../robot-stel/guardia.js"),U="https://app.stelorder.com/app/FrontController?operacion=";
+ assert.equal(g.permitido("POST",U+"listarProyectosPaginado","lectura","sEcho=1&iDisplayStart=0"),true);
+ assert.equal(g.permitido("POST",U+"eliminarProyecto","lectura","sEcho=1"),false);
+ assert.equal(g.permitido("POST","https://app.stelorder.com/app/FrontController","lectura","sEcho=1"),false);
+});

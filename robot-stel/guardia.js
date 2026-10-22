@@ -25,10 +25,13 @@
 const LECTURA=new Set(["GET","HEAD","OPTIONS"]);
 const ENTRADA=/(^|\/)(login|log-in|auth|signin|sign-in|session|sessions|token|oauth)(\/|$|\?|\.)/i;
 const esStel=host=>/(^|\.)stelorder\.com$/i.test(host);
-const CANAL=/^\/app\/ControladorMultiempresa$/;
+const CANAL=/^\/app\/(ControladorMultiempresa|FrontController)$/;
 // Lista cerrada: solo se añaden operaciones de LECTURA revisadas (nombre y efecto).
-const OPERACIONES_LECTURA=new Set(["comprobarLogin"]);
+const OPERACIONES_LECTURA=new Set(["comprobarLogin","cargarPlanesSuscripcion"]);
 const OPERACIONES_ENTRADA=new Set(["realizarLogin"]);
+// Regla de lectura: nombres que EMPIEZAN por un verbo de consulta (y sin palabra de escritura en
+// ninguna parte, ver ESCRITURA). «cargar» no entra: en español también es «subir».
+const VERBO_LECTURA=/^(obtener|listar|buscar|consultar|comprobar|contar|leer|ver|mostrar|get|list|search|count|find|fetch)(?=[A-Z_]|$)/;
 const AUTENTICACION=/(login|codigo|verific|autentic|doblefactor|2fa|otp)/i;
 // Doble barrera: un nombre de escritura nunca pasa, aunque se añadiera por error a la lista.
 const ESCRITURA=/(guardar|grabar|crear|nuev|insert|modific|editar|actualiz|borrar|elimin|anular|enviar|firmar|cerrar|duplic|convert|import|subir|asign|vincul|cambiar|marcar|desmarcar|aplicar|generar|registrar|alta|baja|save|create|update|delete|remove|send|set[A-Z])/i;
@@ -46,10 +49,11 @@ function permitido(metodo,url,fase="lectura",cuerpo=""){
  let u;try{u=new URL(url);}catch{return false;}
  if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&PLANTILLA.test(u.pathname))return soloPlantilla(cuerpo);
  if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&CANAL.test(u.pathname)){
-  const op=operacion(cuerpo);
+  // El nombre de la operación va en el cuerpo o, en las tablas paginadas, en la dirección.
+  const op=operacion(cuerpo)||u.searchParams.get("operacion")||"";
   if(!op||ESCRITURA.test(op))return false;
   // Entrada con código de verificación por correo (doble factor): solo operaciones de autenticación.
-  return OPERACIONES_LECTURA.has(op)||(fase==="entrada"&&(OPERACIONES_ENTRADA.has(op)||AUTENTICACION.test(op)));
+  return OPERACIONES_LECTURA.has(op)||(VERBO_LECTURA.test(op)&&!AUTENTICACION.test(op))||(fase==="entrada"&&(OPERACIONES_ENTRADA.has(op)||AUTENTICACION.test(op)));
  }
  if(fase==="entrada"&&m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&ENTRADA.test(u.pathname))return true;
  return false;
@@ -58,5 +62,5 @@ function permitido(metodo,url,fase="lectura",cuerpo=""){
 function rutaSinDatos(url){
  try{const u=new URL(url);return u.hostname+u.pathname.replace(/\/\d{3,}(?=\/|$)/g,"/:id");}catch{return "(url no válida)";}
 }
-return {permitido,rutaSinDatos,operacion,OPERACIONES_LECTURA,OPERACIONES_ENTRADA,ESCRITURA};
+return {permitido,rutaSinDatos,operacion,OPERACIONES_LECTURA,OPERACIONES_ENTRADA,ESCRITURA,VERBO_LECTURA};
 });
