@@ -3,6 +3,22 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Lista de obras cargada (61 obras) · lector20
+
+**Producción:** web en `main` (versión `20261022lector20`, solo un texto de evidencia). Datos:
+61 obras (código PRY y nombre) transcritas de las capturas del listado de proyectos de STEL que
+envió el usuario, cargadas en `lector_obras` con origen «lista» (los códigos «PRYMP…» no tienen el
+formato PRY + 5 cifras y no se cargan; los nombres cortados en la captura se guardan hasta donde se
+ven). Reversión: `delete from public.lector_obras where origen = 'lista';`.
+
+- Las capturas cubren el listado de la A a «CS MAQUEDA…»: faltan las obras posteriores (por
+  ejemplo varias obras de las lecturas de prueba), que validarán cuando se carguen.
+- Medido offline sobre las dos últimas lecturas reales del usuario: 4 códigos de obra más
+  validados (con el nombre de la obra en el albarán o en el título del albarán de compra de STEL),
+  los 4 correctos, 0 erróneos.
+- Evidencia: «del catálogo de obras del lector» cuando la obra viene de `lector_obras` (antes decía
+  «de STEL»).
+
 ## 2026-10-22 · Lectura real con lector18: dos correcciones (lector19)
 
 **Producción:** web en `main` (versión `20261022lector19`; copia previa en
