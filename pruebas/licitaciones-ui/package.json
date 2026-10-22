@@ -1,0 +1,6 @@
+{
+  "name": "dafrica-licitaciones-ui-tests",
+  "private": true,
+  "scripts": {"test": "node --test dom.test.cjs"},
+  "devDependencies": {"linkedom": "0.18.14"}
+}
