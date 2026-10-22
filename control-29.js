@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261022lector22";
+const VERSION_LECTOR="20261022lector23";
 // PRUEBA (no activa nada): modelos de visión que se comparan con el principal sobre los mismos
 // recortes de manuscritos, solo si se marca la casilla. El resultado no cambia.
 const MODELOS_COMPARAR=["gpt-4.1","gpt-5","gpt-5.1","o4-mini"];
@@ -154,18 +154,6 @@ function montar(root){
      resultado.archivos.push({nombre:f.name,paginas:fuente.numPaginas,...r.resumen});
      for(const d of r.documentos){
       if(catalogo&&d.resultado?._ctx)lib.verificacion.verificar(d.resultado,catalogo);
-      if(consultarStel&&d.resultado?.manuscritos&&lib.manuscritos?.validarStel&&
-       await lib.manuscritos.validarStel(d.resultado,consultarStel,{proveedorNombre:nombreProveedor(d.resultado),
-        diagnostico:x=>{(stelAlb.comparaciones||(stelAlb.comparaciones=[])).push(x);}}))stelAlb.validados++;
-      // Prueba de modelos: la misma validación con STEL para el principal y para cada modelo.
-      const cmp=d.resultado?.manuscritos?.comparacion;
-      if(cmp&&consultarStel&&lib.manuscritos?.validarStel)
-       for(const e of [cmp.principal,...Object.values(cmp.modelos||{})]){
-        if(!e?.stel)continue;
-        const falso={manuscritos:{stel:{...e.stel}},proveedor:d.resultado.proveedor,fecha:d.resultado.fecha,numero:d.resultado.numero};
-        if(await lib.manuscritos.validarStel(falso,consultarStel,{proveedorNombre:nombreProveedor(d.resultado)}))
-         e.stel={...e.stel,valor:falso.manuscritos.stel.valor,estado:falso.manuscritos.stel.estado,confianza:falso.manuscritos.stel.confianza,metodo_final:"vision_recorte_albaran_stel"};
-       }
       resultado.documentos.push({archivo:f.name,...d});
      }
      for(const e of r.errores)resultado.errores.push({archivo:f.name,...e});
@@ -198,6 +186,25 @@ function montar(root){
       // En el JSON descargado (solo en el equipo del usuario), para medir sin volver a leer.
       sc.lista=resp?.notas||[];
      }catch(e){sc.error=String(e?.message||e).slice(0,160);}
+    }
+   }
+   // Códigos ABP escritos a mano: se comprueban contra los albaranes de compra que ya trajo la
+   // búsqueda (sin más consultas a STEL). Solo si la búsqueda no terminó, uno a uno (fallo real:
+   // 39 consultas sueltas agotaban el cupo de STEL y la búsqueda general recibía «403»).
+   const notasStel=motores.stel_compras?.completo?(motores.stel_compras.lista||[]):null;
+   const consultarAbp=notasStel?async ref=>{const c=String(ref).toUpperCase().replace(/[^A-Z0-9]/g,"");
+    return notasStel.filter(n=>String(n.fullReference).toUpperCase().replace(/[^A-Z0-9]/g,"")===c);}:consultarStel;
+   stelAlb.origen=notasStel?"busqueda":"una_a_una";
+   if(consultarAbp&&lib.manuscritos?.validarStel)for(const d of resultado.documentos){
+    if(d.resultado?.manuscritos&&await lib.manuscritos.validarStel(d.resultado,consultarAbp,{proveedorNombre:nombreProveedor(d.resultado),
+     diagnostico:x=>{(stelAlb.comparaciones||(stelAlb.comparaciones=[])).push(x);}}))stelAlb.validados++;
+    // Prueba de modelos: la misma validación con STEL para el principal y para cada modelo.
+    const cmp=d.resultado?.manuscritos?.comparacion;
+    if(cmp)for(const e of [cmp.principal,...Object.values(cmp.modelos||{})]){
+     if(!e?.stel)continue;
+     const falso={manuscritos:{stel:{...e.stel}},proveedor:d.resultado.proveedor,fecha:d.resultado.fecha,numero:d.resultado.numero};
+     if(await lib.manuscritos.validarStel(falso,consultarAbp,{proveedorNombre:nombreProveedor(d.resultado)}))
+      e.stel={...e.stel,valor:falso.manuscritos.stel.valor,estado:falso.manuscritos.stel.estado,confianza:falso.manuscritos.stel.confianza,metodo_final:"vision_recorte_albaran_stel"};
     }
    }
    // Coherencia de los códigos de obra entre todos los PDF leídos juntos.

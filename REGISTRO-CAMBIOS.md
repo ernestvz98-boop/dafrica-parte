@@ -3,6 +3,32 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Lectura real de los 3 PDF con lector22 y corrección del cupo de STEL (lector23)
+
+**Producción:** web en `main` (versión `20261022lector23`). Sin cambios en funciones ni datos.
+
+Lectura del usuario (3 PDF, 30 albaranes, visión, STEL, 103 obras, comparación de modelos):
+**535/605 (88,4 %), 0 errores críticos, 0 AUTO_OK con error.**
+
+| Grupo | Campos | Correctos automáticos | Correctos en revisión | Incorrectos (marcados) | Sin valor (marcados) | Otros |
+|---|---|---|---|---|---|---|
+| Cabecera | 90 | 88 | 0 | 0 | 2 | 0 |
+| Manuscritos | 60 | 29 | 8 | 8 | 14 | 1 |
+| Referencias/descripciones | 118 | 92 | 10 | 13 | 0 | 3 |
+| Económicos | 337 | 326 | 4 | 2 | 5 | 0 |
+
+- Fallo real: la búsqueda de albaranes de compra en STEL terminó en «403» (cupo agotado): antes se
+  habían hecho 39 consultas sueltas para comprobar los ABP escritos a mano. Ahora los ABP a mano se
+  comprueban contra la lista que trae la búsqueda (0 consultas más); solo si la búsqueda no termina,
+  uno a uno. Reproducido con los albaranes de STEL guardados de lecturas anteriores: 88,4 % → ~89,9 %.
+  Chromium (3 PDF, datos simulados): 28 ABP correctos, 0 erróneos, 0 consultas sueltas, sin errores.
+- Comparación de modelos de visión (60 códigos a mano, misma validación): gpt-4o 29 correctos,
+  gpt-4.1 30, **gpt-5.1 32**, o4-mini 30, gpt-5 31; **0 erróneos en todos**. Coste de los recortes de
+  esta lectura: gpt-5.1 0,16 $, gpt-4.1 0,24 $, o4-mini 0,39 $, gpt-5 0,91 $ (gpt-4o 0,33 $ incluye
+  también las casillas impresas). Pendiente de aprobación del usuario para cambiar el modelo.
+- Lo que falta para el 95 %: códigos y descripciones de artículos (O/0 e I/1 sin tarifa ni
+  confirmación) y manuscritos sin detectar.
+
 ## 2026-10-22 · Robot de STEL (solo lectura) en marcha: lista de proyectos leída y cargada
 
 **Producción:** sin cambios en la web ni en funciones. Datos: 42 obras más en `lector_obras` (103 en
