@@ -10,6 +10,12 @@
  * - Fase «lectura»: cualquier otra petición (POST, PUT, PATCH, DELETE…) se CANCELA antes de salir,
  *   aunque fuera solo para leer. Así es imposible guardar, borrar o cambiar nada en STEL.
  * Las canceladas se anotan (método y ruta, nunca su contenido) para decidir con el usuario.
+ *
+ * Canal único de la web de STEL (2026-10-22): la web hace TODO por `POST /app/ControladorMultiempresa`
+ * con `operacion=<nombre>` (leer y escribir). Autorizado por el usuario «solo para lectura y extraer
+ * datos; no modifiques ni crees nada». Por ese canal solo pasan las operaciones de la LISTA CERRADA
+ * de lectura (revisadas una a una); en la entrada, además, las de inicio de sesión. Cualquier otra,
+ * o cualquiera con nombre de escritura, se cancela.
  */
 (function(root,factory){
  const api=factory();
@@ -19,10 +25,30 @@
 const LECTURA=new Set(["GET","HEAD","OPTIONS"]);
 const ENTRADA=/(^|\/)(login|log-in|auth|signin|sign-in|session|sessions|token|oauth)(\/|$|\?|\.)/i;
 const esStel=host=>/(^|\.)stelorder\.com$/i.test(host);
-function permitido(metodo,url,fase="lectura"){
+const CANAL=/^\/app\/ControladorMultiempresa$/;
+// Lista cerrada: solo se añaden operaciones de LECTURA revisadas (nombre y efecto).
+const OPERACIONES_LECTURA=new Set(["comprobarLogin"]);
+const OPERACIONES_ENTRADA=new Set(["realizarLogin"]);
+// Doble barrera: un nombre de escritura nunca pasa, aunque se añadiera por error a la lista.
+const ESCRITURA=/(guardar|grabar|crear|nuev|insert|modific|editar|actualiz|borrar|elimin|anular|enviar|firmar|cerrar|duplic|convert|import|subir|asign|vincul|cambiar|marcar|desmarcar|aplicar|generar|registrar|alta|baja|save|create|update|delete|remove|send|set[A-Z])/i;
+// Plantillas de pantalla: `POST /app/Html` con un único campo `id=<ruta>.html` (lectura pura).
+const PLANTILLA=/^\/app\/Html$/;
+function soloPlantilla(cuerpo){
+ let p;try{p=new URLSearchParams(String(cuerpo||""));}catch{return false;}
+ const claves=[...p.keys()];
+ return claves.length===1&&claves[0]==="id"&&/^[A-Za-z0-9_\/.-]{1,120}\.html$/.test(p.get("id"))&&!p.get("id").includes("..");
+}
+function operacion(cuerpo){try{return new URLSearchParams(String(cuerpo||"")).get("operacion")||"";}catch{return "";}}
+function permitido(metodo,url,fase="lectura",cuerpo=""){
  const m=String(metodo||"").toUpperCase();
  if(LECTURA.has(m))return true;
  let u;try{u=new URL(url);}catch{return false;}
+ if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&PLANTILLA.test(u.pathname))return soloPlantilla(cuerpo);
+ if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&CANAL.test(u.pathname)){
+  const op=operacion(cuerpo);
+  if(!op||ESCRITURA.test(op))return false;
+  return OPERACIONES_LECTURA.has(op)||(fase==="entrada"&&OPERACIONES_ENTRADA.has(op));
+ }
  if(fase==="entrada"&&m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&ENTRADA.test(u.pathname))return true;
  return false;
 }
@@ -30,5 +56,5 @@ function permitido(metodo,url,fase="lectura"){
 function rutaSinDatos(url){
  try{const u=new URL(url);return u.hostname+u.pathname.replace(/\/\d{3,}(?=\/|$)/g,"/:id");}catch{return "(url no válida)";}
 }
-return {permitido,rutaSinDatos};
+return {permitido,rutaSinDatos,operacion,OPERACIONES_LECTURA,OPERACIONES_ENTRADA,ESCRITURA};
 });

@@ -15,7 +15,7 @@
  *   albaranes de compra.
  */
 const fs=require("fs"),path=require("path");
-const {permitido,rutaSinDatos}=require("./guardia.js");
+const {permitido,rutaSinDatos,operacion}=require("./guardia.js");
 const cargarPlaywright=()=>{try{return require("playwright");}catch{return require("/opt/node-tools/node_modules/playwright");}};
 
 const INICIO="https://app.stelorder.com/app/";
@@ -31,8 +31,10 @@ async function explorar(salida){
  try{
   const contexto=await navegador.newContext();
   await contexto.route("**/*",ruta=>{
-   const r=ruta.request(),clave=r.method()+" "+rutaSinDatos(r.url());
-   if(!permitido(r.method(),r.url(),fase)){informe.canceladas[clave]=(informe.canceladas[clave]||0)+1;return ruta.abort("blockedbyclient");}
+   const r=ruta.request(),cuerpo=r.postData()||"",op=operacion(cuerpo);
+   // Solo el nombre de la operación, nunca el resto del cuerpo (puede llevar datos o credenciales).
+   const clave=r.method()+" "+rutaSinDatos(r.url())+(op?" · "+op:"");
+   if(!permitido(r.method(),r.url(),fase,cuerpo)){informe.canceladas[clave]=(informe.canceladas[clave]||0)+1;return ruta.abort("blockedbyclient");}
    if(r.resourceType()==="xhr"||r.resourceType()==="fetch")informe.leidas[clave]=(informe.leidas[clave]||0)+1;
    return ruta.continue();
   });

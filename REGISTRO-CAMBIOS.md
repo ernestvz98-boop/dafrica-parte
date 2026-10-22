@@ -22,6 +22,12 @@ usuario «solo para revisar; por ahora el robot no hace modificaciones».
   confirme un usuario de STEL solo de consulta antes de dejar pasar ese canal.
 - `explorar.js` espera al formulario de entrada (la red nunca queda en reposo) y anota los dominios
   que no responden.
+- Autorizado por el usuario «solo para lectura y extraer datos; no modifiques ni crees nada». La
+  guardia deja pasar por el canal único solo una LISTA CERRADA de operaciones (`comprobarLogin`; en
+  la entrada, `realizarLogin`) y las plantillas `POST /app/Html` con un único `id=<ruta>.html`;
+  cualquier otra, o con nombre de escritura, se cancela (doble barrera). Pruebas en `robot-stel.test.js`.
+- Resultado: entrada aceptada; STEL pide un código de verificación enviado por correo (15 minutos).
+  Robot detenido a la espera de cómo resolverlo con el usuario. Ninguna otra operación enviada.
 
 ## 2026-10-22 · Lectura real con lector21: 95,2 % · lista de obras en curso marcada como completa (lector22)
 
