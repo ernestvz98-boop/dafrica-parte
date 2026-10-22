@@ -56,6 +56,15 @@ función `albaranes-manuscritos` ya admitía `gpt-5.1` en su lista cerrada de mo
     0 AUTO_OK con error).
   - Chromium (3 PDF, servicios simulados): manuscritos con gpt-5.1 (30 consultas) y casillas
     impresas con el modelo por defecto (16); 28 ABP correctos y 0 erróneos; 0 errores JS.
+- Prueba de fuerza en Chromium (servicios simulados, nada sale del equipo):
+
+  | Escenario | Resultado |
+  |---|---|
+  | A · visión 502 + STEL 403 + catálogo caído | **fallo real**: un albarán escaneado salía AUTO_OK sin haber mirado sus códigos a mano (los manuscritos quedaban a null). Corregido: quedan SIN COMPROBAR (`manuscritos.sinComprobar`) → 0 AUTO_OK, la pantalla dice «visión no disponible (17 de 17)» |
+  | B · visión con códigos FALSOS (otra obra que existe, ABP inexistente, confianza 0,99) | 0 críticos, 0 AUTO_OK; 18 ABP correctos por STEL; la obra de un albarán, corregida a la buena por su nombre impreso |
+  | C · respuestas de visión rotas (JSON inválido, estructura inesperada) | 0 críticos, 0 AUTO_OK, sin errores JS (lector25 lo cuenta como fallo de visión) |
+  | D · PDF roto + PDF vacío + PDF bueno | **fallo real**: el PDF roto detenía toda la lectura. Corregido en lector25 |
+  | E · detener a los 25 s | «Lectura detenida», 2 albaranes, botones restablecidos, sin búsqueda en STEL |
 
 ## 2026-10-22 · Lectura real de los 3 PDF con lector22 y corrección del cupo de STEL (lector23)
 
