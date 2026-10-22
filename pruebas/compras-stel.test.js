@@ -49,3 +49,37 @@ test("consulta: cuentas verificadas y fechas con margen",()=>{
  const q=C.consulta([doc(),doc({cuenta:9,fecha:ok("2026-02-01")}),doc({fecha:{valor:"2026-01-01",estado:"REVISAR",confianza:0.5}})]);
  assert.deepEqual(q.cuentas.sort(),[7,9]);assert.equal(q.desde,"2026-01-22");assert.equal(q.hasta,"2026-03-13");
 });
+// Fallo real (2026-10-22): las compras de un proveedor estaban en una cuenta de STEL SIN CIF y la
+// cuenta de su CIF no tenía ninguna; el albarán de compra no se encontraba.
+test("cuenta de STEL sin CIF: sin ninguno en la cuenta del CIF, el único albarán con ese número largo y misma fecha",()=>{
+ const sinCif=new Set(["70"]);
+ const d=doc();
+ const r=C.resolver([d],[nota("ABP261111","123.456 03/03/2026 OBRA FICTICIA",{cuenta:70})],{cuentasSinCif:sinCif});
+ assert.equal(r.resueltos,1);assert.equal(r.sin_cif,1);
+ assert.equal(d.resultado.manuscritos.stel.valor,"ABP26-1111");assert.match(d.resultado.albaran_stel.evidencias[0],/sin CIF/);
+ // Sin la lista de cuentas sin CIF, no.
+ const e=doc();C.resolver([e],[nota("ABP261111","123.456 03/03/2026 X",{cuenta:70})]);
+ assert.notEqual(e.resultado.manuscritos.stel.estado,"OK");
+ // Cuenta con otro CIF (no está en la lista): no.
+ const f=doc();C.resolver([f],[nota("ABP261111","123.456 03/03/2026 X",{cuenta:71})],{cuentasSinCif:sinCif});
+ assert.notEqual(f.resultado.manuscritos.stel.estado,"OK");
+ // Otro albarán de STEL, de cualquier cuenta, con el mismo número en el título: no.
+ const g=doc();C.resolver([g],[nota("ABP261111","123.456 03/03/2026 X",{cuenta:70}),nota("ABP261119","123456 01/02/2026 Y",{cuenta:71,fecha:"2026-02-01"})],{cuentasSinCif:sinCif});
+ assert.notEqual(g.resultado.manuscritos.stel.estado,"OK");
+ // Número corto (4 caracteres) u otra fecha: no.
+ const h=doc({numero:ok("1234")});C.resolver([h],[nota("ABP261111","1234 03/03/2026 X",{cuenta:70})],{cuentasSinCif:sinCif});
+ assert.notEqual(h.resultado.manuscritos.stel.estado,"OK");
+ const i=doc();C.resolver([i],[nota("ABP261111","123456 04/03/2026 X",{cuenta:70,fecha:"2026-03-04"})],{cuentasSinCif:sinCif});
+ assert.notEqual(i.resultado.manuscritos.stel.estado,"OK");
+ // Con el albarán en la cuenta del CIF, se usa ese.
+ const j=doc();C.resolver([j],[nota("ABP261111","123456 03/03/2026 X"),nota("ABP261112","123456 03/03/2026 Y",{cuenta:70})],{cuentasSinCif:sinCif});
+ assert.equal(j.resultado.manuscritos.stel.valor,"ABP26-1111");
+ // Proveedor sin cuenta de STEL con su CIF: también por la cuenta sin CIF.
+ const k=doc({cuenta:null});C.resolver([k],[nota("ABP261111","123456 03/03/2026 X",{cuenta:70})],{cuentasSinCif:sinCif});
+ assert.equal(k.resultado.manuscritos.stel.estado,"OK");
+});
+test("consultaSinCif: fechas de los que siguen sin albarán de compra, con margen corto",()=>{
+ const a=doc(),b=doc({fecha:ok("2026-03-10")}),c=doc({numero:ok("1234")});b.resultado.albaran_stel={estado:"OK"};
+ assert.deepEqual(C.consultaSinCif([a,b,c]),{desde:"2026-02-26",hasta:"2026-03-08"});
+ assert.equal(C.consultaSinCif([b]),null);
+});

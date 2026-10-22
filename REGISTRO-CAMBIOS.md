@@ -3,6 +3,35 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Albaranes de compra de STEL en cuentas sin CIF y robustez de la lectura (lector25)
+
+**Producción:** web en `main` (versión `20261022lector25`). Sin cambios en funciones ni datos: la
+búsqueda en todas las cuentas usa el modo `buscar` que ya tenía `stel-albaranes-consulta` (sin
+cuentas).
+
+- **Fallo real de datos de STEL** (lectura del usuario de la sesión 9): los albaranes de compra del
+  proveedor de 6 albaranes del primer PDF están en una cuenta de STEL **sin CIF**. La cuenta con su
+  CIF no tiene ninguna compra, así que la búsqueda por la cuenta del CIF no los encontraba. En el
+  catálogo, 197 de las 1.304 cuentas de proveedor no tienen CIF válido.
+  - Corrección (`albaranes/compras-stel.js`, `control-29.js`): los albaranes que siguen sin su
+    albarán de compra se buscan, solo en sus fechas (±5 días), en TODAS las cuentas (una consulta
+    más a STEL).
+  - Se acepta el de una cuenta sin CIF válido (nunca la de otro CIF) solo con número de 5+
+    caracteres en el título, la misma fecha y siendo el ÚNICO de STEL con ese número.
+  - El título trae además la obra que escribió la oficina, que valida el código PRY a mano con el
+    catálogo de obras.
+- Proyección sobre la lectura real de la sesión 9 (gpt-5.1, reglas de lector25, solo con los
+  albaranes de STEL guardados de lecturas anteriores, así que es un mínimo): **553/605 (91,4 %)**
+  frente a 546 (90,2 %); manuscritos 40 → 47; **0 críticos**. Ataque con lecturas falsas sobre los
+  30 albaranes: 6.042, 0 aceptadas.
+- **Robustez** (fallos de la prueba de fuerza de lector24):
+  - Un PDF dañado, vacío o protegido da error solo en ese fichero y los demás se leen; antes
+    detenía toda la lectura.
+  - Una respuesta de visión sin la lista de recortes cuenta como fallo de la visión (códigos sin
+    comprobar), no como «ningún manuscrito».
+- Pruebas: 2 nuevas en `compras-stel.test.js` (cuenta sin CIF: única, número largo, misma fecha,
+  nunca otra cuenta con CIF ni otro albarán con el mismo número).
+
 ## 2026-10-22 · Visión de los manuscritos con gpt-5.1 y prueba de fuerza del catálogo de obras (lector24)
 
 **Producción:** web en `main` (versión `20261022lector24`). Sin cambios en funciones ni datos: la

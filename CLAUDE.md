@@ -61,6 +61,10 @@ Edge). El repositorio es **público**.
   varias obras); «solo una de las lecturas existe» exige que, con cualquier cifra en la posición
   dudosa, no exista otra obra. Todo cambio en estas reglas pasa `node pruebas/prueba-fuerza-obras.js`
   con el catálogo real (`pruebas/corpus-real/obras.tsv`): 0 lecturas falsas aceptadas.
+- El albarán de compra de STEL se busca en la cuenta del CIF del proveedor; si no está ahí, en una
+  cuenta de STEL SIN CIF válido (nunca la de otro CIF) solo con número de 5+ caracteres en el título,
+  la misma fecha y siendo el único de STEL con ese número. Si la visión falla, los códigos a mano
+  quedan sin comprobar (nunca AUTO_OK).
 
 ## Proceso ante cada fallo real
 

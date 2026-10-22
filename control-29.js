@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261022lector24";
+const VERSION_LECTOR="20261022lector25";
 // Modelo de visión de los recortes de manuscritos, elegido por el usuario (2026-10-22) tras la
 // comparación sobre los mismos recortes de los 3 PDF reales: 32 de 60 códigos aceptados y
 // correctos frente a 29 del anterior (gpt-4o), 0 erróneos en ambos y menor coste. Las casillas
@@ -90,7 +90,9 @@ function montar(root){
       const pm=motores.vision.por_modo||(motores.vision.por_modo={});
       const u=pm[modo]||(pm[modo]={modelo:null,llamadas:0,input_tokens:0,output_tokens:0});
       u.modelo=resp?.modelo||u.modelo;u.llamadas++;u.input_tokens+=resp?.uso?.input_tokens||0;u.output_tokens+=resp?.uso?.output_tokens||0;
-      return resp?.recortes||[];
+      // Respuesta sin la lista de recortes: es un fallo de la visión, no «ningún manuscrito».
+      if(!Array.isArray(resp?.recortes))throw Error("Respuesta de visión no válida");
+      return resp.recortes;
      }catch(e){motores.vision.fallos++;motores.vision.ultimo_error=String(e?.message||e).slice(0,160);throw e;}
     };
    // Prueba de otros modelos sobre los mismos recortes de manuscritos (casilla; no cambia nada).
@@ -149,7 +151,11 @@ function montar(root){
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
-    const fuente=await lib.motorNavegador.abrirFuente(pdfjs,bytes,{alProgresar:t=>{estado.textContent=f.name+" · "+t;}});
+    // Un PDF dañado o vacío da error solo en ese fichero; los demás se leen (prueba de fuerza
+    // 2026-10-22: un PDF roto en la misma lectura detenía todos con «Invalid PDF structure»).
+    const fuente=await lib.motorNavegador.abrirFuente(pdfjs,bytes,{alProgresar:t=>{estado.textContent=f.name+" · "+t;}})
+     .catch(e=>{resultado.errores.push({archivo:f.name,paginas:[],error:"PDF dañado, vacío o protegido: "+String(e?.message||e).slice(0,160)});return null;});
+    if(!fuente){pintar(resultado);continue;}
     try{
      const r=await lib.lector.leerPdf(fuente,{registro:lib.proveedores.REGISTRO,vision,compararModelos,qr:jsQR,tamLote:5,cancelado:()=>detener,
       catalogoObras,catalogoObrasCompleto,
@@ -181,17 +187,34 @@ function montar(root){
        body:JSON.stringify({buscar:{...q,...(pista?{pista}:{})}}),signal:AbortSignal.timeout(170000)});
       Object.assign(sc,{consultado:true,metodo:resp?.metodo||null,completo:!!resp?.completo,notas:(resp?.notas||[]).length,consultas:resp?.consultas??null,motivo:resp?.motivo||null});
       if(resp?.total)try{localStorage.setItem("dafrica_stel_compras_total",String(resp.total));}catch{}
-      if(resp?.completo){
-       Object.assign(sc,lib.comprasStel.resolver(resultado.documentos,resp.notas||[]));
-       // Con el nombre de la obra que la oficina escribió en STEL, el código PRY a mano puede
-       // validarse con el catálogo de obras (mismo código y mismo nombre).
-       sc.obras=0;
-       for(const d of resultado.documentos){const x=d.resultado;
-        if(x?.albaran_stel?.estado==="OK"&&x.albaran_stel.obra&&lib.manuscritos?.revalidarObra&&
-         lib.manuscritos.revalidarObra(x,{catalogoObras,catalogoObrasCompleto,obraStel:x.albaran_stel.obra}))sc.obras++;}
-      }
+      // Cuentas de STEL sin CIF válido (solo con el catálogo de proveedores completo): un proveedor
+      // puede estar duplicado en STEL en una cuenta sin CIF con sus compras (fallo real 2026-10-22).
+      const cuentasSinCif=catalogo?.proveedores_completo&&lib.nif?new Set((catalogo.proveedores||[]).filter(p=>!lib.nif.validar(p.nif).valido).map(p=>String(p.id))):null;
+      if(resp?.completo)Object.assign(sc,lib.comprasStel.resolver(resultado.documentos,resp.notas||[],{cuentasSinCif}));
       // En el JSON descargado (solo en el equipo del usuario), para medir sin volver a leer.
       sc.lista=resp?.notas||[];
+      // Los que siguen sin albarán de compra: una búsqueda más en TODAS las cuentas, solo en sus fechas.
+      const q2=resp?.completo&&cuentasSinCif?lib.comprasStel.consultaSinCif(resultado.documentos):null;
+      if(q2&&!detener){
+       estado.textContent="Buscando en STEL los albaranes de compra de cuentas sin CIF (solo lectura)…";
+       const resp2=await sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({buscar:{cuentas:[],...q2,...(pista?{pista}:{})}}),signal:AbortSignal.timeout(170000)}).catch(e=>({error:String(e?.message||e).slice(0,160)}));
+       const usadas=new Set(resultado.documentos.map(d=>d.resultado?.albaran_stel?.id).filter(x=>x!=null).map(String));
+       const nuevas=(resp2?.notas||[]).filter(n=>!usadas.has(String(n.id)));
+       sc.sin_cif={consultado:true,completo:!!resp2?.completo,notas:nuevas.length,consultas:resp2?.consultas??null,motivo:resp2?.motivo||resp2?.error||null,resueltos:0};
+       if(resp2?.total)try{localStorage.setItem("dafrica_stel_compras_total",String(resp2.total));}catch{}
+       if(resp2?.completo){
+        const r2=lib.comprasStel.resolver(resultado.documentos.filter(d=>d.resultado&&!d.resultado.albaran_stel),nuevas,{cuentasSinCif});
+        sc.sin_cif.resueltos=r2.resueltos;sc.resueltos=(sc.resueltos||0)+r2.resueltos;sc.numeros=(sc.numeros||0)+r2.numeros;sc.conflictos=(sc.conflictos||0)+r2.conflictos;
+        const vistas=new Set(sc.lista.map(n=>String(n.id)));sc.lista=[...sc.lista,...nuevas.filter(n=>!vistas.has(String(n.id)))];
+       }
+      }
+      // Con el nombre de la obra que la oficina escribió en STEL, el código PRY a mano puede
+      // validarse con el catálogo de obras (mismo código y mismo nombre).
+      sc.obras=0;
+      for(const d of resultado.documentos){const x=d.resultado;
+       if(x?.albaran_stel?.estado==="OK"&&x.albaran_stel.obra&&lib.manuscritos?.revalidarObra&&
+        lib.manuscritos.revalidarObra(x,{catalogoObras,catalogoObrasCompleto,obraStel:x.albaran_stel.obra}))sc.obras++;}
      }catch(e){sc.error=String(e?.message||e).slice(0,160);}
     }
    }

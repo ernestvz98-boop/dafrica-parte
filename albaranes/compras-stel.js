@@ -10,6 +10,10 @@
  * Si el número del papel estaba en revisión y coincide así, también queda confirmado. Si dos
  * albaranes leídos apuntan al mismo de STEL, o la letra a mano dice otro ABP validado, nada se
  * acepta por esta vía.
+ * En STEL un proveedor puede estar duplicado en una cuenta SIN CIF (fallo real 2026-10-22: las
+ * compras de un proveedor estaban en una cuenta sin CIF y la de su CIF no tenía ninguna). Sin
+ * ninguno en la cuenta del CIF, se acepta el de una cuenta sin CIF válido (nunca la de otro CIF)
+ * solo con un número largo (5+), la misma fecha y si es el ÚNICO de STEL con ese número en el título.
  */
 (function(root,factory){
  const api=factory(root);
@@ -33,29 +37,36 @@ function formatoAbp(ref){const c=canon(ref);return /^ABP\d{6}$/.test(c)?c.slice(
 
 /*
  * docs: [{resultado}] (se modifican). notas: albaranes de compra de STEL (stel-albaranes-consulta
- * {buscar}). Devuelve {resueltos, numeros, conflictos}.
+ * {buscar}). cuentasSinCif: Set de ids de cuentas de STEL sin CIF válido (catálogo completo de
+ * proveedores) o null. Devuelve {resueltos, numeros, conflictos, sin_cif}.
  */
-function resolver(docs,notas){
- const res={resueltos:0,numeros:0,conflictos:0};
+function resolver(docs,notas,{cuentasSinCif=null}={}){
+ const res={resueltos:0,numeros:0,conflictos:0,sin_cif:0};
  const elegidos=[];
+ const conNumero=num=>(notas||[]).filter(n=>partesTitulo(n.title).palabras.includes(num));
  for(const d of docs){
-  const r=d.resultado;if(!r)continue;
-  const cuenta=r.proveedor?.estado==="OK"?r.proveedor.account_id:null;
+  const r=d.resultado;if(!r||r.proveedor?.estado!=="OK")continue;
+  const cuenta=r.proveedor.account_id??null;
   const num=canon(r.numero?.valor),fecha=aceptado(r.fecha)?r.fecha.valor:null;
-  if(cuenta==null||num.length<4||!fecha)continue;
-  const cands=(notas||[]).filter(n=>String(n.accountId)===String(cuenta)&&partesTitulo(n.title).palabras.includes(num));
+  if(num.length<4||!fecha)continue;
+  const mismaFecha=n=>dia(n.date)===fecha||partesTitulo(n.title).fecha===fecha;
+  let cands=cuenta!=null?conNumero(num).filter(n=>String(n.accountId)===String(cuenta)):[],sinCif=false;
+  if(!cands.length&&cuentasSinCif&&num.length>=5){
+   const todos=conNumero(num);
+   if(todos.length===1&&cuentasSinCif.has(String(todos[0].accountId))){cands=todos;sinCif=true;}
+  }
   if(cands.length!==1)continue;
   const n=cands[0],t=partesTitulo(n.title),abp=formatoAbp(n.fullReference);
-  if(!abp||(dia(n.date)!==fecha&&t.fecha!==fecha))continue;
-  elegidos.push({r,n,abp,t});
+  if(!abp||!mismaFecha(n))continue;
+  elegidos.push({r,n,abp,t,sinCif});
  }
  // Un mismo albarán de STEL para dos albaranes leídos: ninguno.
  const usos=new Map();for(const e of elegidos)usos.set(e.abp,(usos.get(e.abp)||0)+1);
  for(const e of elegidos){
-  const {r,n,abp,t}=e;
+  const {r,n,abp,t,sinCif}=e;
   if(usos.get(abp)>1){res.conflictos++;continue;}
-  const ev="Albarán de compra STEL "+n.fullReference+" (solo lectura): cuenta del proveedor verificada, número «"+r.numero.valor+
-   "» en su título y fecha "+r.fecha.valor+(t.obra?"; obra en STEL «"+t.obra+"»":"");
+  const ev="Albarán de compra STEL "+n.fullReference+" (solo lectura): "+(sinCif?"cuenta de STEL sin CIF (el único albarán de STEL con ese número)":"cuenta del proveedor verificada")+
+   ", número «"+r.numero.valor+"» en su título y fecha "+r.fecha.valor+(t.obra?"; obra en STEL «"+t.obra+"»":"");
   const m=r.manuscritos?.stel;
   if(m&&aceptado(m)&&canon(m.valor)!==canon(abp)){
    // La letra a mano (validada por otra vía) dice otro ABP: a revisión, sin elegir.
@@ -75,9 +86,26 @@ function resolver(docs,notas){
     {valor:abp,literal:previo.literal||"",estado:"OK",confianza:0.95,motivos:[],
      resolucion:{metodo:"albaran_stel_por_numero",evidencias:[...(previo.literal?["Escrito a mano: «"+previo.literal+"»"]:[]),ev],alternativas:previo.resolucion?.alternativas||[]}};
   }
-  res.resueltos++;
+  res.resueltos++;if(sinCif)res.sin_cif++;
  }
  return res;
+}
+
+/*
+ * Fechas de los albaranes que siguen sin su albarán de compra (proveedor identificado, fecha
+ * aceptada y número de 5+ caracteres), para buscar en TODAS las cuentas de STEL (también las sin
+ * CIF). Margen corto: la fecha del albarán de STEL o la de su título es la del papel.
+ */
+function consultaSinCif(docs,{margen=5}={}){
+ const fechas=[];
+ for(const d of docs){const r=d.resultado;
+  if(r&&!r.albaran_stel&&r.proveedor?.estado==="OK"&&aceptado(r.fecha)&&canon(r.numero?.valor).length>=5)fechas.push(r.fecha.valor);}
+ if(!fechas.length)return null;
+ fechas.sort();
+ const mover=(f,d)=>new Date(Date.parse(f)+d*864e5).toISOString().slice(0,10);
+ let desde=mover(fechas[0],-margen),hasta=mover(fechas.at(-1),margen);
+ if(Date.parse(hasta)-Date.parse(desde)>400*864e5)desde=mover(hasta,-400);
+ return {desde,hasta};
 }
 
 /* Intervalo de fechas y cuentas que hay que pedir a STEL para los albaranes leídos. */
@@ -92,5 +120,5 @@ function consulta(docs,{margen=10}={}){
  if(Date.parse(hasta)-Date.parse(desde)>400*864e5)desde=mover(hasta,-400);
  return {cuentas:[...cuentas].slice(0,40),desde,hasta};
 }
-return {resolver,consulta,partesTitulo,formatoAbp};
+return {resolver,consulta,consultaSinCif,partesTitulo,formatoAbp};
 });
