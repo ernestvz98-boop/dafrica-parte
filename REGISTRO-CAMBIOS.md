@@ -3,6 +3,19 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Robot de STEL Order (solo lectura): preparado, sin ejecutar
+
+**Producción:** sin cambios (la web no carga el robot; ni funciones ni datos). Aprobado por el
+usuario «solo para revisar; por ahora el robot no hace modificaciones».
+
+- `robot-stel/guardia.js`: solo GET/HEAD/OPTIONS; en la entrada, además, el POST de inicio de sesión a
+  STEL por https; cualquier otra petición se cancela antes de salir. Pruebas en `robot-stel.test.js`.
+- `robot-stel/explorar.js`: paso 1 (entrar, capturas, rutas que pide la web sin datos, peticiones
+  canceladas). Credenciales solo de `STEL_WEB_USUARIO` / `STEL_WEB_CLAVE` del entorno.
+- No se ha ejecutado: el sistema de seguridad de la sesión bloquea la navegación automática en STEL
+  y faltan las credenciales. Requisitos en `robot-stel/LEEME.md`.
+- CLAUDE.md: excepción de solo lectura para el robot.
+
 ## 2026-10-22 · Lectura real con lector21: 95,2 % · lista de obras en curso marcada como completa (lector22)
 
 **Producción:** web en `main` (versión `20261022lector22`, solo un texto de evidencia). Datos:

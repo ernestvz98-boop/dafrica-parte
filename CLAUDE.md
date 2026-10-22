@@ -20,6 +20,9 @@ Edge). El repositorio es **público**.
   recuperable y confirmación.
 - STEL solo a través de funciones Edge con el secreto `STEL_API_KEY`; nunca copiar, imprimir ni
   registrar el valor de ningún secreto. Antes de escribir en STEL, acceso solo de lectura.
+- Excepción aprobada por el usuario (2026-10-22): el robot de la web de STEL (`robot-stel/`) **solo
+  para revisar**. Toda petición pasa por `robot-stel/guardia.js` (cualquier escritura se cancela);
+  credenciales solo en variables del entorno; no pulsa botones salvo la entrada.
 - No contratar servicios externos (OCR, visión) sin mostrar antes resultados y costes.
 
 ## Datos reales
@@ -74,6 +77,7 @@ evaluación del corpus (`node pruebas/evaluar.js --incluir-sin-revisar`, tambié
 | `albaranes/compras-stel.js` | albarán de compra de STEL por el número del proveedor en su título (ABP sin leer la letra a mano) |
 | `albaranes/datos-referencia.js` | importación de listas de obras (`lector_obras`) y tarifas de proveedor desde CSV/Excel, nunca precios |
 | `albaranes/etiquetas.js` | etiquetas de obra con QR: hoja para imprimir y lectura del QR en el escaneo |
+| `robot-stel/` | robot de la web de STEL Order, solo lectura (guardia, exploración); ver su `LEEME.md` |
 | `albaranes/vendor/` | librerías de terceros servidas por la web (jsQR, qrcode-generator, xlsx); ver su `LEEME.md` |
 | `albaranes/motor-navegador.js` | pdf.js + tesseract.js en el navegador (renderizado bajo demanda) |
 | `control-29.js` | módulo «Lector de albaranes» del menú (permiso `costes.ver`) |
