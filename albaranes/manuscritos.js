@@ -291,7 +291,7 @@ function evidencias(campo,codigo,ctx){
   if(cat.length===1){
    const delAlbaran=new Set([...[].concat(ctx.obraImpresa||[]),...[].concat(ctx.obraEscrita||[])].flatMap(t=>[...palabrasObra(t)]));
    const comunes=[...palabrasObra(cat[0].nombre)].filter(p=>delAlbaran.has(p));
-   if(comunes.length)ev.push("Obra «"+cat[0].nombre+"» del catálogo de obras"+(ctx.catalogoObrasCompleto===false?" del lector":" de STEL")+", con «"+comunes.join(", ")+"» también en el albarán");
+   if(comunes.length)ev.push("Obra «"+cat[0].nombre+"» del catálogo de obras, con «"+comunes.join(", ")+"» también en el albarán");
   }
  }else{
   const alb=typeof ctx.albaranStel==="function"?ctx.albaranStel(formatoStel(codigo)):null;

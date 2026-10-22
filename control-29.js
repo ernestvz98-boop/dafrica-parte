@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261022lector21";
+const VERSION_LECTOR="20261022lector22";
 // PRUEBA (no activa nada): modelos de visión que se comparan con el principal sobre los mismos
 // recortes de manuscritos, solo si se marca la casilla. El resultado no cambia.
 const MODELOS_COMPARAR=["gpt-4.1","gpt-5","gpt-5.1","o4-mini"];

@@ -3,6 +3,29 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Lectura real con lector21: 95,2 % · lista de obras en curso marcada como completa (lector22)
+
+**Producción:** web en `main` (versión `20261022lector22`, solo un texto de evidencia). Datos:
+`lector_ajustes.obras_lista_completa = {total: 61}` (el usuario indica que el resto del listado de
+STEL son obras terminadas). Reversión: `delete from public.lector_ajustes where clave='obras_lista_completa';`.
+
+Lectura del usuario (1 PDF, 9 albaranes, visión y STEL reales): **199/209 (95,2 %), 0 errores
+críticos, 0 AUTO_OK con error**. La búsqueda de albaranes de compra en STEL termina completa
+(filtro por proveedor, 32 consultas) y resuelve 7 ABP.
+
+| Grupo | Campos | Correctos automáticos | Correctos en revisión | Incorrectos (marcados) | Sin valor (marcados) | Otros |
+|---|---|---|---|---|---|---|
+| Cabecera | 27 | 26 | 0 | 0 | 1 | 0 |
+| Manuscritos | 18 | 13 | 0 | 5 | 0 | 0 |
+| Referencias/descripciones | 48 | 45 | 0 | 1 | 0 | 2 |
+| Económicos | 116 | 115 | 1 | 0 | 0 | 0 |
+
+- Con la lista marcada como completa, la regla «lectura a una cifra de la única obra con ese nombre»
+  resuelve 1 obra más en esta lectura y 1 en la anterior (reproducido; 0 erróneas) → 200/209 (95,7 %).
+- Pendiente: 3 obras de las pruebas no están en la lista cargada (su código no se puede validar);
+  número de albarán tachado por una firma; un código con «>» por «S».
+- Evidencia: «del catálogo de obras» (sin decir de dónde viene la lista).
+
 ## 2026-10-22 · Obra por nombre + segunda prueba · lector21
 
 **Producción:** web en `main` (versión `20261022lector21`; copia previa en
