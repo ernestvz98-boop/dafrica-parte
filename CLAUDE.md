@@ -65,6 +65,9 @@ Edge). El repositorio es **público**.
   cuenta de STEL SIN CIF válido (nunca la de otro CIF) solo con número de 5+ caracteres en el título,
   la misma fecha y siendo el único de STEL con ese número. Si la visión falla, los códigos a mano
   quedan sin comprobar (nunca AUTO_OK).
+- Un ABP escrito a mano se valida con STEL por la fecha solo si ese albarán de compra es el ÚNICO
+  del proveedor ese día y no está asignado a otro albarán leído (con varios el mismo día, una cifra
+  mal leída da otro); si no, hace falta el número del proveedor en STEL.
 
 ## Proceso ante cada fallo real
 

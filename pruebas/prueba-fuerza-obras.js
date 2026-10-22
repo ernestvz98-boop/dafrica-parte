@@ -14,6 +14,7 @@
  *   dos lecturas        lee R (existe) o Z (no existe), y la cifra buena no está entre ellas
  *   una cifra           lee Z (no existe) a una mala lectura de T (regla del nombre)
  *   lote                otro albarán del lote validado con R y el mismo nombre; en este se lee R
+ *   cifra perdida       lee el código de T o de otra obra R cercana con UNA cifra menos («PRY1233»)
  *   control             lee T bien (cuántas buenas se aceptan: la prueba no es vacía)
  * Fallo real que la originó (2026-10-22): con el catálogo real se aceptaban lecturas falsas por
  * palabras comunes a varias obras («HOSPITAL», «CENTRO»…) y por «solo esta existe».
@@ -66,6 +67,9 @@ function atacar(catalogo,{vias=["impresa","escrita"],palabras=true}={}){
     anota("lote",T,este.obra,pista+" leído "+r);
    }
    for(const z of vs.filter(x=>!codigos.has(x)))anota("una cifra",T,M.validarCodigos(vista([[z,0.99]]),ctx).obra,pista+" leído "+z);
+   const sinUna=c=>[...new Set([0,1,2,3,4].map(i=>"PRY"+c.slice(3,3+i)+c.slice(4+i)))];
+   for(const o of [T.codigo,...vs.filter(x=>codigos.has(x))])for(const z of sinUna(o))
+    anota("cifra perdida",T,M.validarCodigos(vista([[z,0.99]]),ctx).obra,pista+" leído "+z);
   }
  }
  return tabla;

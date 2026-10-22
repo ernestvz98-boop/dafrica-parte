@@ -83,3 +83,14 @@ test("consultaSinCif: fechas de los que siguen sin albarán de compra, con marge
  assert.deepEqual(C.consultaSinCif([a,b,c]),{desde:"2026-02-26",hasta:"2026-03-08"});
  assert.equal(C.consultaSinCif([b]),null);
 });
+test("cuentas sin CIF demostradas: las de los albaranes resueltos en ellas, por proveedor",()=>{
+ const sinCif=new Set(["70"]);
+ const a=doc(),b=doc({numero:ok("654321")});a.resultado.proveedor.id="P1";b.resultado.proveedor.id="P1";
+ C.resolver([a,b],[nota("ABP261111","123456 03/03/2026 X",{cuenta:70})],{cuentasSinCif:sinCif});
+ assert.equal(a.resultado.albaran_stel.cuenta,70);assert.equal(a.resultado.albaran_stel.sin_cif,true);
+ const m=C.cuentasSinCifPorProveedor([a,b]);
+ assert.deepEqual([...m.get("id:P1")],["70"]);
+ // Resuelto en la cuenta del CIF: no cuenta como cuenta sin CIF.
+ const c=doc();c.resultado.proveedor.id="P2";C.resolver([c],[nota("ABP261111","123456 03/03/2026 X")],{cuentasSinCif:sinCif});
+ assert.equal(C.cuentasSinCifPorProveedor([c]).size,0);
+});

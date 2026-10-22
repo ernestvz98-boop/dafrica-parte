@@ -184,18 +184,26 @@ test("código STEL manuscrito: se valida con el albarán de compra de STEL (solo
  const stel={"ABP26-1234":[{fullReference:"ABP26-1234",supplier:"Proveedor Ficticio SL",date:"2026-10-14",extraReference:""}],
   "ABP26-7234":[{fullReference:"ABP26-7234",supplier:"Proveedor Ficticio SL",date:"2026-10-14",extraReference:""}]};
  const consultar=async c=>stel[c]||[];
- let r=base();assert.equal(await validarStel(r,consultar),true);
+ // Único albarán de compra del proveedor ese día (lo dice la lista de la búsqueda).
+ const unico={delMismoDia:()=>0};
+ let r=base();assert.equal(await validarStel(r,consultar,unico),true);
  assert.equal(r.manuscritos.stel.estado,"OK");assert.equal(r.manuscritos.stel.resolucion.metodo,"vision_recorte_albaran_stel");
+ // Prueba de fuerza: con otro albarán de compra del proveedor el mismo día, la fecha no lo
+ // identifica (una cifra mal leída del ABP daría el otro); sin la lista, tampoco.
+ r=base();assert.equal(await validarStel(r,consultar,{delMismoDia:()=>1}),false);
+ r=base();assert.equal(await validarStel(r,consultar),false);
+ // Ya asignado a otro albarán leído: no.
+ r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],id:5}],{...unico,asignadas:new Set(["5"])}),false);
  // Otro proveedor, o ni fecha ni número coinciden: no se valida.
- r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],supplier:"OTRO PROVEEDOR"}]),false);assert.equal(r.manuscritos.stel.estado,"REVISAR");
- r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],date:"2026-09-01"}]),false);
+ r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],supplier:"OTRO PROVEEDOR"}],unico),false);assert.equal(r.manuscritos.stel.estado,"REVISAR");
+ r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],date:"2026-09-01"}],unico),false);
  // Número del proveedor en la referencia externa de STEL: también vale.
  r=base();assert.equal(await validarStel(r,async()=>[{...stel["ABP26-1234"][0],date:"2026-09-01",extraReference:"600111"}]),true);
  // Dos interpretaciones (1/7) que STEL valida ambas: no se resuelve.
  r=base();r.manuscritos.stel={valor:null,literal:"ABP26 ?234",estado:"AMBIGUO",resolucion:{alternativas:["ABP261234","ABP267234"]}};
- assert.equal(await validarStel(r,consultar),false);assert.equal(r.manuscritos.stel.estado,"AMBIGUO");
+ assert.equal(await validarStel(r,consultar,unico),false);assert.equal(r.manuscritos.stel.estado,"AMBIGUO");
  // Varias coincidencias exactas en STEL: no es única.
- r=base();assert.equal(await validarStel(r,async()=>[...stel["ABP26-1234"],...stel["ABP26-1234"]]),false);
+ r=base();assert.equal(await validarStel(r,async()=>[...stel["ABP26-1234"],...stel["ABP26-1234"]],unico),false);
 });
 
 test("una sola lectura PRY: existir en el catálogo no basta; hace falta que el nombre de la obra coincida con el albarán",()=>{
@@ -215,10 +223,10 @@ test("código STEL: el proveedor se compara por la cuenta de STEL verificada con
   manuscritos:{stel:{valor:"ABP26-1234",literal:"ABP26 1234",estado:"REVISAR",resolucion:{alternativas:["ABP261234"]}}}});
  const doc={fullReference:"ABP261234",supplier:"Ficticio Distribuciones",accountId:777,date:"2026-10-14",extraReference:""};
  const vistos=[];
- let r=base();assert.equal(await validarStel(r,async()=>[doc],{diagnostico:x=>vistos.push(x)}),true);
+ let r=base();assert.equal(await validarStel(r,async()=>[doc],{diagnostico:x=>vistos.push(x),delMismoDia:()=>0}),true);
  assert.equal(vistos[0].mismo_proveedor,true);assert.equal(vistos[0].cuenta_stel,777);
  // Otra cuenta, aunque el nombre coincida: no.
- r=base();assert.equal(await validarStel(r,async()=>[{...doc,accountId:778,supplier:"PROVEEDOR FICTICIO SL"}]),false);
+ r=base();assert.equal(await validarStel(r,async()=>[{...doc,accountId:778,supplier:"PROVEEDOR FICTICIO SL"}],{delMismoDia:()=>0}),false);
 });
 
 test("revalidarObra: el nombre de obra del albarán de compra de STEL corrobora el código del catálogo; otro nombre, no",()=>{
@@ -325,4 +333,31 @@ test("prueba de fuerza: con la visión caída los códigos quedan sin comprobar 
  assert.ok(r.incidencias.some(i=>/sin validar: obra «sin leer»/.test(i)));
  // Sin lecturas, la comprobación de ABP contra STEL no tiene nada que validar.
  assert.equal(await validarStel(r,async()=>[{fullReference:"ABP261234",supplier:"x",accountId:777,date:"2026-03-03"}]),false);
+});
+test("obra por nombre: a la lectura le falta una cifra («PRY9011»): se completa solo con la obra que señala el nombre",()=>{
+ const cat=[{codigo:"PRY90111",nombre:"COLMENA FICTICIA"},{codigo:"PRY90110",nombre:"OTRA OBRA"},{codigo:"PRY90011",nombre:"TERCERA INVENTADA"}];
+ const lee=[{indice:0,tipo:"PRY",tachado:false,texto_literal:"PRY 9011",lecturas:[{codigo:"PRY9011",confianza:0.99}]}];
+ const r=validarCodigos(lee,{catalogoObras:cat,catalogoObrasCompleto:true,obraEscrita:["colmena ficticia"]}).obra;
+ assert.equal(r.valor,"PRY90111");assert.equal(r.estado,"OK");assert.match(r.resolucion.evidencias.join(" "),/falta una cifra/);
+ // Sin el nombre, o con el catálogo incompleto: no.
+ assert.notEqual(validarCodigos(lee,{catalogoObras:cat,catalogoObrasCompleto:true}).obra.estado,"OK");
+ assert.notEqual(validarCodigos(lee,{catalogoObras:cat,catalogoObrasCompleto:false,obraEscrita:["colmena ficticia"]}).obra.estado,"OK");
+ // Dos obras con ese nombre que se completan desde la lectura: no.
+ const dos=[...cat,{codigo:"PRY90115",nombre:"COLMENA FICTICIA NORTE"}];
+ assert.notEqual(validarCodigos(lee,{catalogoObras:dos,catalogoObrasCompleto:true,obraEscrita:["colmena ficticia"]}).obra.estado,"OK");
+});
+test("código STEL a mano: vale la cuenta de STEL sin CIF que otros albaranes del lote han demostrado del proveedor",async()=>{
+ const {validarStel}=require("../albaranes/manuscritos.js");
+ const base=()=>({fecha:{estado:"OK",valor:"2026-03-03"},numero:{valor:"600.111"},proveedor:{nombre:"PROVEEDOR FICTICIO",account_id:777},
+  manuscritos:{stel:{valor:"ABP26-1234",literal:"ABP26 1234",estado:"REVISAR",resolucion:{alternativas:["ABP261234"]}}}});
+ const nota={fullReference:"ABP261234",supplier:"",accountId:70,date:"2026-03-03",extraReference:""};
+ // Cuenta distinta de la del CIF y sin demostrar: no.
+ let r=base();assert.equal(await validarStel(r,async()=>[nota]),false);
+ // Demostrada por otros albaranes del lote: sí, con la misma fecha (su único albarán ese día).
+ const vinc={cuentasProveedor:new Set(["70"]),delMismoDia:()=>0};
+ r=base();assert.equal(await validarStel(r,async()=>[nota],vinc),true);
+ assert.match(r.manuscritos.stel.resolucion.evidencias.join(" "),/sin CIF del mismo proveedor/);
+ // Otra fecha, u otro albarán de compra del proveedor ese mismo día: no.
+ r=base();assert.equal(await validarStel(r,async()=>[{...nota,date:"2026-03-09"}],vinc),false);
+ r=base();assert.equal(await validarStel(r,async()=>[nota],{...vinc,delMismoDia:()=>1}),false);
 });

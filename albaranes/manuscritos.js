@@ -251,6 +251,17 @@ function codigosLeidos(lecturas){
  }
  return [...out];
 }
+// Lecturas a las que les falta UNA cifra («PRY1233»: fallo real 2026-10-22, la visión pierde una de
+// varias cifras iguales seguidas), y los códigos de 5 cifras que salen insertando una.
+function codigosIncompletos(lecturas){
+ const out=new Set();
+ for(const v of (lecturas||[]).filter(l=>l.tipo==="PRY"&&!l.tachado))for(const l of v.lecturas||[]){
+  const m=canon(l.codigo).match(/^(?:P?R?Y)(\d{4})$/);if(m)out.add("PRY"+m[1]);
+ }
+ return [...out];
+}
+const completa=(incompleto,codigo)=>{const c4=incompleto.slice(3),c5=codigo.slice(3);
+ for(let i=0;i<5;i++)if(c5.slice(0,i)+c5.slice(i+1)===c4)return true;return false;};
 const cifrasDistintas=(a,b)=>{let n=0;for(let i=0;i<Math.max(a.length,b.length);i++)if(a[i]!==b[i])n++;return n;};
 // Dos códigos que una mala lectura confunde: una cifra distinta o dos cifras contiguas intercambiadas.
 function confundibles(a,b){
@@ -279,10 +290,13 @@ function obraPorNombre(lecturas,ctx={}){
  if(!palabras.size)return null;
  const conNombre=cat.filter(e=>[...palabrasObra(e.nombre)].some(w=>palabras.has(w)));
  if(!conNombre.length)return null;
- const leidos=codigosLeidos(lecturas);
+ const leidos=codigosLeidos(lecturas),incompletos=codigosIncompletos(lecturas);
  const comunes=e=>[...palabrasObra(e.nombre)].filter(w=>palabras.has(w)).join(", ");
+ const vistos=[...leidos,...incompletos.map(x=>x+" (falta una cifra)")];
  const acepta=(e,ev,metodo)=>({valor:canon(e.codigo),literal:"",estado:"OK",confianza:0.93,motivos:[],
-  resolucion:{metodo,evidencias:[...(leidos.length?["Visión: "+leidos.join(" / ")]:[]),...ev],alternativas:leidos}});
+  resolucion:{metodo,evidencias:[...(vistos.length?["Visión: "+vistos.join(" / ")]:[]),...ev],alternativas:leidos}});
+ // Lo escrito a mano es compatible con el código: a una cifra, o le falta una.
+ const cerca=(c,unaCifra)=>leidos.some(unaCifra)||incompletos.some(x=>completa(x,c));
  // a) Número de obra impreso junto al nombre.
  for(const t of [].concat(ctx.obraImpresa||[])){
   const num=cifrasObra(t);if(!num)continue;
@@ -291,23 +305,24 @@ function obraPorNombre(lecturas,ctx={}){
   const c=canon(m[0].codigo);
   // Además, un código escrito a mano compatible (como mucho una cifra distinta): sin él no se sabe
   // si el albarán es de esa obra o solo la menciona (caso real: obra impresa sin código a mano).
-  if(!leidos.some(r=>cifrasDistintas(r,c)<=1))return null;
+  if(!cerca(c,r=>cifrasDistintas(r,c)<=1))return null;
   return acepta(m[0],["Número de obra impreso «"+t+"» y obra «"+m[0].nombre+"» del catálogo con «"+comunes(m[0])+"» en el albarán"],"obra_impresa_catalogo");
  }
  // b) Lectura a una cifra (o con dos cifras contiguas intercambiadas) del código de la obra que el
  // nombre señala (catálogo completo). El nombre debe señalar UNA obra, la que más palabras comparte
  // con el albarán y sin empate: una palabra común a varias obras («HOSPITAL») no identifica ninguna.
- if(ctx.catalogoObrasCompleto!==true||!leidos.length)return null;
+ // También una lectura a la que le falta una cifra: debe completarse solo con esa obra.
+ if(ctx.catalogoObrasCompleto!==true||!(leidos.length||incompletos.length))return null;
  const puntos=e=>enComun(e.nombre,palabras).length,mejor=Math.max(...conNombre.map(puntos));
  const mejores=conNombre.filter(e=>puntos(e)===mejor);
  if(mejores.length!==1)return null;
- const m=conNombre.filter(e=>{const c=canon(e.codigo);return !leidos.includes(c)&&leidos.some(r=>confundibles(r,c));});
+ const m=conNombre.filter(e=>{const c=canon(e.codigo);return !leidos.includes(c)&&cerca(c,r=>confundibles(r,c));});
  if(m.length!==1||m[0]!==mejores[0])return null;
  // Si alguna lectura es exactamente otra obra con el mismo nombre, hay dos interpretaciones.
  if(leidos.some(r=>conNombre.some(e=>canon(e.codigo)===r)))return null;
- const r=leidos.find(x=>confundibles(x,canon(m[0].codigo)));
- return acepta(m[0],["La lectura «"+r+"» difiere en una cifra (o en dos contiguas intercambiadas) de la obra del catálogo completo que mejor coincide con el albarán («"+
-  comunes(m[0])+"»): «"+m[0].nombre+"»"],"obra_nombre_catalogo");
+ const c=canon(m[0].codigo),r=leidos.find(x=>confundibles(x,c));
+ return acepta(m[0],[(r?"La lectura «"+r+"» difiere en una cifra (o en dos contiguas intercambiadas)":"A la lectura «"+incompletos.find(x=>completa(x,c))+"» le falta una cifra")+
+  " de la obra del catálogo completo que mejor coincide con el albarán («"+comunes(m[0])+"»): «"+m[0].nombre+"»"],"obra_nombre_catalogo");
 }
 const vacio=motivos=>({valor:null,literal:"",estado:"VACIO",confianza:null,motivos});
 
@@ -527,12 +542,18 @@ function fechaStel(v){
  const m=String(v).match(/^(\d{4}-\d{2}-\d{2})/);if(m)return m[1];
  const d=new Date(v);return isNaN(d)?null:d.toISOString().slice(0,10);
 }
-async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null}={}){
+// cuentasProveedor: cuentas de STEL SIN CIF que otros albaranes del lote ya han demostrado de este
+// proveedor (su número en el título de un único albarán de compra de esa cuenta, con la misma fecha).
+// delMismoDia(nota): cuántos OTROS albaranes de compra del proveedor tienen esa fecha (null si no se
+// sabe). La fecha solo identifica el albarán de compra si es el único del proveedor ese día (prueba
+// de fuerza 2026-10-22: con varios el mismo día, una cifra mal leída del ABP daba otro de ellos).
+// asignadas: albaranes de compra ya asignados a otros albaranes leídos.
+async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null,cuentasProveedor=null,delMismoDia=null,asignadas=null}={}){
  const m=r?.manuscritos?.stel;
  if(!m||!["REVISAR","AMBIGUO"].includes(m.estado)||typeof consultar!=="function")return false;
  const nombre=proveedorNombre||r.proveedor?.nombre;
  const cuenta=r.proveedor?.account_id;
- if(!nombre&&cuenta==null)return false;
+ if(!nombre&&cuenta==null&&!cuentasProveedor?.size)return false;
  const alternativas=[...new Set((m.resolucion?.alternativas||[]).map(canon).filter(c=>FORMATOS.stel.test(c)))];
  const validas=[];
  for(const c of alternativas){
@@ -541,15 +562,19 @@ async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null}={
   if(exactos.length!==1)continue;
   const d=exactos[0];
   // Proveedor: la cuenta de STEL (la misma que verificó el CIF en el catálogo) o, si no hay, el nombre.
-  const mismoProv=cuenta!=null&&d.accountId!=null?String(d.accountId)===String(cuenta):
-   canonNombre(d.supplier)!==""&&canonNombre(d.supplier)===canonNombre(nombre);
+  const vinculada=d.accountId!=null&&!!cuentasProveedor?.has(String(d.accountId));
+  const mismoProv=vinculada||(cuenta!=null&&d.accountId!=null?String(d.accountId)===String(cuenta):
+   canonNombre(d.supplier)!==""&&canonNombre(d.supplier)===canonNombre(nombre));
   const mismaFecha=r.fecha?.estado==="OK"&&!!r.fecha.valor&&fechaStel(d.date)===r.fecha.valor;
   const mismoNum=!!r.numero?.valor&&!!d.extraReference&&canon(d.extraReference)===canon(r.numero.valor);
+  const otros=typeof delMismoDia==="function"?delMismoDia(d):null,usada=!!asignadas?.has(String(d.id));
+  const porFecha=mismaFecha&&otros===0;
   if(typeof diagnostico==="function")diagnostico({ref:d.fullReference,proveedor_stel:d.supplier,cuenta_stel:d.accountId??null,proveedor:nombre,cuenta:cuenta??null,
    fecha_stel:d.date,fecha_stel_normalizada:fechaStel(d.date),fecha:r.fecha?.valor??null,referencia_externa:d.extraReference||null,numero:r.numero?.valor??null,
-   mismo_proveedor:mismoProv,misma_fecha:mismaFecha,mismo_numero:mismoNum});
-  if(mismoProv&&(mismaFecha||mismoNum))validas.push({c,ev:"Albarán de compra STEL "+d.fullReference+" (solo lectura): proveedor «"+d.supplier+"»"+
-   (mismaFecha?", misma fecha "+r.fecha.valor:"")+(mismoNum?", referencia del proveedor «"+d.extraReference+"»":"")});
+   mismo_proveedor:mismoProv,misma_fecha:mismaFecha,mismo_numero:mismoNum,otros_del_dia:otros,ya_asignado:usada});
+  if(mismoProv&&!usada&&(porFecha||mismoNum))validas.push({c,ev:"Albarán de compra STEL "+d.fullReference+" (solo lectura): "+
+   (vinculada?"cuenta de STEL sin CIF del mismo proveedor (por otros albaranes del lote)":"proveedor «"+d.supplier+"»")+
+   (porFecha?", misma fecha "+r.fecha.valor+" (su único albarán de compra ese día)":"")+(mismoNum?", referencia del proveedor «"+d.extraReference+"»":"")});
  }
  if(validas.length!==1)return false;
  const x=validas[0];

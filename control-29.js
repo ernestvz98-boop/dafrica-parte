@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261022lector25";
+const VERSION_LECTOR="20261022lector26";
 // Modelo de visión de los recortes de manuscritos, elegido por el usuario (2026-10-22) tras la
 // comparación sobre los mismos recortes de los 3 PDF reales: 32 de 60 códigos aceptados y
 // correctos frente a 29 del anterior (gpt-4o), 0 erróneos en ambos y menor coste. Las casillas
@@ -225,8 +225,17 @@ function montar(root){
    const consultarAbp=notasStel?async ref=>{const c=String(ref).toUpperCase().replace(/[^A-Z0-9]/g,"");
     return notasStel.filter(n=>String(n.fullReference).toUpperCase().replace(/[^A-Z0-9]/g,"")===c);}:consultarStel;
    stelAlb.origen=notasStel?"busqueda":"una_a_una";
+   // Cuentas de STEL sin CIF que otros albaranes del lote han demostrado de cada proveedor.
+   const cuentasDemostradas=lib.comprasStel?.cuentasSinCifPorProveedor?lib.comprasStel.cuentasSinCifPorProveedor(resultado.documentos):new Map();
+   // Con la lista de la búsqueda se sabe cuántos albaranes de compra tiene el proveedor cada día y
+   // cuáles están ya asignados; sin ella (consultas sueltas), la fecha sola no basta.
+   const asignadas=new Set(resultado.documentos.map(d=>d.resultado?.albaran_stel?.id).filter(x=>x!=null).map(String));
+   const delMismoDia=(x,extra)=>notasStel?n=>{const cuentas=new Set([...(extra||[]),...(x.proveedor?.account_id!=null?[String(x.proveedor.account_id)]:[])]);
+    return notasStel.filter(o=>String(o.id)!==String(n.id)&&cuentas.has(String(o.accountId))&&lib.manuscritos.fechaStel(o.date)===lib.manuscritos.fechaStel(n.date)).length;}:null;
    if(consultarAbp&&lib.manuscritos?.validarStel)for(const d of resultado.documentos){
+    const extra=notasStel?cuentasDemostradas.get(lib.comprasStel.claveProveedor(d.resultado))||null:null;
     if(d.resultado?.manuscritos&&await lib.manuscritos.validarStel(d.resultado,consultarAbp,{proveedorNombre:nombreProveedor(d.resultado),
+     cuentasProveedor:extra,delMismoDia:d.resultado?delMismoDia(d.resultado,extra):null,asignadas,
      diagnostico:x=>{(stelAlb.comparaciones||(stelAlb.comparaciones=[])).push(x);}}))stelAlb.validados++;
     // Prueba de modelos: la misma validación con STEL para el principal y para cada modelo.
     const cmp=d.resultado?.manuscritos?.comparacion;

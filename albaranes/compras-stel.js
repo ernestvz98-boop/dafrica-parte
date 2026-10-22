@@ -74,7 +74,7 @@ function resolver(docs,notas,{cuentasSinCif=null}={}){
    r.albaran_stel={fullReference:n.fullReference,abp,id:n.id,obra:t.obra,estado:"CONFLICTO",evidencias:[ev]};
    res.conflictos++;continue;
   }
-  r.albaran_stel={fullReference:n.fullReference,abp,id:n.id,obra:t.obra,estado:"OK",evidencias:[ev]};
+  r.albaran_stel={fullReference:n.fullReference,abp,id:n.id,cuenta:n.accountId??null,sin_cif:sinCif,obra:t.obra,estado:"OK",evidencias:[ev]};
   if(!aceptado(r.numero)){
    r.numero={...r.numero,estado:"OK",confianza:0.95,motivos:[],
     resolucion:{...(r.numero.resolucion||{}),metodo:"albaran_stel_titulo",evidencias:[...(r.numero.resolucion?.evidencias||[]),ev]}};
@@ -96,6 +96,16 @@ function resolver(docs,notas,{cuentasSinCif=null}={}){
  * aceptada y número de 5+ caracteres), para buscar en TODAS las cuentas de STEL (también las sin
  * CIF). Margen corto: la fecha del albarán de STEL o la de su título es la del papel.
  */
+/* Cuentas de STEL sin CIF demostradas de cada proveedor por los albaranes resueltos en ellas. */
+const claveProveedor=r=>r?.proveedor?.id!=null?"id:"+r.proveedor.id:r?.proveedor?.nif?"nif:"+canon(r.proveedor.nif):null;
+function cuentasSinCifPorProveedor(docs){
+ const out=new Map();
+ for(const d of docs){const r=d.resultado,k=claveProveedor(r);
+  if(k&&r.albaran_stel?.estado==="OK"&&r.albaran_stel.sin_cif&&r.albaran_stel.cuenta!=null){
+   if(!out.has(k))out.set(k,new Set());out.get(k).add(String(r.albaran_stel.cuenta));}}
+ return out;
+}
+
 function consultaSinCif(docs,{margen=5}={}){
  const fechas=[];
  for(const d of docs){const r=d.resultado;
@@ -120,5 +130,5 @@ function consulta(docs,{margen=10}={}){
  if(Date.parse(hasta)-Date.parse(desde)>400*864e5)desde=mover(hasta,-400);
  return {cuentas:[...cuentas].slice(0,40),desde,hasta};
 }
-return {resolver,consulta,consultaSinCif,partesTitulo,formatoAbp};
+return {resolver,consulta,consultaSinCif,cuentasSinCifPorProveedor,claveProveedor,partesTitulo,formatoAbp};
 });

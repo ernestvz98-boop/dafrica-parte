@@ -3,6 +3,34 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Lectura con una cifra perdida, cuenta sin CIF demostrada y ABP del mismo día (lector26)
+
+**Producción:** web en `main` (versión `20261022lector26`). Sin cambios en funciones ni datos.
+
+- **Lectura a la que le falta una cifra.** Fallo real (4 códigos de obra de la lectura del usuario):
+  la visión pierde una de varias cifras iguales seguidas (ejemplo ficticio: «PRY1233» por «PRY12333»).
+  - La regla del nombre la completa solo si el nombre de la obra (impreso, escrito o del título de
+    STEL) señala UNA obra del catálogo completo, sin empate, y esa obra es la única con ese nombre
+    que se obtiene insertando una cifra.
+  - Prueba de fuerza con el catálogo real: familia nueva «cifra perdida», 26.298 ataques, **0
+    falsas**, 5.436 completadas bien.
+- **Cuenta de STEL sin CIF demostrada.** Si otros albaranes del lote del mismo proveedor ya se han
+  encontrado en una cuenta sin CIF (número en el título, misma fecha, único), el ABP escrito a mano
+  de los demás se comprueba también contra esa cuenta.
+- **Fallo encontrado por la prueba de fuerza en esa misma regla** (y que ya existía con la cuenta
+  del CIF): si el proveedor tiene VARIOS albaranes de compra en STEL el mismo día, una cifra mal
+  leída del ABP coincidía con otro de ellos y se aceptaba (6 de 3.528 ataques).
+  - Ahora la fecha solo es prueba si es el ÚNICO albarán de compra del proveedor ese día (según la
+    lista de la búsqueda) y no está asignado a otro albarán leído.
+  - Sin la lista (consultas sueltas, si la búsqueda no termina), la fecha sola ya no basta: hace
+    falta el número del proveedor en la referencia de STEL.
+  - Tras la corrección: **0 falsas** (2.514 obra y 3.528 ABP sobre los 30 albaranes reales).
+- Proyección sobre la lectura real de la sesión 9 (gpt-5.1; solo con los albaranes de STEL guardados,
+  así que es un mínimo): **556/605 (91,9 %)**, 0 críticos. Manuscritos: 50 de 60.
+- Pruebas: regresión de la cifra perdida, de la cuenta demostrada y del mismo día; las de STEL
+  indican ahora si el albarán de compra es el único del proveedor ese día. Corpus sin visión igual
+  (91,0 %, 90,6 %, 93,3 %; 0 críticos, 0 AUTO_OK con error).
+
 ## 2026-10-22 · Albaranes de compra de STEL en cuentas sin CIF y robustez de la lectura (lector25)
 
 **Producción:** web en `main` (versión `20261022lector25`). Sin cambios en funciones ni datos: la
