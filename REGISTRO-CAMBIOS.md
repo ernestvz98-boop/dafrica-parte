@@ -3,6 +3,23 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-22 · Visión de los manuscritos con gpt-5.1 (lector24)
+
+**Producción:** web en `main` (versión `20261022lector24`). Sin cambios en funciones ni datos: la
+función `albaranes-manuscritos` ya admitía `gpt-5.1` en su lista cerrada de modelos.
+
+- Aprobado por el usuario tras la comparación sobre los mismos recortes (60 códigos a mano de los 3
+  PDF, misma validación): gpt-5.1 32 aceptados y correctos frente a 29 de gpt-4o, **0 erróneos en
+  ambos**, y menor coste (unos 0,16 $ por los recortes de los 3 PDF).
+- Solo los recortes de manuscritos (`modo: "manuscrito"`) piden `gpt-5.1`; las casillas impresas
+  dudosas siguen con el modelo por defecto de la función hasta medirlo también. La validación no
+  cambia: lo que lee la visión se acepta solo con evidencia (formato, catálogo, STEL, lote, QR).
+- El JSON guarda el consumo por uso (`motores.vision.por_modo`: modelo, consultas y tokens) y la
+  pantalla muestra el modelo de cada uso. `pruebas/comparar-vision.js` compara el principal solo con
+  sus consultas de manuscritos. La casilla de prueba compara ahora gpt-4o, gpt-4.1, gpt-5 y o4-mini.
+- Sin cambios en la biblioteca del lector (`albaranes/`): el corpus sin visión no cambia.
+- Verificado: `npm test` 264/264.
+
 ## 2026-10-22 · Lectura real de los 3 PDF con lector22 y corrección del cupo de STEL (lector23)
 
 **Producción:** web en `main` (versión `20261022lector23`). Sin cambios en funciones ni datos.

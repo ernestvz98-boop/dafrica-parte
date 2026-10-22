@@ -54,8 +54,10 @@ function compararVision(lectura,carpeta){
   f.uso=f.uso||{input_tokens:0,output_tokens:0,llamadas:0};
   for(const k of Object.keys(f.uso))f.uso[k]+=x.uso[k]||0;
  }
- const up=lectura.motores?.vision?.uso;
- if(tabla.principal&&up)tabla.principal.uso={...up};
+ // Principal: desde lector24, el consumo de sus consultas de manuscritos (por_modo.manuscrito,
+ // comparable con los demás); en lecturas anteriores, el total de todas sus consultas.
+ const v=lectura.motores?.vision,up=v?.por_modo?.manuscrito||v?.uso;
+ if(tabla.principal&&up)tabla.principal.uso={input_tokens:up.input_tokens||0,output_tokens:up.output_tokens||0,llamadas:up.llamadas||0};
  return tabla;
 }
 
@@ -64,12 +66,13 @@ if(require.main===module){
  if(!json){console.error("Uso: node pruebas/comparar-vision.js albaranes.json [carpeta]");process.exit(2);}
  const lectura=JSON.parse(fs.readFileSync(json,"utf8"));
  const tabla=compararVision(lectura,carpeta);
- const modeloPrincipal=lectura.motores?.vision?.uso?.modelo||"gpt-4o";
+ const v=lectura.motores?.vision,soloManuscritos=!!v?.por_modo?.manuscrito;
+ const modeloPrincipal=(soloManuscritos?v.por_modo.manuscrito.modelo:v?.uso?.modelo)||"gpt-4o";
  console.log("| Modelo | Aceptados correctos | ERRÓNEOS aceptados | Revisión (correcta entre alternativas) | Revisión (sin ella) | Vacío | Llamadas fallidas | Tokens entrada/salida | Coste estimado (USD) |");
  console.log("|---|---|---|---|---|---|---|---|---|");
  for(const [n,f] of Object.entries(tabla)){
   const modelo=n==="principal"?modeloPrincipal:n,coste=precio(modelo,f.uso);
-  console.log("| "+(n==="principal"?"principal ("+modelo+", todas las consultas)":n)+" | "+f.correcto+" | "+f.critico+" | "+f.revision_con+" | "+f.revision_sin+" | "+f.vacio+" | "+f.errores+" | "+
+  console.log("| "+(n==="principal"?"principal ("+modelo+(soloManuscritos?", consultas de manuscritos)":", todas las consultas)"):n)+" | "+f.correcto+" | "+f.critico+" | "+f.revision_con+" | "+f.revision_sin+" | "+f.vacio+" | "+f.errores+" | "+
    (f.uso?f.uso.input_tokens+" / "+f.uso.output_tokens:"—")+" | "+(coste==null?"—":coste.toFixed(3))+" |");
  }
  for(const [n,f] of Object.entries(tabla))if(f.criticos.length)console.log("Críticos de "+n+": "+f.criticos.length);

@@ -34,7 +34,7 @@ function evaluarWeb(lectura,carpeta){
  const m=lectura.motores,v=m?.vision,c=m?.catalogo;
  const motores=!m?"segunda fase no informada":"catálogo STEL "+(c.disponible?c.articulos+" artículos":"NO disponible")+
   (c.disponible&&!c.completo?" (incompleto"+(c.motivo?": "+c.motivo:"")+")":"")+(c.error?" ("+c.error+")":"")+
-  " · visión "+(!v.activa?"sin consultas":v.fallos?"NO disponible ("+v.fallos+"/"+v.llamadas+" fallidas"+(v.ultimo_error?": "+v.ultimo_error:"")+")":v.llamadas+" consultas")+
+  " · visión "+(!v.activa?"sin consultas":v.fallos?"NO disponible ("+v.fallos+"/"+v.llamadas+" fallidas"+(v.ultimo_error?": "+v.ultimo_error:"")+")":v.llamadas+" consultas"+(v.por_modo?" ("+Object.entries(v.por_modo).map(([k,x])=>k+": "+(x.modelo||"—")).join("; ")+")":""))+
   (m.stel_albaranes?" · albaranes STEL "+m.stel_albaranes.validados+" validados / "+m.stel_albaranes.consultas+" consultas"+(m.stel_albaranes.fallos?" ("+m.stel_albaranes.fallos+" fallidas)":""):"");
  return {corpus:"lectura web ("+(lectura.archivos||[]).map(a=>a.nombre).join(", ")+"; "+motores+")",informes,pendientes,sinRevisar};
 }

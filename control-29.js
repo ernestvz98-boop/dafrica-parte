@@ -10,10 +10,15 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261022lector23";
+const VERSION_LECTOR="20261022lector24";
+// Modelo de visión de los recortes de manuscritos, elegido por el usuario (2026-10-22) tras la
+// comparación sobre los mismos recortes de los 3 PDF reales: 32 de 60 códigos aceptados y
+// correctos frente a 29 del anterior (gpt-4o), 0 erróneos en ambos y menor coste. Las casillas
+// impresas dudosas siguen con el modelo por defecto de la función hasta medirlo también.
+const MODELO_MANUSCRITOS="gpt-5.1";
 // PRUEBA (no activa nada): modelos de visión que se comparan con el principal sobre los mismos
 // recortes de manuscritos, solo si se marca la casilla. El resultado no cambia.
-const MODELOS_COMPARAR=["gpt-4.1","gpt-5","gpt-5.1","o4-mini"];
+const MODELOS_COMPARAR=["gpt-4o","gpt-4.1","gpt-5","o4-mini"];
 if(!modules.some(m=>m.id===MODULO.id)){
  const i=modules.findIndex(m=>m.id==="costes");
  modules.splice(i>=0?i+1:modules.length,0,MODULO);
@@ -80,9 +85,11 @@ function montar(root){
      motores.vision.activa=true;motores.vision.llamadas++;
      try{
       const resp=await sb("/functions/v1/albaranes-manuscritos",{method:"POST",headers:{"Content-Type":"application/json"},
-       body:JSON.stringify({recortes,modo}),signal:AbortSignal.timeout(130000)});
-      const u=motores.vision.uso||(motores.vision.uso={modelo:null,input_tokens:0,output_tokens:0});
-      u.modelo=resp?.modelo||u.modelo;u.input_tokens+=resp?.uso?.input_tokens||0;u.output_tokens+=resp?.uso?.output_tokens||0;
+       body:JSON.stringify({recortes,modo,...(modo==="manuscrito"?{modelo:MODELO_MANUSCRITOS}:{})}),signal:AbortSignal.timeout(130000)});
+      // Consumo por uso (manuscritos / casillas impresas), cada uno con el modelo que respondió.
+      const pm=motores.vision.por_modo||(motores.vision.por_modo={});
+      const u=pm[modo]||(pm[modo]={modelo:null,llamadas:0,input_tokens:0,output_tokens:0});
+      u.modelo=resp?.modelo||u.modelo;u.llamadas++;u.input_tokens+=resp?.uso?.input_tokens||0;u.output_tokens+=resp?.uso?.output_tokens||0;
       return resp?.recortes||[];
      }catch(e){motores.vision.fallos++;motores.vision.ultimo_error=String(e?.message||e).slice(0,160);throw e;}
     };
@@ -246,7 +253,8 @@ function montar(root){
   const ETIQ={AUTO_OK:"AUTO_OK · verificado",REVISAR:'<span class="error">REVISAR</span>',ERROR_DOCUMENTO:'<b class="error">ERROR_DOCUMENTO</b>'};
   const m=r.motores,v=m?.vision,cat=m?.catalogo;
   const segunda=!m?"":'<p class="muted">Segunda fase · catálogo STEL (solo lectura): '+(cat.disponible?(cat.obras_completo?esc(cat.obras)+' obras y ':'obras <b>no disponibles</b>'+(cat.obras_motivo?' ('+esc(cat.obras_motivo)+')':'')+' · ')+esc(cat.articulos)+' artículos'+({cache:' (guardado en este navegador)',reanudado:' (descarga reanudada)',parcial_sin_avance:' (STEL no ha respondido; se usa lo guardado)'}[cat.origen]||'')+(cat.completo?'':' (<b>incompleto</b>'+(cat.motivo?': '+esc(cat.motivo):'')+'; sin catálogo completo no se validan códigos)'):'<b>no disponible</b>'+(cat.error?' ('+esc(cat.error)+')':''))+
-   ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas'+(v.ultimo_error?': '+esc(v.ultimo_error):'')+')':esc(v.llamadas)+' consultas')+
+   ' · visión de recortes: '+(!v.activa?'sin campos dudosos que consultar':v.fallos?'<b>no disponible</b> ('+esc(v.fallos)+' de '+esc(v.llamadas)+' consultas fallidas'+(v.ultimo_error?': '+esc(v.ultimo_error):'')+')':esc(v.llamadas)+' consultas'+
+    (v.por_modo?' ('+Object.entries(v.por_modo).map(([k,x])=>(k==="manuscrito"?"manuscritos":"casillas impresas")+": "+esc(x.modelo||"—")).join("; ")+')':''))+
    (m.stel_albaranes?' · albaranes STEL (códigos ABP): '+esc(m.stel_albaranes.validados)+' validados en '+esc(m.stel_albaranes.consultas)+' consultas'+
     (m.stel_albaranes.fallos?' (<b>'+esc(m.stel_albaranes.fallos)+' fallidas</b>'+(m.stel_albaranes.ultimo_error?': '+esc(m.stel_albaranes.ultimo_error):'')+')':''):'')+
    (m.stel_compras?.consultado?' · albaranes de compra STEL por número: '+esc(m.stel_compras.resueltos||0)+' encontrados'+(m.stel_compras.completo?'':' (<b>búsqueda incompleta</b>'+(m.stel_compras.motivo?': '+esc(m.stel_compras.motivo):'')+')'):
