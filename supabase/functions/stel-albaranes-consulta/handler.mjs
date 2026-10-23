@@ -15,6 +15,8 @@
  * 2026-10-22: v5. Con el filtro, cada proveedor se lee desde el final de su lista (fallo real: un
  *   proveedor con más de 2.000 albaranes agotaba el límite de páginas leyendo desde el principio).
  *   v6: el final se acota a una página (no al albarán exacto): unas 7 consultas menos por lista.
+ * 2026-10-23: v7. Páginas solapadas en un albarán con comprobación de continuidad: si la lista
+ *   cambia durante la lectura, la búsqueda queda incompleta («lista_cambiada»), nunca con huecos.
  */
 const cors={"Access-Control-Allow-Origin":"https://ernestvz98-boop.github.io","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...cors,"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}});
@@ -79,14 +81,19 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
    else{hi=Math.max(1000,2*(lo+1));while(await hay(hi)){lo=hi;hi*=2;if(hi>2e6)break;}}
    // Basta acotar el final a menos de una página: la primera página leída (desde `lo`) lo contiene.
    while(hi-lo>tam){const m=Math.floor((lo+hi)/2);if(await hay(m))lo=m;else hi=m;}
-   const filas=[];let total=null;
-   for(let inicio=Math.max(0,lo);;inicio=Math.max(0,inicio-tam)){
+   // Las páginas se solapan en un albarán y se comprueba que es el mismo: si la lista cambia
+   // mientras se lee (un albarán borrado desplaza las posiciones), se notaría un hueco silencioso
+   // (un «no existe» o un «único del día» falsos). Lista cambiada = búsqueda incompleta.
+   const filas=[];let total=null,anterior=null;
+   for(let inicio=Math.max(0,lo);;inicio=Math.max(0,inicio-(tam-1))){
     if(paginas>=maxPaginas)throw Error("limite_paginas");
     const f=await get({...filtro,limit:tam,start:inicio});paginas++;
     if(!f.every(valida))throw Error("filtro_inconsistente");
-    if(total===null)total=inicio+f.length;
+    if(anterior&&String(f[anterior.inicio-inicio]?.id)!==String(anterior.id))throw Error("lista_cambiada");
+    if(total===null){if(!f.length&&inicio>0)throw Error("lista_cambiada");total=inicio+f.length;}
     filas.push(...f);
-    if(inicio===0||!f.some(x=>dia(x["creation-date"]||x.date)>=limite))break;
+    if(inicio===0||!f.length||!f.some(x=>dia(x["creation-date"]||x.date)>=limite))break;
+    anterior={inicio,id:f[0].id};
    }
    return {filas,total};
   };

@@ -92,6 +92,38 @@ function resolver(docs,notas,{cuentasSinCif=null}={}){
 }
 
 /*
+ * Identidad del albarán de compra de STEL al final de la lectura: un mismo albarán de STEL (por su
+ * id o por su ABP), aceptado para DOS o más albaranes leídos, es un error de identidad (una cifra
+ * mal leída, un mismo día con varios albaranes…) que provocaría asociaciones equivocadas o
+ * duplicados. Ninguno se acepta: todos a revisión, con el motivo. docs: [{resultado}] (se modifican).
+ * Devuelve el número de albaranes leídos afectados.
+ */
+function conflictosIdentidad(docs){
+ const claves=new Map();
+ const anotar=(k,i)=>{if(!k)return;if(!claves.has(k))claves.set(k,new Set());claves.get(k).add(i);};
+ docs.forEach((d,i)=>{
+  const r=d?.resultado;if(!r)return;
+  const a=r.albaran_stel;
+  if(a&&a.estado==="OK"){anotar(a.id!=null?"id:"+a.id:null,i);anotar(canon(a.abp||a.fullReference)?"abp:"+canon(a.abp||a.fullReference):null,i);}
+  const m=r.manuscritos?.stel;
+  if(aceptado(m)){anotar(canon(m.valor)?"abp:"+canon(m.valor):null,i);anotar(m.resolucion?.id_stel!=null?"id:"+m.resolucion.id_stel:null,i);}
+ });
+ const afectados=new Set();
+ for(const [k,s] of claves)if(s.size>1)for(const i of s)afectados.add(i+"|"+k);
+ const porDoc=new Map();
+ for(const x of afectados){const [i,k]=x.split("|");if(!porDoc.has(+i))porDoc.set(+i,[]);porDoc.get(+i).push(k);}
+ for(const [i,ks] of porDoc){
+  const r=docs[i].resultado,otros=new Set();
+  for(const k of ks)for(const j of claves.get(k))if(j!==i)otros.add(docs[j].resultado?.numero?.valor||"#"+(j+1));
+  const motivo="El mismo albarán de compra de STEL quedaba asociado también a "+[...otros].join(", ")+": identidad sin resolver";
+  if(r.albaran_stel?.estado==="OK")r.albaran_stel={...r.albaran_stel,estado:"CONFLICTO",motivos:[...(r.albaran_stel.motivos||[]),motivo]};
+  const m=r.manuscritos?.stel;
+  if(aceptado(m))r.manuscritos.stel={...m,estado:"REVISAR",confianza:0.5,motivos:[...(m.motivos||[]),motivo]};
+ }
+ return porDoc.size;
+}
+
+/*
  * La búsqueda de la lectura: una en TODAS las cuentas. STEL corta con «403»/«429» tras muchas
  * consultas seguidas y al rato vuelve a responder (21-23/10/2026): un único reintento tras una
  * espera. Si no termina por larga (fechas muy separadas), por cuenta. buscar(b) pide {buscar: b} a
@@ -141,5 +173,5 @@ function consulta(docs,{margen=10}={}){
  if(Date.parse(hasta)-Date.parse(desde)>400*864e5)desde=mover(hasta,-400);
  return {cuentas:[...cuentas].slice(0,40),desde,hasta};
 }
-return {resolver,consulta,buscarNotasLectura,sinCupo,cuentasSinCifPorProveedor,claveProveedor,partesTitulo,formatoAbp};
+return {resolver,consulta,buscarNotasLectura,conflictosIdentidad,sinCupo,cuentasSinCifPorProveedor,claveProveedor,partesTitulo,formatoAbp};
 });

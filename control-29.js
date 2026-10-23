@@ -244,6 +244,8 @@ function montar(root){
       e.stel={...e.stel,valor:falso.manuscritos.stel.valor,estado:falso.manuscritos.stel.estado,confianza:falso.manuscritos.stel.confianza,metodo_final:"vision_recorte_albaran_stel"};
     }
    }
+   // Un mismo albarán de compra de STEL para dos albaranes leídos: ninguno se acepta.
+   if(lib.comprasStel?.conflictosIdentidad)stelAlb.conflictos_identidad=lib.comprasStel.conflictosIdentidad(resultado.documentos);
    // Coherencia de los códigos de obra entre todos los PDF leídos juntos.
    const man=resultado.documentos.map(d=>d.resultado?.manuscritos).filter(Boolean);
    if(man.length&&lib.manuscritos)lib.manuscritos.coherenciaLote(man,{catalogoObras});

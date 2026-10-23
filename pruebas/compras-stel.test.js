@@ -114,3 +114,21 @@ test("búsqueda de la lectura: con «403», un reintento tras la espera; si sigu
  s=con({...corte,motivo:"limite_paginas"},bien);r=await C.buscarNotasLectura(s.buscar,q,{esperar:async()=>{throw Error("no debe esperar");}});
  assert.equal(r.todas,false);assert.deepEqual(s.pedidas[1].cuentas,[7,8]);assert.equal(r.resp.completo,true);
 });
+
+test('identidad ABP: un mismo albarán de compra de STEL para dos albaranes leídos → ninguno aceptado',()=>{
+ const {conflictosIdentidad}=require('../albaranes/compras-stel.js');
+ const doc=(num,stel,man)=>({resultado:{numero:{valor:num,estado:'OK',confianza:1},albaran_stel:stel,manuscritos:man?{stel:man}:null}});
+ const docs=[
+  doc('11.111',{id:7,abp:'ABP26-0001',estado:'OK'},null),
+  doc('22.222',null,{valor:'ABP26-0001',estado:'OK',confianza:0.95,resolucion:{}}), // letra a mano, el mismo ABP
+  doc('33.333',{id:9,abp:'ABP26-0003',estado:'OK'},{valor:'ABP26-0003',estado:'OK',confianza:0.95,resolucion:{id_stel:9}}), // el suyo, coherente
+ ];
+ assert.equal(conflictosIdentidad(docs),2);
+ assert.equal(docs[0].resultado.albaran_stel.estado,'CONFLICTO');
+ assert.equal(docs[1].resultado.manuscritos.stel.estado,'REVISAR');
+ assert.match(docs[1].resultado.manuscritos.stel.motivos.at(-1),/11\.111/);
+ assert.equal(docs[2].resultado.albaran_stel.estado,'OK');assert.equal(docs[2].resultado.manuscritos.stel.estado,'OK');
+ // El mismo id con otro formato de referencia también es conflicto.
+ const d2=[doc('1',{id:5,abp:'ABP26-0005',estado:'OK'}),doc('2',null,{valor:'ABP26-0050',estado:'OK',confianza:0.95,resolucion:{id_stel:5}})];
+ assert.equal(conflictosIdentidad(d2),2);
+});

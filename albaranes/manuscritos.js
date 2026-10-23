@@ -580,14 +580,16 @@ async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null,cu
   if(typeof diagnostico==="function")diagnostico({ref:d.fullReference,proveedor_stel:d.supplier,cuenta_stel:d.accountId??null,proveedor:nombre,cuenta:cuenta??null,
    fecha_stel:d.date,fecha_stel_normalizada:fechaStel(d.date),fecha:r.fecha?.valor??null,referencia_externa:d.extraReference||null,numero:r.numero?.valor??null,
    mismo_proveedor:mismoProv,misma_fecha:mismaFecha,mismo_numero:mismoNum,otros_del_dia:otros,ya_asignado:usada});
-  if(mismoProv&&!usada&&(porFecha||mismoNum))validas.push({c,ev:"Albarán de compra STEL "+d.fullReference+" (solo lectura): "+
+  if(mismoProv&&!usada&&(porFecha||mismoNum))validas.push({c,id:d.id??null,ev:"Albarán de compra STEL "+d.fullReference+" (solo lectura): "+
    (vinculada?"cuenta de STEL sin CIF del mismo proveedor (por otros albaranes del lote)":"proveedor «"+d.supplier+"»")+
    (porFecha?", misma fecha "+r.fecha.valor+" (su único albarán de compra ese día)":"")+(mismoNum?", referencia del proveedor «"+d.extraReference+"»":"")});
  }
  if(validas.length!==1)return false;
  const x=validas[0];
  r.manuscritos.stel={...m,valor:formatoStel(x.c),estado:"OK",confianza:0.95,motivos:[],
-  resolucion:{...m.resolucion,metodo:"vision_recorte_albaran_stel",evidencias:[...(m.resolucion?.evidencias||[]),x.ev]}};
+  resolucion:{...m.resolucion,metodo:"vision_recorte_albaran_stel",id_stel:x.id??null,evidencias:[...(m.resolucion?.evidencias||[]),x.ev]}};
+ // Ya asignado: el siguiente albarán leído de la misma lectura no puede quedarse con el mismo.
+ if(x.id!=null&&asignadas&&typeof asignadas.add==="function")asignadas.add(String(x.id));
  return true;
 }
 

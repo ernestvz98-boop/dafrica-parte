@@ -402,3 +402,16 @@ test("coherencia del lote: los títulos de la tabla no son palabras de obra",()=
  const tercero={obraImpresa:["RESIDENCIA FICTICIA"],obra:{valor:"PRY90111",estado:"REVISAR",confianza:0.8,resolucion:{metodo:"vision_recorte"}}};
  assert.equal(coherenciaLote([ancla,tercero]),1);
 });
+
+test('validarStel registra el albarán de compra asignado: el siguiente albarán leído no puede quedarse con él',async()=>{
+ const M=require('../albaranes/manuscritos.js');
+ const nota={id:41,fullReference:'ABP26-0041',supplier:'PROVEEDOR FICTICIO',accountId:3,date:'2026-05-04',extraReference:''};
+ const mk=()=>({proveedor:{nombre:'PROVEEDOR FICTICIO',account_id:3},fecha:{valor:'2026-05-04',estado:'OK'},numero:{valor:'1'},
+  manuscritos:{stel:{valor:null,literal:'ABP26 0041',estado:'REVISAR',confianza:0.5,resolucion:{alternativas:['ABP260041']}}}});
+ const asignadas=new Set(),a=mk(),b=mk();
+ const opc={asignadas,delMismoDia:()=>0};
+ assert.equal(await M.validarStel(a,async()=>[nota],opc),true);
+ assert.ok(asignadas.has('41'));assert.equal(a.manuscritos.stel.resolucion.id_stel,41);
+ assert.equal(await M.validarStel(b,async()=>[nota],opc),false);
+ assert.equal(b.manuscritos.stel.estado,'REVISAR');
+});

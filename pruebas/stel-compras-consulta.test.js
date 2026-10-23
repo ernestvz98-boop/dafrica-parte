@@ -66,3 +66,23 @@ test('proveedor con miles de albaranes: con el filtro se lee desde el final de s
  assert.equal(r.notas.filter(n=>n.accountId===5).length,21);assert.equal(r.notas.filter(n=>n.accountId===6).length,40);
  assert.ok(consultas.length<40,'consultas: '+consultas.length);
 });
+
+test('la lista cambia durante la lectura (un albarán borrado): búsqueda incompleta, nunca con huecos',async()=>{
+ const {buscarNotas}=await mod();
+ let lista=NOTAS.slice(),leidas=0;
+ const r=await buscarNotas(async url=>{
+  const u=new URL(url),s=Number(u.searchParams.get('start')),l=Number(u.searchParams.get('limit'));
+  const pagina=lista.slice(s,s+l);
+  // Sondeo de la cuenta (1.ª lectura de página) y primera página del final (2.ª); después, un borrado.
+  if(l>1&&++leidas===2)lista=lista.filter(n=>n.id!==200);
+  return response(pagina);
+ },'k',{cuentas:[1],desde:'2026-07-20',hasta:'2026-10-30',dormir:async()=>{}});
+ assert.equal(r.completo,false);assert.equal(r.motivo,'lista_cambiada');assert.equal(r.notas.length,0);
+});
+test('páginas solapadas: sin cambios, la lectura hacia atrás no pierde ni repite albaranes',async()=>{
+ const {buscarNotas}=await mod();
+ const r=await buscarNotas(stel(false),'k',{cuentas:[1,2,3],desde:'2026-07-15',hasta:'2026-10-30',tam:40,dormir:async()=>{}});
+ assert.equal(r.completo,true);
+ const esperadas=NOTAS.filter(n=>n.date.slice(0,10)>='2026-07-15').map(n=>n.id);
+ assert.deepEqual(r.notas.map(n=>n.id).sort((a,b)=>a-b),esperadas);
+});

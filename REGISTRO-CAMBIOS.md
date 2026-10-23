@@ -3,6 +3,28 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-23 · Identidad del albarán de compra de STEL y paginación de la búsqueda (sin publicar)
+
+**Producción:** sin cambios. En la rama de desarrollo; la función `stel-albaranes-consulta` v7 está
+pendiente de desplegar y la web pendiente de publicar (con autorización).
+
+1. **Paginación de la búsqueda en STEL.** La función leía la lista hacia atrás por posiciones, sin
+   solapar páginas. Si se borraba o añadía un albarán durante la lectura, las posiciones se
+   desplazaban y podía saltarse alguno en silencio. Eso daba un «no existe» falso (posible duplicado
+   al crear) o un «único del día» falso (asociación incorrecta). Ahora:
+   - las páginas se solapan en un albarán y se comprueba que es el mismo;
+   - si no coincide, la búsqueda queda incompleta («lista_cambiada»), y una búsqueda incompleta
+     nunca cuenta como «no existe».
+2. **Identidad ABP.** El conjunto de albaranes de compra «ya asignados» se calculaba una sola vez,
+   antes de validar los ABP escritos a mano. Así, dos albaranes leídos del mismo lote podían quedarse
+   con el mismo albarán de compra. Ahora:
+   - cada validación lo añade al conjunto;
+   - al final, `comprasStel.conflictosIdentidad` deja en revisión cualquier albarán de compra (por
+     id o por ABP) aceptado para dos o más albaranes leídos, con el motivo.
+
+Pruebas: `stel-compras-consulta.test.js` (lista cambiada durante la lectura; páginas solapadas sin
+pérdidas ni repeticiones), `compras-stel.test.js` y `manuscritos.test.js`. `npm test`: 292/292.
+
 ## 2026-10-23 · Lectura real de 2 PDF nuevos: separación, página de la línea y descripciones incompletas (lector29)
 
 **Producción:** web en `main` (versión `20261023lector29`). Sin cambios en funciones ni datos.
