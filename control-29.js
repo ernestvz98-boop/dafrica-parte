@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261023lector28";
+const VERSION_LECTOR="20261023lector29";
 // Modelo de visión de los recortes de manuscritos, elegido por el usuario (2026-10-22) tras la
 // comparación sobre los mismos recortes de los 3 PDF reales: 32 de 60 códigos aceptados y
 // correctos frente a 29 del anterior (gpt-4o), 0 erróneos en ambos y menor coste. Las casillas

@@ -357,10 +357,14 @@ function evidencias(campo,codigo,ctx){
 
 /*
  * Palabras que identifican una obra («MOLINO», «VEGAS», «NAVE», «PISCINAS»…), sin rótulos,
- * números ni palabras comunes a todos los albaranes (la comarca, la empresa, el almacén).
+ * números ni palabras comunes a todos los albaranes (la comarca, la empresa, el almacén) ni los
+ * títulos de la tabla (fallo hallado 2026-10-23: «REFERENCIA DESCRIPCIÓN CANTIDAD P. UNITARIO
+ * IMPORTE» se tomaba como obra impresa y «CANTIDAD», «IMPORTE» unían albaranes de obras distintas).
  */
 const VACIAS=new Set(["OBRA","OBRAS","REF","REFERENCIA","DATOS","PEDIDO","SU","DE","DEL","LA","EL","LOS","LAS","Y","EN","SL","SLU","SA",
- "DAFRICA","BIERZO","LEON","PONFERRADA","CAMPONARAYA","ALMACEN","STOCK","TALLER","SUMINISTRO","MONTAJE","ENTREGA","CONTACTO","RETIRADO","POR"]);
+ "DAFRICA","BIERZO","LEON","PONFERRADA","CAMPONARAYA","ALMACEN","STOCK","TALLER","SUMINISTRO","MONTAJE","ENTREGA","CONTACTO","RETIRADO","POR",
+ "DESCRIPCION","CONCEPTO","CANTIDAD","CANT","UNIDAD","UNIDADES","PRECIO","UNITARIO","IMPORTE","TOTAL","DESCUENTO","CODIGO","ARTICULO",
+ "BULTOS","TALLA","NETO","BRUTO","SUBTOTAL"]);
 function palabrasObra(t){
  return new Set(String(t||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/[^A-Z ]/g," ")
   .split(/\s+/).filter(x=>x.length>=4&&!VACIAS.has(x)));

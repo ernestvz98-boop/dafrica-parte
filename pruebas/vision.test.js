@@ -113,7 +113,7 @@ test("código con texto pegado: la visión del recorte no confirma una descripci
  assert.match(l.referencia.literal,/\s/,"precondición: el código lleva texto pegado");
  assert.notEqual(l.descripcion.resolucion?.metodo,"vision_coincide_ocr");
  assert.ok(l.descripcion.confianza<0.9||l.descripcion.estado!=="OK");
- assert.ok(l.descripcion.motivos.some(m=>/Frontera entre código y descripción/.test(m)));
+ assert.ok(l.descripcion.motivos.some(m=>/Frontera entre código y descripción|El código lleva texto pegado/.test(m)));
 });
 
 test("código con S/5, Z/2, B/8 o G/6 (sin O/0 ni I/1): visión y OCR iguales lo confirman; con O/0 no",async()=>{

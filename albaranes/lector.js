@@ -48,7 +48,11 @@ function firmaPagina(resultado,pagina){
  */
 function continua(primera,ultima,f){
  if(f.vacia)return true;
- if(f.pagina&&f.pagina.k>1&&(!ultima.pagina||f.pagina.k===ultima.pagina.k+1)&&(!f.nif||!primera.nif||f.nif===primera.nif))return true;
+ // Números de albarán distintos: otro albarán, diga lo que diga «Página k». Y «Página k» solo
+ // prueba la continuación si es la siguiente (la 2 si la anterior no se leyó). Fallo real
+ // 2026-10-23: el OCR leyó «Pag:9» en «Pag: 1» (con un ABP a mano al lado) y unió dos albaranes.
+ if(f.numero&&primera.numero&&f.numero!==primera.numero)return false;
+ if(f.pagina&&f.pagina.k>1&&f.pagina.k===(ultima.pagina?ultima.pagina.k+1:2)&&(!f.nif||!primera.nif||f.nif===primera.nif))return true;
  if(f.pagina&&f.pagina.k===1)return false;
  if(f.nif&&primera.nif&&f.nif!==primera.nif)return false;
  if(f.numero&&primera.numero)return f.numero===primera.numero;

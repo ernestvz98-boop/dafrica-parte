@@ -33,6 +33,17 @@ function paginaDesdePalabras(palabras,{numero=1,anchoPx,altoPx,dpi=300,desplazam
   palabras=palabras.map(p=>{const d=inclinacion*((p.x0+p.x1)/2-cx);return {...p,y0:p.y0-d,y1:p.y1-d};});
  }
  const fragmentos=[],girados=[];
+ // Signo corto de confianza ínfima DENTRO de una línea impresa (palabras fiables de su altura a los
+ // dos lados): no es un trazo de bolígrafo, es texto impreso mal leído (fallo real 2026-10-23:
+ // «Ø40» leído «M40» con confianza 24 se descartaba y la descripción, sin «Ø40», se aceptaba). Se
+ // conserva: su baja confianza deja la casilla en revisión.
+ const porLineaOcr=new Map();
+ for(const p of palabras)if(p.linea!=null){if(!porLineaOcr.has(p.linea))porLineaOcr.set(p.linea,[]);porLineaOcr.get(p.linea).push(p);}
+ const dentroDeTexto=p=>{
+  const h=p.y1-p.y0,parecida=q=>Math.abs((q.y1-q.y0)-h)<=0.5*Math.max(h,q.y1-q.y0);
+  const ws=(porLineaOcr.get(p.linea)||[]).filter(q=>q!==p&&q.conf>=60&&/\w{2,}/.test(String(q.texto||""))&&parecida(q));
+  return ws.some(q=>q.x1<=p.x0+2&&p.x0-q.x1<3*h)&&ws.some(q=>q.x0>=p.x1-2&&q.x0-p.x1<3*h);
+ };
  for(const p of palabras){
   // Rayas verticales de la tabla pegadas a la palabra («1301097020|»): no forman parte del texto.
   // Tampoco una cola de rayas largas («JERRAP25LN-—», la tinta de un subrayado); «1,00-» se conserva.
@@ -40,7 +51,7 @@ function paginaDesdePalabras(palabras,{numero=1,anchoPx,altoPx,dpi=300,desplazam
   if(!texto)continue;
   if(BASURA.test(texto)){descartadas.push(texto);continue;}
   // Trazos de bolígrafo (círculos, subrayados) leídos como 1–3 caracteres de confianza ínfima.
-  if(texto.length<=3&&Number.isFinite(p.conf)&&p.conf<30&&!/^\d+([.,]\d+)?%?$/.test(texto)){descartadas.push(texto);continue;}
+  if(texto.length<=3&&Number.isFinite(p.conf)&&p.conf<30&&!/^\d+([.,]\d+)?%?$/.test(texto)&&!dentroDeTexto(p)){descartadas.push(texto);continue;}
   // Texto girado de los márgenes (avisos legales verticales): basura de baja confianza en el borde.
   // Los fragmentos cortos del texto girado salen con confianza media («25», «Ep:»): umbral mayor.
   // Fragmentos de 1–3 caracteres en el margen exterior: letras sueltas del texto vertical

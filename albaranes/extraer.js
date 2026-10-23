@@ -1031,6 +1031,17 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   f.motivos.push("Cuadre incompleto: "+f.cuadre.detalle);
  }
  if(f.referencia.estado==="VACIO"&&!perfil?.permite_sin_referencia)f.motivos.push("Línea sin referencia");
+ // Casilla del código con el principio de la descripción («100200 RACOR» por «GF RACOR MANGUERA…»;
+ // «Yeso proyectar» en un proveedor sin columna de código): la descripción leída puede estar
+ // incompleta, no se acepta sola (fallo real 2026-10-23: 8 descripciones sin su primera palabra
+ // aceptadas). Un código con espacios propio («CUT PEDOBLAM1/4X3/8 (20M)») no termina en palabra.
+ const tokensRef=String(f.referencia.literal||"").trim().split(/\s+/).filter(Boolean);
+ const pegada=tokensRef.length>1&&/^[A-Za-zÁÉÍÓÚÑÜáéíóúñü]{3,}\.?$/.test(tokensRef.at(-1));
+ if(f.descripcion.estado==="OK"&&tokensRef.length&&(pegada||perfil?.sin_columna_codigo)){
+  f.descripcion={...f.descripcion,estado:"REVISAR",motivos:[...(f.descripcion.motivos||[]),
+   pegada?"El código lleva texto pegado («"+tokensRef.at(-1)+"»): puede faltar el principio de la descripción":
+    "El proveedor no imprime código: lo leído como código («"+f.referencia.literal+"») puede ser el principio de la descripción"]};
+ }
  if(cruda.partida)f.columnas_estimadas=true;
  // Columna cuyo título no se pudo leer: asignada por posición, no se acepta sin revisión.
  for(const k of cruda.titulosInferidos||[])if(f[k]?.estado==="OK"){
@@ -1056,6 +1067,12 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   for(const k of ["referencia","descripcion","cantidad","unidad","precio","descuento","importe"])
    if(f[k].estado==="OK")f[k]={...f[k],estado:"REVISAR",motivos:[...(f[k].motivos||[]),"Posición de columna estimada"]};
  }
+ // Fila sin código ni descripción con alguna cifra («7»: trazo de una firma en la columna de la
+ // cantidad): no es un artículo seguro y sus cifras no se aceptan solas (fallo real 2026-10-23).
+ // Las que cuadran (cantidad × precio = importe) sí son cifras impresas.
+ if(f.referencia.estado==="VACIO"&&f.descripcion.estado==="VACIO")
+  for(const k of ["cantidad","precio","descuento","subtotal","importe"])if(f[k]?.estado==="OK")
+   f[k]={...f[k],estado:"REVISAR",motivos:[...(f[k].motivos||[]),"Fila sin código ni descripción (posible trazo o anotación)"]};
  if(f.cantidad.valor===0)f.motivos.push("Cantidad 0 (posible pendiente de servir)");
  if(["AMBIGUO","INVALIDO","VACIO"].includes(f.cantidad.estado))
   f.motivos.push("Cantidad: "+(f.cantidad.motivos[0]||"celda vacía"));
@@ -1238,6 +1255,20 @@ function extraerDePaginas(paginas,opciones={}){
    ant.descripcion={...ant.descripcion,estado:"REVISAR",motivos:[...(ant.descripcion.motivos||[]),"La fila siguiente, sin código, puede ser el final de esta descripción («"+l.descripcion.literal+"»)"]};
    ant.motivos.push("Descripción posiblemente cortada: sigue una fila sin código");ant.estado="REVISAR";
   }
+ });
+ // Fila siguiente cuyo «código» no tiene el formato de código del proveedor («15m2/paquete»,
+ // «λ=0.035 W/mk», renglones de una descripción larga de DECOTAP leídos en la columna del código):
+ // la descripción anterior puede seguir en ella (fallo real 2026-10-23: aceptada cortada).
+ const reFormatoRef=perfil?.formato_referencia?new RegExp(perfil.formato_referencia):null;
+ if(reFormatoRef)salida.lineas.forEach((l,i)=>{
+  const ant=salida.lineas[i-1];
+  // Basta con que la primera palabra tenga la forma, también con caracteres que el OCR confunde
+  // («3OOABC765432l Montante» es una fila de artículo; «15m2/paquete», no).
+  const t=String(l.referencia.literal||"").trim().split(/\s+/)[0],u=t.toUpperCase();
+  const pareceCodigo=[t,u,u.replace(/[OQD]/g,"0").replace(/[IL]/g,"1").replace(/Z/g,"2").replace(/S/g,"5").replace(/B/g,"8").replace(/G/g,"6")].some(x=>reFormatoRef.test(x));
+  if(!ant||l.pagina!==ant.pagina||ant.descripcion.estado!=="OK"||l.referencia.estado==="VACIO"||pareceCodigo)return;
+  ant.descripcion={...ant.descripcion,estado:"REVISAR",motivos:[...(ant.descripcion.motivos||[]),"La fila siguiente («"+l.referencia.literal+"») no tiene forma de código del proveedor: puede ser el final de esta descripción"]};
+  ant.motivos.push("Descripción posiblemente cortada: la fila siguiente no es un código");ant.estado="REVISAR";
  });
  for(const x of tablas)if(x.t)salida.lineas_ignoradas.push(...x.t.ignoradas);
  // Pie: totales impresos.

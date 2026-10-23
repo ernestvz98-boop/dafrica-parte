@@ -134,3 +134,20 @@ test("página escaneada en blanco: se adjunta al albarán anterior y se informa;
  assert.equal(r.documentos[1].estado_documento,"ERROR_DOCUMENTO");
  assert.deepEqual(r.resumen.paginas_en_blanco,[2]);assert.equal(r.resumen.paginas_completas,true);
 });
+
+// Fallo real (2026-10-23): el OCR leyó «Pag:9» en la cabecera de otro albarán («Pag: 1», con un ABP a
+// mano al lado) y se unieron dos albaranes con números distintos.
+test("«Página k» no une páginas con números de albarán distintos, ni salta páginas",()=>{
+ const p1={nif:NIF,numero:"600111",pagina:null,sigue:false,totales:false,vacia:false};
+ const p2={nif:NIF,numero:"600222",pagina:{k:9,n:null},sigue:false,totales:true,vacia:false};
+ assert.equal(continua(p1,p1,p2),false);
+ assert.equal(continua(p1,p1,{...p2,pagina:{k:2,n:null}}),false);
+ // Sin número legible: «Página 9» tras una página sin numerar no es la siguiente; «Página 2» sí.
+ assert.equal(continua(p1,p1,{...p2,numero:null}),false);
+ assert.equal(continua(p1,p1,{...p2,numero:null,pagina:{k:2,n:null}}),true);
+ // Con la anterior numerada, solo la siguiente («Página 3» tras «Página 2»).
+ const pp2={...p1,pagina:{k:2,n:null}};
+ assert.equal(continua(p1,pp2,{...p2,numero:null,pagina:{k:3,n:null}}),true);
+ assert.equal(continua(p1,pp2,{...p2,numero:null,pagina:{k:5,n:null}}),false);
+ assert.equal(agruparPaginas([{n:1,firma:p1},{n:2,firma:p2}]).length,2);
+});

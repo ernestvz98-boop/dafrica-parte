@@ -3,6 +3,64 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-23 · Lectura real de 2 PDF nuevos: separación, página de la línea y descripciones incompletas (lector29)
+
+**Producción:** web en `main` (versión `20261023lector29`). Sin cambios en funciones ni datos.
+
+Lectura del usuario con lector28 de 2 PDF nuevos (14 albaranes: Saltoki ×4, Bersum ×2, Almacenes
+Gallego ×4, Hijos de Tomás Sorribas ×2, Decotap y un albarán de hormigón). STEL respondió (una
+búsqueda, 27 consultas, 9 albaranes de compra). Respuestas correctas transcritas de las imágenes
+(fuera de git). Resultado: **278/370 (75,1 %), 8 errores críticos**, más los del albarán unido con
+otro (el evaluador no puede compararlo).
+
+1. **Dos albaranes unidos.** En «Pag: 1», con el ABP escrito al lado, el OCR leyó «Pag:9». Como
+   página 9, se unió al albarán anterior aunque los números eran distintos (dos de Saltoki). Ahora:
+   - dos páginas con números de albarán distintos nunca se unen;
+   - «Página k» solo prueba la continuación si es la siguiente (la 2 si la anterior no se leyó).
+2. **Relectura en la página equivocada.** En un albarán de varias páginas, el código y la descripción
+   dudosos de la segunda página se releían (y recortaban para la visión) en la primera. Una línea
+   tomó así el texto de la línea a su misma altura de la otra página («80X80» en lugar de «130X90»),
+   aceptado con 0,93. Ahora cada línea se relee en su página.
+3. **Descripciones sin su primera palabra** (los 8 críticos). La palabra caía en la casilla del
+   código («100200 RACOR», «300ABC1234567 Soporte»), o en una columna de código deducida en un
+   proveedor que no imprime código («Yeso proyectar»). La descripción incompleta se aceptaba. Ahora
+   la descripción queda en revisión si:
+   - el código lleva una palabra pegada al final;
+   - el proveedor no tiene columna de código (perfil `sin_columna_codigo`: Hijos de Tomás Sorribas)
+     y aun así se lee algo como código;
+   - con formato de código del proveedor, la fila siguiente no tiene forma de código («15m2/paquete»,
+     renglones de una descripción larga de DECOTAP). Se toleran O/0, S/5… en el código.
+4. **Signo impreso descartado como trazo de bolígrafo.** El motor local leyó «Ø40» como «M40» con
+   confianza 24 y lo descartaba; la descripción, sin «Ø40», se aceptaba. Ahora un signo corto de
+   poca confianza entre palabras impresas de su línea no se descarta, y la casilla queda en revisión.
+5. **Fila fantasma.** El trazo de una firma se leyó «7» en la columna de la cantidad, sin código ni
+   descripción, con la cantidad aceptada. Ahora las cifras de una fila sin código ni descripción
+   quedan en revisión, salvo las que cuadran.
+6. **Coherencia del lote** (hallado en Chromium). La cabecera de la tabla («REFERENCIA DESCRIPCIÓN
+   CANTIDAD P. UNITARIO IMPORTE») se tomaba como obra impresa, y «CANTIDAD» o «IMPORTE» unían
+   albaranes de obras distintas. Los títulos de la tabla ya no cuentan como palabras de obra.
+7. **Evaluador.** Una fila con texto pegado al código se emparejaba con la siguiente y daba errores
+   que no eran. Ahora también empareja por la primera palabra del código y por el importe; cada
+   campo se juzga igual que antes.
+
+Verificación:
+- `npm test`: 288 pruebas. Hay una regresión por cada fallo, con datos ficticios, y todas fallaban
+  con lector28.
+- Corpus (5 PDF, 44 albaranes, motor local): **818/927 (88,2 %), 0 críticos**, 0 AUTO_OK con error.
+  - Los 3 de siempre, igual que antes: 91,0 % (90,6 % como en la web).
+  - Los 2 nuevos: 84,3 % (83,0 % como en la web).
+- Prueba de fuerza de obras: 0 falsas.
+- Chromium con los 2 PDF nuevos (visión y STEL simulados): 14 albaranes bien separados, 10 ABP
+  correctos, **0 críticos**, sin errores de JavaScript.
+- Proyección de la lectura real anterior (3 PDF), con los albaranes de compra de STEL de esta
+  lectura: 573/605 (94,7 %), 0 críticos.
+
+Pendiente:
+- el albarán de hormigón (sin tabla) queda en ERROR_DOCUMENTO, sin nada aceptado;
+- Hijos de Tomás Sorribas: el lector crea una columna de código que no existe (las descripciones
+  quedan en revisión);
+- las descripciones de varios renglones de DECOTAP quedan en revisión.
+
 ## 2026-10-23 · STEL sin respuesta durante la lectura (lector28)
 
 **Producción:** web en `main` (versión `20261023lector28`). Sin cambios en funciones ni datos.

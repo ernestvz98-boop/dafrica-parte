@@ -43,9 +43,15 @@ function clasificar({campo,esperado,obtenido,estado,debeMarcarse,tipo,confianza=
 }
 
 // Alineación de líneas esperadas/obtenidas para que una fila perdida no desplace las demás.
+// Solo empareja filas; cada campo se juzga después igual. También vale la primera palabra del código
+// leído («100200 RACOR» es la fila de «100200») y el importe (proveedores sin código): sin ello, una
+// fila con texto pegado al código se emparejaba con la siguiente y daba errores que no eran.
 function alinear(esperadas,obtenidas){
- const sim=(e,o)=>(e.referencia&&N.limpiar(e.referencia)===N.limpiar(o.referencia.literal)?2:0)+
-  (N.canon(e.descripcion)&&N.canon(e.descripcion)===N.canon(o.descripcion.literal)?1:0);
+ const primera=t=>N.limpiar(String(t||"").trim().split(/\s+/)[0]||"");
+ const sim=(e,o)=>(e.referencia&&(N.limpiar(e.referencia)===N.limpiar(o.referencia.literal)||
+   (String(o.referencia.literal||"").trim().includes(" ")&&primera(o.referencia.literal)===N.limpiar(e.referencia)))?2:0)+
+  (N.canon(e.descripcion)&&N.canon(e.descripcion)===N.canon(o.descripcion.literal)?1:0)+
+  (e.importe!=null&&typeof o.importe?.valor==="number"&&[].concat(e.importe).some(x=>Math.abs(x-o.importe.valor)<1e-9)?1:0);
  const n=esperadas.length,m=obtenidas.length;
  const S=Array.from({length:n+1},()=>new Array(m+1).fill(0));
  for(let i=1;i<=n;i++)S[i][0]=-i;

@@ -322,3 +322,14 @@ test("importe leído dentro de la columna de descuento («50 3,30», importe vac
  const m=leer(pag("3,90")).lineas[0];
  assert.equal(m.importe.estado,"VACIO");assert.notEqual(m.cuadre.estado,"VERIFICADO");assert.equal(m.estado,"REVISAR");
 });
+
+// Fallo real (2026-10-23): «Ø40» impreso en medio de una descripción, leído «M40» con confianza 24,
+// se descartaba como trazo de bolígrafo; la descripción quedaba sin él y se aceptaba.
+test("signo corto de confianza ínfima entre palabras impresas de su línea: se conserva (casilla en revisión); suelto, se descarta",()=>{
+ const pag=paginaDesdePalabras([w("TUBO",100,200,95,{linea:"t"}),w("3M",125,200,95,{linea:"t"}),w("M40",140,200,24,{linea:"t"}),w("PVC",160,200,95,{linea:"t"}),
+  w("ok",300,260,20,{linea:"s"})],{anchoPx:595,altoPx:842,dpi:72});
+ const textos=pag.lineas.map(l=>l.texto);
+ assert.ok(textos.some(t=>/3M M40 PVC/.test(t)),"el signo de dentro del texto se conserva: "+JSON.stringify(textos));
+ assert.ok(pag.lineas.find(l=>/M40/.test(l.texto)).celdas.some(c=>/M40/.test(c.texto)&&c.conf<30),"y su confianza baja llega a la casilla");
+ assert.ok(!textos.some(t=>/\bok\b/.test(t)),"un trazo suelto, fuera de una línea impresa, sigue descartándose");
+});

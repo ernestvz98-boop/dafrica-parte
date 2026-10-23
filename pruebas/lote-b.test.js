@@ -405,3 +405,71 @@ test("descuento no leído en una línea que no cuadra: se relee la casilla y sol
  assert.equal(s.lineas[1].descuento.estado,"VACIO");assert.notEqual(s.lineas[1].cuadre.estado,"VERIFICADO");
  assert.ok(s.lineas[1].importe.confianza<0.9);
 });
+
+// Fallo real (2026-10-23): en un albarán de dos páginas, el código y la descripción dudosos de una
+// línea de la SEGUNDA página se releían en la PRIMERA, a la misma altura, y se tomaba el texto de
+// otra línea («PLATO … 80X80» en lugar de «… 130X90»), aceptado con 0,93.
+test("albarán de dos páginas: una línea de la segunda se relee en su página, nunca en la primera",async()=>{
+ const p1=[...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300000001",60],["TUBO",120],["MULTICAPA",150],["2,00",420],["10,000",462],["50",510],["10,00",560])];
+ const p2=[...titulos(),...fila(218,["1300000002",60],["CODO",120,70],["LATON",150,70],["1,00",420],["5,000",462],["50",510],["2,50",560])];
+ const pagina=(numero,palabras)=>({numero,anchoPx:595,altoPx:842,dpi:72,
+  async ocr({region=null}={}){
+   if(!region)return palabras;
+   const [x,y,ww,h]=region;
+   return palabras.filter(p=>p.x0>=x&&p.x1<=x+ww&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+  }});
+ const r=await extraerEscaneado([pagina(1,p1),pagina(2,p2)],{registro:registroCon(),hoy:HOY});
+ const l=r.lineas.find(x=>x.pagina===2);
+ assert.ok(l,"la línea de la segunda página existe");
+ assert.equal(l.descripcion.valor,"CODO LATON");
+ assert.ok(l.descripcion.confianza<0.9,"poca confianza del OCR y sin relectura fiable en su página: en revisión");
+});
+
+// Fallo real (2026-10-23): la primera palabra de la descripción caía en la casilla del código
+// («100200 RACOR» y descripción «GF MANGUERA…»; «Yeso proyectar» en un proveedor sin código) o el
+// siguiente renglón de una descripción larga se leía como otra línea («15m2/paquete»), y la
+// descripción incompleta se aceptaba. 8 errores críticos en la lectura del usuario.
+test("descripción posiblemente incompleta: código con palabra pegada, proveedor sin código o renglón siguiente sin forma de código",()=>{
+ const tit=fila(200,["CÓDIGO",60],["CONCEPTO",120],["CANTIDAD",400],["PRECIO",460],["DTO%",500],["IMPORTE",545]);
+ const cif=(y,cod,...desc)=>fila(y,[cod,60],...desc.map((t,i)=>[t,120+40*i]),["2,00",420],["10,000",462],["50",510],["10,00",560]);
+ // Código con una palabra pegada: la descripción no se acepta.
+ let r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["130001",60],["RACOR",92],["GF",125],["MANGUERA",140],["2,00",420],["10,000",462],["50",510],["10,00",560])]);
+ assert.equal(r.lineas[0].referencia.literal,"130001 RACOR");
+ assert.ok(r.lineas[0].descripcion.confianza<0.9,"código con texto pegado: descripción en revisión");
+ // Un código propio con espacios que no termina en palabra no afecta a la descripción.
+ r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["CUT",60],["T1/2",77],["GF",120],["MANGUERA",135],["2,00",420],["10,000",462],["50",510],["10,00",560])]);
+ assert.ok(r.lineas[0].descripcion.confianza>=0.9);
+ // Proveedor que no imprime código: lo leído como código hace dudosa la descripción.
+ r=leer([...cabeceraDoc(),...etiquetas(),...tit,...cif(218,"YESO","PROYECTAR","FINO")],{registro:registroCon({sin_columna_codigo:true,permite_sin_referencia:true})});
+ assert.ok(r.lineas[0].descripcion.confianza<0.9,"sin columna de código: descripción en revisión");
+ // Con formato de código: el renglón siguiente sin ese formato puede ser el final de la descripción.
+ const reg=registroCon({formato_referencia:"^\\d{10}$"});
+ r=leer([...cabeceraDoc(),...etiquetas(),...tit,...cif(218,"1300000001","TUBO","MULTICAPA"),...fila(232,["15m2/paquete",60])],{registro:reg});
+ assert.ok(r.lineas[0].descripcion.confianza<0.9,"la siguiente fila no es un código: descripción anterior en revisión");
+ r=leer([...cabeceraDoc(),...etiquetas(),...tit,...cif(218,"1300000001","TUBO","MULTICAPA"),...cif(232,"1300000002","CODO","LATON")],{registro:reg});
+ assert.ok(r.lineas[0].descripcion.confianza>=0.9&&r.lineas[1].descripcion.confianza>=0.9,"dos códigos con formato: nada cambia");
+});
+
+// Fallo real (2026-10-23): el trazo de una firma en la columna de la cantidad se leyó «7» como una
+// fila sin código ni descripción, con la cantidad aceptada.
+test("fila sin código ni descripción: sus cifras no se aceptan solas",()=>{
+ const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300000001",60],["TUBO",120],["MULTICAPA",150],["2,00",420],["10,000",462],["50",510],["10,00",560]),
+  ...fila(250,["7",425])]);
+ const fantasma=r.lineas.find(l=>l.referencia.estado==="VACIO"&&l.descripcion.estado==="VACIO");
+ assert.ok(fantasma,"precondición: la fila del trazo se lee");
+ assert.ok(fantasma.cantidad.confianza<0.9,"la cantidad de una fila sin artículo queda en revisión");
+ assert.ok(r.lineas[0].cantidad.confianza>=0.9);
+});
+test("fila siguiente con código y texto pegado («1300000002 CODO»): sí es otra fila de artículo",()=>{
+ const tit=fila(200,["CÓDIGO",60],["CONCEPTO",120],["CANTIDAD",400],["PRECIO",460],["DTO%",500],["IMPORTE",545]);
+ const reg=registroCon({formato_referencia:"^\\d{10}$"});
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["1300000001",60],["TUBO",120],["MULTICAPA",150],["2,00",420],["10,000",462],["50",510],["10,00",560]),
+  ...fila(232,["1300000002",60],["CODO",112],["LATON",140],["2,00",420],["10,000",462],["50",510],["10,00",560])],{registro:reg});
+ assert.ok(r.lineas[0].descripcion.confianza>=0.9);
+ // Código con caracteres que el OCR confunde («13OOOOOOO2», «l3000000O2»): también es una fila de artículo.
+ for(const cod of ["13OOOOOOO2","l3000000O2"]){
+  const q=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300000001",60],["TUBO",120],["MULTICAPA",150],["2,00",420],["10,000",462],["50",510],["10,00",560]),
+   ...fila(232,[cod,60],["CODO",120],["LATON",150],["2,00",420],["10,000",462],["50",510],["10,00",560])],{registro:reg});
+  assert.ok(q.lineas[0].descripcion.confianza>=0.9,cod);
+ }
+});

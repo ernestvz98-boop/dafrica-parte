@@ -58,7 +58,7 @@ const REGISTRO={
    formato_referencia:"^\\d{3}[A-Z0-9]{10}$"},
   // Tabla sin código: cantidad, concepto, dto., precio, importe.
   {id:"ARRIBAS",nombre:"HIJOS DE TOMAS ARRIBAS, S.L.",nombres:["HIJOSDETOMASSORRIBAS"],nifs:[],huellas_nif:["3f7cdfd390abe5ea7d63c73ee9cdeea2918b610cc0a3e4afa0c96c931a911596"],
-   formato_numeros:"es",formato_confirmado:true,formato_numero:"^\\d{4} ?/ ?\\d{4}$",permite_sin_referencia:true}
+   formato_numeros:"es",formato_confirmado:true,formato_numero:"^\\d{4} ?/ ?\\d{4}$",permite_sin_referencia:true,sin_columna_codigo:true}
  ]
 };
 

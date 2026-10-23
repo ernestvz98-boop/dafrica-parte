@@ -388,3 +388,17 @@ test("ABP con dos lecturas: si STEL no respondió para una, no se valida la otra
  const a=r();assert.equal(await validarStel(a,async c=>c==="ABP26-7234"?[nota]:[]),true);
  const b=r();assert.equal(await validarStel(b,async c=>c==="ABP26-7234"?[nota]:null),false);assert.equal(b.manuscritos.stel.estado,"AMBIGUO");
 });
+
+// Fallo hallado (2026-10-23): la cabecera de la tabla («REFERENCIA DESCRIPCIÓN CANTIDAD P. UNITARIO
+// IMPORTE») se tomaba como obra impresa; sus palabras unían albaranes de obras distintas por
+// coherencia del lote.
+test("coherencia del lote: los títulos de la tabla no son palabras de obra",()=>{
+ const {coherenciaLote,palabrasObra}=require("../albaranes/manuscritos.js");
+ assert.equal(palabrasObra("DESCRIPCIÓN CANTIDAD P. UNITARIO IMPORTE").size,0);
+ const ancla={obraImpresa:["OBRA RESIDENCIA FICTICIA","Cantidad Concepto Dto. Precio Importe"],obra:{valor:"PRY90111",estado:"OK",confianza:0.95,resolucion:{metodo:"obra_nombre_catalogo",evidencias:["x","y"]}}};
+ const otro={obraImpresa:["DESCRIPCIÓN CANTIDAD P. UNITARIO IMPORTE"],obra:{valor:"PRY90111",estado:"REVISAR",confianza:0.8,resolucion:{metodo:"vision_recorte"}}};
+ assert.equal(coherenciaLote([ancla,otro]),0);assert.equal(otro.obra.estado,"REVISAR");
+ // Con una palabra de obra de verdad en común, sí.
+ const tercero={obraImpresa:["RESIDENCIA FICTICIA"],obra:{valor:"PRY90111",estado:"REVISAR",confianza:0.8,resolucion:{metodo:"vision_recorte"}}};
+ assert.equal(coherenciaLote([ancla,tercero]),1);
+});

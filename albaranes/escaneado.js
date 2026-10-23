@@ -353,6 +353,9 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   // Relectura y visión solo confirman los caracteres DENTRO de la casilla, no sus límites: una
   // descripción recortada («Pladur M48/35…» sin «Montante») se confirmaría. Queda en revisión.
   const frontera=/\s/.test(String(l.referencia?.literal||"").trim());
+  // La relectura y el recorte, en la página de la línea (fallo real 2026-10-23: en un albarán de dos
+  // páginas, la línea de la segunda se releyó en la primera y tomó el texto de la línea de al lado).
+  const pg=paginas.find(p=>p.numero===l.pagina)||pag;
   for(const campo of ["referencia","descripcion"]){
    const c=l[campo];
    if(!c||c.estado!=="OK"||(c.confianza??1)>=0.9||!c.caja)continue;
@@ -361,13 +364,13 @@ async function segundaFase(principal,paginas,lecturas,opciones){
     if(!(c.motivos||[]).includes(m))l[campo]={...c,motivos:[...(c.motivos||[]),m]};
     continue;
    }
-   const r=await resolverCampo(pag,campo,[c.caja],{perfil,opcionesFecha,literal:c.literal});
+   const r=await resolverCampo(pg,campo,[c.caja],{perfil,opcionesFecha,literal:c.literal});
    // Sin resolver: candidato a la comprobación por un segundo motor (visión del recorte).
-   if(!r||r.conflicto)pendientes.push({l,campo,candidatos:[c.valor??c.literal,...(r?.conflicto||[]),...(campo==="referencia"?c.alternativas_ocr||[]:[])].filter(Boolean)});
+   if(!r||r.conflicto)pendientes.push({l,campo,pg,candidatos:[c.valor??c.literal,...(r?.conflicto||[]),...(campo==="referencia"?c.alternativas_ocr||[]:[])].filter(Boolean)});
    // Código con S/5, Z/2, B/8 o G/6 (sin O/0 ni I/1/l): las relecturas del OCR confunden igual esos
    // pares; aunque concuerden, solo la visión (otro motor) puede confirmarlo.
    else if(campo==="referencia"&&/[A-Z]/i.test(r.valor)&&/\d/.test(r.valor)&&/[S5B8Z2G6]/.test(r.valor)&&!/[O0I1l]/.test(r.valor))
-    pendientes.push({l,campo,candidatos:[r.valor,c.valor??c.literal,...(c.alternativas_ocr||[])].filter(Boolean)});
+    pendientes.push({l,campo,pg,candidatos:[r.valor,c.valor??c.literal,...(c.alternativas_ocr||[])].filter(Boolean)});
    if(!r)continue;
    if(r.conflicto){l[campo]={...c,motivos:[...(c.motivos||[]),"Relecturas fiables distintas: "+r.conflicto.join(" | ")]};continue;}
    // Una referencia no cambia de número de palabras (la relectura no debe arrastrar la celda vecina).
@@ -388,12 +391,12 @@ async function segundaFase(principal,paginas,lecturas,opciones){
  // Número y fecha en conflicto (p. ej. «3504» / «3904»): la visión del recorte decide solo entre
  // los candidatos del OCR y su lectura debe cumplir el formato del proveedor o ser una fecha válida.
  for(const x of pendientesCabecera)pendientes.push({...x,cabecera:true,l:{[x.campo]:{caja:x.caja},fila:"cabecera"}});
- if(typeof opciones.vision==="function"&&pendientes.length&&typeof pag.recortePng==="function"){
-  const k=pag.dpi/72,recortes=pendientes.map(x=>{
-   const [x0,y,x1,alto]=x.l[x.campo].caja;
-   const rx0=Math.max(0,Math.floor((x0-0.6*alto)*k)),rx1=Math.min(pag.anchoPx,Math.ceil((x1+0.6*alto)*k));
-   const ry0=Math.max(0,Math.floor((y-1.3*alto)*k)),ry1=Math.min(pag.altoPx,Math.ceil((y+0.45*alto)*k));
-   return pag.recortePng([rx0,ry0,rx1-rx0,ry1-ry0]);
+ if(typeof opciones.vision==="function"&&pendientes.length&&pendientes.every(x=>typeof (x.pg||pag).recortePng==="function")){
+  const recortes=pendientes.map(x=>{
+   const pp=x.pg||pag,k=pp.dpi/72,[x0,y,x1,alto]=x.l[x.campo].caja;
+   const rx0=Math.max(0,Math.floor((x0-0.6*alto)*k)),rx1=Math.min(pp.anchoPx,Math.ceil((x1+0.6*alto)*k));
+   const ry0=Math.max(0,Math.floor((y-1.3*alto)*k)),ry1=Math.min(pp.altoPx,Math.ceil((y+0.45*alto)*k));
+   return pp.recortePng([rx0,ry0,rx1-rx0,ry1-ry0]);
   });
   const lecturas=[];
   try{for(let i=0;i<recortes.length;i+=8)for(const v of await opciones.vision(recortes.slice(i,i+8),{modo:"impreso"})||[])

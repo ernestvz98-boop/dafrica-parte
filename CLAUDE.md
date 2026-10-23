@@ -75,6 +75,11 @@ Edge). El repositorio es **público**.
   código de dos renglones (el OCR pierde guiones y espacios) la pantalla avisa y guarda al segundo
   clic; las confirmaciones de esos códigos anteriores a ese aviso no se usan.
 - Un descuento que el OCR no leyó se acepta por relectura solo si con él la línea cuadra.
+- Separación: dos páginas con números de albarán distintos nunca se unen; «Página k» solo prueba la
+  continuación si es la siguiente. Las relecturas y recortes de una línea, siempre en su página.
+- Si la casilla del código puede llevar el principio de la descripción (palabra pegada al código,
+  proveedor sin columna de código, fila siguiente sin forma de código del proveedor), la descripción
+  no se acepta sola. Un signo de baja confianza entre palabras impresas no se descarta como trazo.
 - Consultas a STEL: una sola búsqueda de albaranes de compra por lectura (todas las cuentas, solo
   las fechas de la lectura); nada de consultas sueltas que agoten su cupo («403»). Si STEL no
   responde («403»/«429»), un solo reintento al minuto y ninguna consulta más en esa lectura; una
