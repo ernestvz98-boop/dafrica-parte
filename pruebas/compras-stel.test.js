@@ -94,3 +94,23 @@ test("consulta: también con un proveedor sin cuenta de STEL por su CIF (la bús
  assert.deepEqual(q.cuentas,[]);assert.equal(q.desde,"2026-02-21");assert.equal(q.hasta,"2026-03-13");
  assert.equal(C.consulta([doc({fecha:{valor:"2026-03-03",estado:"REVISAR",confianza:0.5}})]),null);
 });
+// Fallo real (2026-10-23): STEL corta con «403» tras muchas consultas seguidas y al rato vuelve a
+// responder. Un único reintento tras la espera; si sigue sin responder, «sin cupo» (sin más consultas).
+test("búsqueda de la lectura: con «403», un reintento tras la espera; si sigue, sin cupo; por cuenta solo si es larga",async()=>{
+ const q={cuentas:[7,8],desde:"2026-02-21",hasta:"2026-03-13"};
+ const bien={metodo:"recientes",completo:true,notas:[],consultas:9},corte={metodo:"error",completo:false,notas:[],consultas:1,motivo:"STEL 403"};
+ const con=(...respuestas)=>{const pedidas=[];return {pedidas,buscar:async b=>{pedidas.push(b);return respuestas.shift();}};};
+ const esperas=[],esperar=async ms=>{esperas.push(ms);};
+ let s=con(bien),r=await C.buscarNotasLectura(s.buscar,q,{esperar});
+ assert.equal(r.resp.completo,true);assert.equal(r.todas,true);assert.equal(r.sin_cupo,false);assert.equal(s.pedidas.length,1);assert.deepEqual(s.pedidas[0].cuentas,[]);
+ s=con(corte,bien);r=await C.buscarNotasLectura(s.buscar,q,{esperar});
+ assert.equal(r.resp.completo,true);assert.equal(r.sin_cupo,false);assert.equal(s.pedidas.length,2);assert.deepEqual(esperas,[60000]);assert.equal(r.intentos.length,2);
+ s=con(corte,{...corte,motivo:"STEL 429"});r=await C.buscarNotasLectura(s.buscar,q,{esperar});
+ assert.equal(r.sin_cupo,true);assert.equal(s.pedidas.length,2);
+ // Detenida durante la espera: no se vuelve a preguntar.
+ let parar=false;s=con(corte,bien);r=await C.buscarNotasLectura(s.buscar,q,{esperar:async()=>{parar=true;},detenido:()=>parar});
+ assert.equal(s.pedidas.length,1);assert.equal(r.sin_cupo,true);
+ // Búsqueda larga (límite de páginas): por cuenta, sin espera.
+ s=con({...corte,motivo:"limite_paginas"},bien);r=await C.buscarNotasLectura(s.buscar,q,{esperar:async()=>{throw Error("no debe esperar");}});
+ assert.equal(r.todas,false);assert.deepEqual(s.pedidas[1].cuentas,[7,8]);assert.equal(r.resp.completo,true);
+});

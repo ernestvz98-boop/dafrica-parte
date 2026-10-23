@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261023lector27";
+const VERSION_LECTOR="20261023lector28";
 // Modelo de visión de los recortes de manuscritos, elegido por el usuario (2026-10-22) tras la
 // comparación sobre los mismos recortes de los 3 PDF reales: 32 de 60 códigos aceptados y
 // correctos frente a 29 del anterior (gpt-4o), 0 erróneos en ambos y menor coste. Las casillas
@@ -122,8 +122,12 @@ function montar(root){
    // Albaranes de compra de STEL (SOLO LECTURA) para validar los códigos ABP manuscritos.
    const stelAlb={consultas:0,validados:0,fallos:0};motores.stel_albaranes=stelAlb;
    const cacheStel=new Map();
+   // STEL sin respuesta (cupo de consultas, «403»/«429», o caído): en esta lectura no se le pregunta
+   // más; las consultas siguientes devuelven null («no se sabe»), nunca «no existe».
+   let stelNoDisponible=null;
    const consultarStel=typeof sb!=="function"?null:async ref=>{
     if(cacheStel.has(ref))return cacheStel.get(ref);
+    if(stelNoDisponible)return null;
     const pedir=async x=>{stelAlb.consultas++;
      try{
       const resp=await sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -132,11 +136,11 @@ function montar(root){
       if((stelAlb.muestras||(stelAlb.muestras=[])).length<3)stelAlb.muestras.push({ref:x,devueltos:resp?.checkedCount??null,encontrados:(resp?.documents||[]).length,diagnostico:resp?.diagnostico||null});
       if((resp?.documents||[]).length)(stelAlb.encontrados||(stelAlb.encontrados=[])).push({ref:x,documentos:resp.documents});
       return resp?.documents||[];
-     }catch(e){stelAlb.fallos++;stelAlb.ultimo_error=String(e?.message||e).slice(0,160);return [];}};
+     }catch(e){stelAlb.fallos++;stelAlb.ultimo_error=String(e?.message||e).slice(0,160);stelNoDisponible=stelAlb.ultimo_error;return null;}};
     // STEL guarda la referencia sin guion («ABP261234»): se pide así primero (medido 2026-10-21).
     const docs=await pedir(ref.replace(/-/g,""));
-    const final=docs.length?docs:await pedir(ref);
-    cacheStel.set(ref,final);
+    const final=docs&&!docs.length?await pedir(ref):docs;
+    if(final)cacheStel.set(ref,final);
     return final;
    };
    const nombreProveedor=x=>(x?.proveedor?.account_id!=null&&(catalogo?.proveedores||[]).find(p=>String(p.id)===String(x.proveedor.account_id))?.nombre)||x?.proveedor?.nombre||null;
@@ -178,8 +182,9 @@ function montar(root){
    // Albarán de compra de STEL de cada albarán leído, por el número del proveedor en su título
    // (solo lectura). Una sola búsqueda en TODAS las cuentas (también las sin CIF) en las fechas de la
    // lectura, desde el final de la lista y con la pista del total. Fallo real (2026-10-23): por cuenta
-   // gastó 55 consultas y la búsqueda siguiente recibió «403» (cupo de STEL). Si no termina por larga
-   // (fechas muy separadas), por cuenta y sin las cuentas sin CIF. Solo con la búsqueda completa.
+   // gastó 55 consultas y la búsqueda siguiente recibió «403» (cupo de STEL). Con «403»/«429», un
+   // reintento al minuto; si no termina por larga (fechas muy separadas), por cuenta y sin las
+   // cuentas sin CIF. Solo con la búsqueda completa.
    if(typeof sb==="function"&&lib.comprasStel&&!detener){
     const q=lib.comprasStel.consulta(resultado.documentos),sc=motores.stel_compras={consultado:false};
     if(q){
@@ -188,14 +193,13 @@ function montar(root){
      const buscar=b=>sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({buscar:{...b,...(pista?{pista}:{})}}),signal:AbortSignal.timeout(170000)});
      try{
-      let resp=await buscar({cuentas:[],desde:q.desde,hasta:q.hasta}),todas=true;
-      sc.intentos=[{cuentas:"todas",completo:!!resp?.completo,consultas:resp?.consultas??null,motivo:resp?.motivo||null}];
-      if(!resp?.completo&&resp?.motivo==="limite_paginas"&&q.cuentas.length&&!detener){
-       resp=await buscar(q);todas=false;
-       sc.intentos.push({cuentas:q.cuentas.length,completo:!!resp?.completo,consultas:resp?.consultas??null,motivo:resp?.motivo||null});
-      }
+      const b=await lib.comprasStel.buscarNotasLectura(buscar,q,{detenido:()=>detener,
+       esperar:async ms=>{for(let t=0;t<ms&&!detener;t+=1000)await new Promise(ok=>setTimeout(ok,1000));},
+       alEsperar:ms=>{estado.textContent="STEL no responde por ahora (límite de consultas): se vuelve a intentar dentro de "+Math.round(ms/1000)+" s (solo lectura)…";}});
+      const resp=b.resp,todas=b.todas;sc.intentos=b.intentos;
       Object.assign(sc,{consultado:true,todas_las_cuentas:todas,metodo:resp?.metodo||null,completo:!!resp?.completo,notas:(resp?.notas||[]).length,
-       consultas:sc.intentos.reduce((n,x)=>n+(x.consultas||0),0),motivo:resp?.motivo||null});
+       consultas:sc.intentos.reduce((n,x)=>n+(x.consultas||0),0),motivo:resp?.motivo||null,sin_cupo:b.sin_cupo});
+      if(b.sin_cupo)stelNoDisponible=resp.motivo;
       if(resp?.total)try{localStorage.setItem("dafrica_stel_compras_total",String(resp.total));}catch{}
       // Cuentas de STEL sin CIF válido (solo con el catálogo de proveedores completo): un proveedor
       // puede estar duplicado en STEL en una cuenta sin CIF con sus compras (fallo real 2026-10-22).
@@ -209,7 +213,7 @@ function montar(root){
       for(const d of resultado.documentos){const x=d.resultado;
        if(x?.albaran_stel?.estado==="OK"&&x.albaran_stel.obra&&lib.manuscritos?.revalidarObra&&
         lib.manuscritos.revalidarObra(x,{catalogoObras,catalogoObrasCompleto,obraStel:x.albaran_stel.obra}))sc.obras++;}
-     }catch(e){sc.error=String(e?.message||e).slice(0,160);}
+     }catch(e){sc.error=String(e?.message||e).slice(0,160);stelNoDisponible=sc.error;}
     }
    }
    // Códigos ABP escritos a mano: se comprueban contra los albaranes de compra que ya trajo la
@@ -218,7 +222,7 @@ function montar(root){
    const notasStel=motores.stel_compras?.completo?(motores.stel_compras.lista||[]):null;
    const consultarAbp=notasStel?async ref=>{const c=String(ref).toUpperCase().replace(/[^A-Z0-9]/g,"");
     return notasStel.filter(n=>String(n.fullReference).toUpperCase().replace(/[^A-Z0-9]/g,"")===c);}:consultarStel;
-   stelAlb.origen=notasStel?"busqueda":"una_a_una";
+   stelAlb.origen=notasStel?"busqueda":stelNoDisponible?"stel_no_disponible":"una_a_una";
    // Cuentas de STEL sin CIF que otros albaranes del lote han demostrado de cada proveedor.
    const cuentasDemostradas=lib.comprasStel?.cuentasSinCifPorProveedor?lib.comprasStel.cuentasSinCifPorProveedor(resultado.documentos):new Map();
    // Con la lista de la búsqueda se sabe cuántos albaranes de compra tiene el proveedor cada día y
@@ -285,7 +289,8 @@ function montar(root){
     (v.por_modo?' ('+Object.entries(v.por_modo).map(([k,x])=>(k==="manuscrito"?"manuscritos":"casillas impresas")+": "+esc(x.modelo||"—")).join("; ")+')':''))+
    (m.stel_albaranes?' · albaranes STEL (códigos ABP): '+esc(m.stel_albaranes.validados)+' validados en '+esc(m.stel_albaranes.consultas)+' consultas'+
     (m.stel_albaranes.fallos?' (<b>'+esc(m.stel_albaranes.fallos)+' fallidas</b>'+(m.stel_albaranes.ultimo_error?': '+esc(m.stel_albaranes.ultimo_error):'')+')':''):'')+
-   (m.stel_compras?.consultado?' · albaranes de compra STEL por número: '+esc(m.stel_compras.resueltos||0)+' encontrados'+(m.stel_compras.completo?'':' (<b>búsqueda incompleta</b>'+(m.stel_compras.motivo?': '+esc(m.stel_compras.motivo):'')+')'):
+   (m.stel_compras?.sin_cupo?' · albaranes de compra STEL: <b>STEL no responde</b> (límite de consultas: «'+esc(m.stel_compras.motivo)+'»); los códigos ABP quedan sin comprobar. Vuelve a leer más tarde':
+    m.stel_compras?.consultado?' · albaranes de compra STEL por número: '+esc(m.stel_compras.resueltos||0)+' encontrados'+(m.stel_compras.completo?'':' (<b>búsqueda incompleta</b>'+(m.stel_compras.motivo?': '+esc(m.stel_compras.motivo):'')+')'):
     m.stel_compras?.error?' · albaranes de compra STEL: <b>no disponible</b> ('+esc(m.stel_compras.error)+')':'')+
    (cat.disponible&&(!v.activa||!v.fallos)?'':'. Sin ellos, los campos dudosos quedan en REVISAR.')+'</p>';
   $("lalResumen").innerHTML='<p><b>'+esc(r.documentos.length)+'</b> documentos: <b>'+esc(n("AUTO_OK"))+'</b> AUTO_OK · <b>'+

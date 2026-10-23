@@ -91,6 +91,28 @@ function resolver(docs,notas,{cuentasSinCif=null}={}){
  return res;
 }
 
+/*
+ * La búsqueda de la lectura: una en TODAS las cuentas. STEL corta con «403»/«429» tras muchas
+ * consultas seguidas y al rato vuelve a responder (21-23/10/2026): un único reintento tras una
+ * espera. Si no termina por larga (fechas muy separadas), por cuenta. buscar(b) pide {buscar: b} a
+ * stel-albaranes-consulta. Devuelve {resp, todas, intentos, sin_cupo}: sin_cupo = STEL no respondió.
+ */
+const sinCupo=r=>!r?.completo&&/^STEL (403|429|5\d\d)$/.test(String(r?.motivo||""));
+async function buscarNotasLectura(buscar,q,{espera=60000,esperar=ms=>new Promise(ok=>setTimeout(ok,ms)),detenido=()=>false,alEsperar=null}={}){
+ const intentos=[];
+ const pedir=async(b,cuentas)=>{const r=await buscar(b);
+  intentos.push({cuentas,completo:!!r?.completo,consultas:r?.consultas??null,motivo:r?.motivo||null});return r;};
+ const todasLasCuentas={cuentas:[],desde:q.desde,hasta:q.hasta};
+ let resp=await pedir(todasLasCuentas,"todas"),todas=true;
+ if(sinCupo(resp)&&!detenido()){
+  if(typeof alEsperar==="function")alEsperar(espera);
+  await esperar(espera);
+  if(!detenido())resp=await pedir(todasLasCuentas,"todas");
+ }
+ if(!resp?.completo&&resp?.motivo==="limite_paginas"&&q.cuentas.length&&!detenido()){resp=await pedir(q,q.cuentas.length);todas=false;}
+ return {resp,todas,intentos,sin_cupo:sinCupo(resp)};
+}
+
 /* Cuentas de STEL sin CIF demostradas de cada proveedor por los albaranes resueltos en ellas. */
 const claveProveedor=r=>r?.proveedor?.id!=null?"id:"+r.proveedor.id:r?.proveedor?.nif?"nif:"+canon(r.proveedor.nif):null;
 function cuentasSinCifPorProveedor(docs){
@@ -119,5 +141,5 @@ function consulta(docs,{margen=10}={}){
  if(Date.parse(hasta)-Date.parse(desde)>400*864e5)desde=mover(hasta,-400);
  return {cuentas:[...cuentas].slice(0,40),desde,hasta};
 }
-return {resolver,consulta,cuentasSinCifPorProveedor,claveProveedor,partesTitulo,formatoAbp};
+return {resolver,consulta,buscarNotasLectura,sinCupo,cuentasSinCifPorProveedor,claveProveedor,partesTitulo,formatoAbp};
 });

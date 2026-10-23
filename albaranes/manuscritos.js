@@ -533,7 +533,8 @@ function aplicarEstado(r){
  * LECTURA: se acepta una interpretación si STEL tiene exactamente un albarán con esa referencia,
  * del mismo proveedor (nombre de la cuenta) y con la misma fecha o con el número del proveedor
  * en su referencia externa. Si valida más de una interpretación, no se resuelve.
- * consultar(referencia) → [{fullReference, supplier, date, extraReference}] (función Edge).
+ * consultar(referencia) → [{fullReference, supplier, date, extraReference}] (función Edge), o null
+ * si STEL no respondió.
  */
 const canonNombre=t=>String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z0-9]/g,"").replace(/(SLU|SAU|SL|SA)$/,"");
 function fechaStel(v){
@@ -557,7 +558,10 @@ async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null,cu
  const alternativas=[...new Set((m.resolucion?.alternativas||[]).map(canon).filter(c=>FORMATOS.stel.test(c)))];
  const validas=[];
  for(const c of alternativas){
-  const docs=(await consultar(formatoStel(c)))||[];
+  const docs=await consultar(formatoStel(c));
+  // STEL no respondió (sin cupo o caído): no se sabe si esa lectura existe, y sin comprobar todas
+  // las lecturas no hay unicidad que valga.
+  if(docs==null)return false;
   const exactos=docs.filter(d=>canon(d.fullReference)===c);
   if(exactos.length!==1)continue;
   const d=exactos[0];

@@ -377,3 +377,14 @@ test("texto encima de la línea que es la obra del albarán: la descripción no 
  // Con la obra del título del albarán de compra de STEL también vale.
  const e=r("TORREON",{estado:"VACIO"});e.albaran_stel={estado:"OK",obra:"TORREON"};assert.equal(textoPrevioObra(e,{catalogoObras:cat}),1);
 });
+
+// STEL sin respuesta (cupo agotado, 2026-10-23): una lectura del ABP que no se pudo consultar no
+// cuenta como «no existe»; sin comprobarlas todas no hay unicidad que valga.
+test("ABP con dos lecturas: si STEL no respondió para una, no se valida la otra aunque exista",async()=>{
+ const {validarStel}=require("../albaranes/manuscritos.js");
+ const r=()=>({fecha:{estado:"OK",valor:"2026-03-03"},numero:{valor:"600.111"},proveedor:{nombre:"PROVEEDOR FICTICIO, S.L."},
+  manuscritos:{stel:{valor:null,literal:"ABP26 ?234",estado:"AMBIGUO",resolucion:{alternativas:["ABP261234","ABP267234"]}}}});
+ const nota={fullReference:"ABP26-7234",supplier:"Proveedor Ficticio SL",date:"2026-03-03",extraReference:"600111"};
+ const a=r();assert.equal(await validarStel(a,async c=>c==="ABP26-7234"?[nota]:[]),true);
+ const b=r();assert.equal(await validarStel(b,async c=>c==="ABP26-7234"?[nota]:null),false);assert.equal(b.manuscritos.stel.estado,"AMBIGUO");
+});

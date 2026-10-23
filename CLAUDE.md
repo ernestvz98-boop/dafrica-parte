@@ -76,7 +76,9 @@ Edge). El repositorio es **público**.
   clic; las confirmaciones de esos códigos anteriores a ese aviso no se usan.
 - Un descuento que el OCR no leyó se acepta por relectura solo si con él la línea cuadra.
 - Consultas a STEL: una sola búsqueda de albaranes de compra por lectura (todas las cuentas, solo
-  las fechas de la lectura); nada de consultas sueltas que agoten su cupo («403»).
+  las fechas de la lectura); nada de consultas sueltas que agoten su cupo («403»). Si STEL no
+  responde («403»/«429»), un solo reintento al minuto y ninguna consulta más en esa lectura; una
+  consulta fallida nunca cuenta como «no existe».
 
 ## Proceso ante cada fallo real
 

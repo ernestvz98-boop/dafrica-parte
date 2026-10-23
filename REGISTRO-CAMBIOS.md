@@ -3,6 +3,31 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-23 · STEL sin respuesta durante la lectura (lector28)
+
+**Producción:** web en `main` (versión `20261023lector28`). Sin cambios en funciones ni datos.
+
+El usuario no podía leer porque STEL había cortado («403») en su lectura de las 8:55 (hora de
+España) con lector26. Según los registros, STEL corta tras muchas consultas seguidas (45–90 en poco
+tiempo) y al rato vuelve a responder: el 21 cortó por la mañana y una o dos horas después respondía
+con normalidad. STEL no publica su límite.
+
+- Si la búsqueda de albaranes de compra recibe «403» o «429» (o un error 5xx), se espera un minuto
+  y se intenta una sola vez más.
+- Si sigue sin responder, en esa lectura no se le pregunta más a STEL. Antes se pasaba a consultas
+  sueltas de cada ABP (hasta unas 50, todas fallidas), que alargaban la lectura y mantenían el corte.
+- Una consulta a STEL que falla ya no cuenta como «ese albarán no existe». Con un ABP de dos lecturas
+  posibles, si una no se pudo consultar, la otra no se valida por ser «la única» (antes podía).
+- La pantalla dice que STEL no responde y que los códigos ABP quedan sin comprobar. La lectura
+  sigue: sin STEL solo quedan sin comprobar los ABP y los albaranes de compra (en revisión, sin
+  errores).
+- Pruebas: 281 (2 nuevas: reintento y «sin cupo» de la búsqueda; ABP con una lectura sin consultar).
+- Chromium (un PDF real; Supabase y STEL simulados):
+  - STEL corta una vez: segunda búsqueda a los 60 s, 8 albaranes de compra, 0 erróneos, 0 consultas
+    sueltas;
+  - STEL no responde nunca: aviso en pantalla, 0 consultas sueltas, 0 ABP aceptados;
+  - sin errores de JavaScript. Corpus igual (91,0 % y 90,6 %, 0 críticos); prueba de fuerza 0 falsas.
+
 ## 2026-10-23 · Lectura real con lector26: confirmaciones mal formadas y cupo de STEL (lector27)
 
 **Producción:** web en `main` (versión `20261023lector27`). Sin cambios en funciones ni datos: las
