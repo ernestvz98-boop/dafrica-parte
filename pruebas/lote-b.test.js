@@ -386,3 +386,22 @@ test("unidad «ml» que una lectura OCR lee «mi»: se toma de otra lectura de l
  const s=await extraerEscaneado(motor({}),{registro:registroCon(),hoy:HOY});
  assert.ok(!["m","ml"].includes(s.lineas[0]?.unidad?.valor));
 });
+
+// Fallo real (2026-10-23): el OCR de la página no leyó el descuento impreso de una línea; la línea no
+// cuadraba y cantidad, precio e importe quedaban en revisión.
+test("descuento no leído en una línea que no cuadra: se relee la casilla y solo vale si con él la línea cuadra",async()=>{
+ const pag=[...cabeceraDoc(),...etiquetas(),...titulos(),
+  ...fila(218,["1300000001",60],["TUBO",120],["MULTICAPA",150],["2,00",420],["10,000",462],["50",510],["10,00",560]),
+  ...fila(232,["1300000002",60],["CODO",120],["LATON",150],["50,00",420],["2,000",462],["80,00",560])];
+ // La relectura de la casilla del descuento (columna x≈510, fila de la segunda línea) lee «20,00%».
+ const relee=texto=>({region})=>region[0]>480&&region[0]<530&&region[1]>215&&region[1]<235?[[texto,92]]:null;
+ const r=await extraerEscaneado(motorRecortes(pag,relee("20,00%")),{registro:registroCon(),hoy:HOY});
+ const l=r.lineas[1];
+ assert.equal(l.descuento.valor,20);assert.equal(l.descuento.estado,"VERIFICADO");assert.equal(l.descuento.resolucion.metodo,"relectura_dirigida_cuadre");
+ assert.equal(l.cuadre.estado,"VERIFICADO");
+ for(const k of ["cantidad","precio","importe"])assert.equal(l[k].estado,"VERIFICADO",k);
+ // Con otro descuento la línea no cuadra: no se acepta nada.
+ const s=await extraerEscaneado(motorRecortes(pag,relee("10,00%")),{registro:registroCon(),hoy:HOY});
+ assert.equal(s.lineas[1].descuento.estado,"VACIO");assert.notEqual(s.lineas[1].cuadre.estado,"VERIFICADO");
+ assert.ok(s.lineas[1].importe.confianza<0.9);
+});

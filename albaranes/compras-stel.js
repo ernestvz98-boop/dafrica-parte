@@ -91,11 +91,6 @@ function resolver(docs,notas,{cuentasSinCif=null}={}){
  return res;
 }
 
-/*
- * Fechas de los albaranes que siguen sin su albarán de compra (proveedor identificado, fecha
- * aceptada y número de 5+ caracteres), para buscar en TODAS las cuentas de STEL (también las sin
- * CIF). Margen corto: la fecha del albarán de STEL o la de su título es la del papel.
- */
 /* Cuentas de STEL sin CIF demostradas de cada proveedor por los albaranes resueltos en ellas. */
 const claveProveedor=r=>r?.proveedor?.id!=null?"id:"+r.proveedor.id:r?.proveedor?.nif?"nif:"+canon(r.proveedor.nif):null;
 function cuentasSinCifPorProveedor(docs){
@@ -106,29 +101,23 @@ function cuentasSinCifPorProveedor(docs){
  return out;
 }
 
-function consultaSinCif(docs,{margen=5}={}){
- const fechas=[];
- for(const d of docs){const r=d.resultado;
-  if(r&&!r.albaran_stel&&r.proveedor?.estado==="OK"&&aceptado(r.fecha)&&canon(r.numero?.valor).length>=5)fechas.push(r.fecha.valor);}
- if(!fechas.length)return null;
- fechas.sort();
- const mover=(f,d)=>new Date(Date.parse(f)+d*864e5).toISOString().slice(0,10);
- let desde=mover(fechas[0],-margen),hasta=mover(fechas.at(-1),margen);
- if(Date.parse(hasta)-Date.parse(desde)>400*864e5)desde=mover(hasta,-400);
- return {desde,hasta};
-}
-
-/* Intervalo de fechas y cuentas que hay que pedir a STEL para los albaranes leídos. */
+/*
+ * Intervalo de fechas de los albaranes leídos (proveedor identificado y fecha aceptada) y cuentas de
+ * STEL de sus CIF. La búsqueda principal es en todas las cuentas: también vale para un proveedor sin
+ * cuenta con su CIF en STEL.
+ */
 function consulta(docs,{margen=10}={}){
  const cuentas=new Set(),fechas=[];
  for(const d of docs){const r=d.resultado;
-  if(r?.proveedor?.estado==="OK"&&r.proveedor.account_id!=null&&aceptado(r.fecha)){cuentas.add(Number(r.proveedor.account_id));fechas.push(r.fecha.valor);}}
- if(!cuentas.size)return null;
+  if(r?.proveedor?.estado!=="OK"||!aceptado(r.fecha))continue;
+  fechas.push(r.fecha.valor);
+  if(r.proveedor.account_id!=null)cuentas.add(Number(r.proveedor.account_id));}
+ if(!fechas.length)return null;
  fechas.sort();
  const mover=(f,d)=>new Date(Date.parse(f)+d*864e5).toISOString().slice(0,10);
  let desde=mover(fechas[0],-margen),hasta=mover(fechas.at(-1),margen);
  if(Date.parse(hasta)-Date.parse(desde)>400*864e5)desde=mover(hasta,-400);
  return {cuentas:[...cuentas].slice(0,40),desde,hasta};
 }
-return {resolver,consulta,consultaSinCif,cuentasSinCifPorProveedor,claveProveedor,partesTitulo,formatoAbp};
+return {resolver,consulta,cuentasSinCifPorProveedor,claveProveedor,partesTitulo,formatoAbp};
 });

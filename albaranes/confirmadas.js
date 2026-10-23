@@ -21,6 +21,34 @@ const codigo=v=>String(v||"").trim().toUpperCase().replace(/\s/g,"");
 const sinSignos=v=>codigo(v).replace(/[^A-Z0-9]/g,"");
 const clase=v=>sinSignos(v).replace(/O/g,"0").replace(/S/g,"5").replace(/I/g,"1").replace(/L/g,"1").replace(/B/g,"8").replace(/Z/g,"2").replace(/G/g,"6");
 
+/*
+ * Un código confirmado solo vale si tiene forma de código (fallo real 2026-10-23: se confirmaron
+ * códigos con el principio de la descripción pegado, «… “ Montante», con un espacio en medio y un
+ * importe leído en la columna del código, como «1.234,5600»). No vale con comillas, «?» u otros
+ * signos que no son de un código, con forma de importe (cifras con decimales con coma) ni, si el
+ * perfil del proveedor declara su formato de código (formato_referencia), sin ese formato.
+ */
+const SIGNOS_AJENOS=/[“”«»¨¡¿?"'`´‘’]/;
+const IMPORTE=/^-?\d{1,3}(\.\d{3})*,\d+$/;
+function codigoValido(referencia,perfil=null){
+ const t=String(referencia??"").trim();
+ if(!t||SIGNOS_AJENOS.test(t)||IMPORTE.test(t))return false;
+ if(perfil?.formato_referencia&&!new RegExp(perfil.formato_referencia).test(t))return false;
+ return true;
+}
+const perfilDe=p=>{try{return p?.id?(M("proveedores").REGISTRO?.proveedores||[]).find(x=>x.id===p.id)||null:null;}catch{return null;}};
+
+/*
+ * Código en dos renglones: el lector une los renglones con un espacio y el OCR pierde guiones y
+ * espacios pequeños. Hasta lector27 la pantalla proponía esa lectura sin avisar y se confirmó tal
+ * cual (fallo real 2026-10-23: un espacio donde el papel lleva guion; se habría aceptado un código
+ * erróneo). Ahora la pantalla avisa y pide un segundo clic tras compararlo con el papel. Para esos
+ * códigos solo vale una confirmación posterior a ese aviso, o la tarifa.
+ */
+const AVISO_DOS_RENGLONES=Date.parse("2026-10-23T09:05:00Z");
+const dosRenglones=ref=>(ref?.motivos||[]).some(m=>/^Código en dos renglones/.test(m));
+const conAviso=c=>c.origen==="tarifa"||Date.parse(c.confirmado_en)>=AVISO_DOS_RENGLONES;
+
 /* Clave estable del proveedor: su perfil registrado o, si no lo tiene, su CIF. */
 function clave(p){
  if(!p||p.estado!=="OK")return null;
@@ -52,7 +80,8 @@ function necesarias(docs){
 function aplicar(det,confirmadas){
  const k=clave(det?.proveedor);
  if(!k||!Array.isArray(confirmadas)||!confirmadas.length)return 0;
- const delProveedor=confirmadas.filter(c=>c.proveedor_clave===k&&c.referencia&&c.descripcion);
+ const perfil=perfilDe(det.proveedor);
+ const delProveedor=confirmadas.filter(c=>c.proveedor_clave===k&&c.referencia&&c.descripcion&&codigoValido(c.referencia,perfil));
  if(!delProveedor.length)return 0;
  const compatible=M("verificacion").descripcionCompatible;
  let n=0;
@@ -62,7 +91,7 @@ function aplicar(det,confirmadas){
   const leidos=leidosDe(ref);
   // Un solo código equivalente: si hay dos que solo difieren en O/0, S/5…, ni la igualdad exacta
   // con lo leído decide (el OCR pudo leer uno por otro).
-  const candidatos=delProveedor.filter(c=>leidos.some(t=>clase(t)!==""&&clase(t)===clase(c.referencia)));
+  const candidatos=delProveedor.filter(c=>(!dosRenglones(ref)||conAviso(c))&&leidos.some(t=>clase(t)!==""&&clase(t)===clase(c.referencia)));
   if(candidatos.length!==1)continue;
   const exactos=candidatos.filter(c=>leidos.some(t=>sinSignos(t)===sinSignos(c.referencia)));
   const c=candidatos[0];
@@ -77,5 +106,5 @@ function aplicar(det,confirmadas){
  }
  return n;
 }
-return {aplicar,clave,clase,necesarias};
+return {aplicar,clave,clase,necesarias,codigoValido,perfilDe,dosRenglones};
 });

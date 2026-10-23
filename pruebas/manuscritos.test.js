@@ -361,3 +361,19 @@ test("código STEL a mano: vale la cuenta de STEL sin CIF que otros albaranes de
  r=base();assert.equal(await validarStel(r,async()=>[{...nota,date:"2026-03-09"}],vinc),false);
  r=base();assert.equal(await validarStel(r,async()=>[nota],{...vinc,delMismoDia:()=>1}),false);
 });
+test("texto encima de la línea que es la obra del albarán: la descripción no queda en revisión; otro texto, sí",()=>{
+ const {textoPrevioObra}=require("../albaranes/manuscritos.js");
+ const cat=[{codigo:"PRY90088",nombre:"EDIFICIO FICTICIO TORREON DEL VALLE"}];
+ const motivo=t=>"Texto justo encima de la línea: «"+t+"» (¿primer renglón de la descripción o anotación?)";
+ const r=(t,obra={valor:"PRY90088",estado:"OK",confianza:0.95})=>({manuscritos:{obra},lineas:[{descripcion:{valor:"puerta de paso ficticia",estado:"REVISAR",conf_ocr:93,texto_previo:t,motivos:[motivo(t)]}}]});
+ const a=r("TORREON DEL VALLE");assert.equal(textoPrevioObra(a,{catalogoObras:cat}),1);
+ assert.equal(a.lineas[0].descripcion.estado,"OK");assert.equal(a.lineas[0].descripcion.motivos.length,0);
+ assert.equal(a.lineas[0].descripcion.resolucion.metodo,"texto_previo_obra");
+ // Texto que no es de la obra («Suministro y montaje»): sigue en revisión.
+ const b=r("Suministro y montaje");assert.equal(textoPrevioObra(b,{catalogoObras:cat}),0);assert.equal(b.lineas[0].descripcion.estado,"REVISAR");
+ // Obra sin validar, o una palabra que no es de la obra: no.
+ const c=r("TORREON DEL VALLE",{valor:"PRY90088",estado:"REVISAR",confianza:0.8});assert.equal(textoPrevioObra(c,{catalogoObras:cat}),0);
+ const d=r("TORREON NORTE");assert.equal(textoPrevioObra(d,{catalogoObras:cat}),0);
+ // Con la obra del título del albarán de compra de STEL también vale.
+ const e=r("TORREON",{estado:"VACIO"});e.albaran_stel={estado:"OK",obra:"TORREON"};assert.equal(textoPrevioObra(e,{catalogoObras:cat}),1);
+});

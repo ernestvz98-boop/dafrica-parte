@@ -53,7 +53,9 @@ const REGISTRO={
    formato_numero:"^\\d{6}$"},
   // Número precedido de la serie («ALBARÁN AB26 001234»).
   {id:"DECOTAP",nombre:"CREACIONES EN PLACA DE YESO SL",nombres:["DECOTAP"],nifs:[],huellas_nif:["87752cafe4646693469e46e8d08e1adb0bed77eddee9690e78200e56cd8cd39a"],
-   formato_numeros:"es",formato_confirmado:true,formato_numero:"^\\d{6}$"},
+   formato_numeros:"es",formato_confirmado:true,formato_numero:"^\\d{6}$",
+   // Código de artículo: 3 cifras y 10 letras o cifras, sin espacios (11 de 11 códigos revisados).
+   formato_referencia:"^\\d{3}[A-Z0-9]{10}$"},
   // Tabla sin código: cantidad, concepto, dto., precio, importe.
   {id:"ARRIBAS",nombre:"HIJOS DE TOMAS ARRIBAS, S.L.",nombres:["HIJOSDETOMASSORRIBAS"],nifs:[],huellas_nif:["3f7cdfd390abe5ea7d63c73ee9cdeea2918b610cc0a3e4afa0c96c931a911596"],
    formato_numeros:"es",formato_confirmado:true,formato_numero:"^\\d{4} ?/ ?\\d{4}$",permite_sin_referencia:true}

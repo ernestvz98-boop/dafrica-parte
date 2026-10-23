@@ -78,11 +78,6 @@ test("cuenta de STEL sin CIF: sin ninguno en la cuenta del CIF, el único albar�
  const k=doc({cuenta:null});C.resolver([k],[nota("ABP261111","123456 03/03/2026 X",{cuenta:70})],{cuentasSinCif:sinCif});
  assert.equal(k.resultado.manuscritos.stel.estado,"OK");
 });
-test("consultaSinCif: fechas de los que siguen sin albarán de compra, con margen corto",()=>{
- const a=doc(),b=doc({fecha:ok("2026-03-10")}),c=doc({numero:ok("1234")});b.resultado.albaran_stel={estado:"OK"};
- assert.deepEqual(C.consultaSinCif([a,b,c]),{desde:"2026-02-26",hasta:"2026-03-08"});
- assert.equal(C.consultaSinCif([b]),null);
-});
 test("cuentas sin CIF demostradas: las de los albaranes resueltos en ellas, por proveedor",()=>{
  const sinCif=new Set(["70"]);
  const a=doc(),b=doc({numero:ok("654321")});a.resultado.proveedor.id="P1";b.resultado.proveedor.id="P1";
@@ -93,4 +88,9 @@ test("cuentas sin CIF demostradas: las de los albaranes resueltos en ellas, por 
  // Resuelto en la cuenta del CIF: no cuenta como cuenta sin CIF.
  const c=doc();c.resultado.proveedor.id="P2";C.resolver([c],[nota("ABP261111","123456 03/03/2026 X")],{cuentasSinCif:sinCif});
  assert.equal(C.cuentasSinCifPorProveedor([c]).size,0);
+});
+test("consulta: también con un proveedor sin cuenta de STEL por su CIF (la búsqueda es en todas las cuentas)",()=>{
+ const q=C.consulta([doc({cuenta:null})]);
+ assert.deepEqual(q.cuentas,[]);assert.equal(q.desde,"2026-02-21");assert.equal(q.hasta,"2026-03-13");
+ assert.equal(C.consulta([doc({fecha:{valor:"2026-03-03",estado:"REVISAR",confianza:0.5}})]),null);
 });

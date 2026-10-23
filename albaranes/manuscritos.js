@@ -602,5 +602,33 @@ function revalidarObra(r,{catalogoObras=null,catalogoObrasCompleto=false,obraSte
  return true;
 }
 
-return {sinComprobar,revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,fechaStel,FORMATOS};
+/*
+ * Texto justo encima de una línea de artículo que es la OBRA del albarán («OBRA FICTICIA»), no el
+ * primer renglón de la descripción (caso real 2026-10-23, el usuario lo comprobó en el papel): todas
+ * sus palabras distintivas están en el nombre de la obra validada (catálogo de obras) o en la obra
+ * del albarán de compra de STEL, y no lleva cifras. Entonces la descripción no queda en revisión por
+ * ese texto (si no tiene otras dudas). Un texto como «Suministro y montaje» no es de ninguna obra y
+ * sigue en revisión. Devuelve cuántas descripciones resuelve.
+ */
+const MOTIVO_TEXTO_PREVIO=/^Texto justo encima de la línea/;
+function textoPrevioObra(r,{catalogoObras=null}={}){
+ const o=r?.manuscritos?.obra,nombres=[];
+ if(o?.estado==="OK"&&(o.confianza??0)>=0.9){const c=(catalogoObras||[]).find(e=>canon(e.codigo)===canon(o.valor));if(c)nombres.push(c.nombre);}
+ if(r?.albaran_stel?.estado==="OK"&&r.albaran_stel.obra)nombres.push(r.albaran_stel.obra);
+ if(!nombres.length)return 0;
+ const deLaObra=new Set(nombres.flatMap(t=>[...palabrasObra(t)]));
+ let n=0;
+ for(const l of r.lineas||[]){
+  const d=l.descripcion,t=d?.texto_previo;
+  if(!t||d.estado!=="REVISAR"||/\d/.test(t))continue;
+  const p=[...palabrasObra(t)],motivos=(d.motivos||[]).filter(m=>!MOTIVO_TEXTO_PREVIO.test(m));
+  if(!p.length||!p.every(w=>deLaObra.has(w))||motivos.length)continue;
+  l.descripcion={...d,estado:"OK",motivos,resolucion:{...(d.resolucion||{}),metodo:"texto_previo_obra",
+   evidencias:[...(d.resolucion?.evidencias||[]),"El texto de encima («"+t+"») es la obra del albarán («"+nombres[0]+"»), no parte de la descripción"]}};
+  n++;
+ }
+ return n;
+}
+
+return {textoPrevioObra,sinComprobar,revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,fechaStel,FORMATOS};
 });

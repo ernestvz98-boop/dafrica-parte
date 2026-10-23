@@ -1256,7 +1256,7 @@ function extraerDePaginas(paginas,opciones={}){
  const textoDoc=clave(paginas.flatMap(p=>p.lineas.map(l=>l.texto)).join(" "));
  const tipoImpreso=/\bABONO\b/.test(textoDoc)?"ABONO":/\bDEVOLUCION\b/.test(textoDoc)?"DEVOLUCION":null;
  Object.defineProperty(salida,"_ctx",{enumerable:false,writable:true,value:{
-  perfil,totalLineas,base,tipoImpreso,hayTabla:tablas.some(x=>x.t),columnas:primera.t?.cabecera||[],
+  perfil,totalLineas,base,tipoImpreso,hayTabla:tablas.some(x=>x.t),columnas:primera.t?.cabecera||[],opcionesNumero,precioPor,
   // Cifras impresas en el pie (para completar totales cuya etiqueta no se ha leído).
   cifrasPie:pie.flatMap(l=>l.celdas.flatMap(c=>String(c.texto).split(/\s+/).map(t=>t.replace(/[€%]/g,"").trim()).filter(t=>/\d/.test(t))
    .map(t=>({literal:t,...N().numero(t,opcionesNumero),caja:caja(c),conf:c.conf??null})).filter(x=>x.estado==="OK"))),

@@ -3,6 +3,82 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-23 · Lectura real con lector26: confirmaciones mal formadas y cupo de STEL (lector27)
+
+**Producción:** web en `main` (versión `20261023lector27`). Sin cambios en funciones ni datos: las
+confirmaciones del usuario no se han tocado (copia en `pruebas/corpus-real/`, fuera de git).
+
+Lectura del usuario con lector26 (3 PDF, 30 albaranes, gpt-5.1, STEL): **548/605 (90,6 %), 0 errores
+críticos**. Un «AUTO_OK con error» no lo era: el ABP lo puso STEL (número del proveedor en el título
+y fecha) y la ficha de respuestas lo tenía como dudoso; resuelto en la ficha.
+
+1. **Confirmaciones mal formadas** (fallo real). De 15 códigos confirmados por el usuario, 4 guardan
+   algo que no es un código:
+   - dos con el principio de la descripción pegado;
+   - uno con un espacio en medio;
+   - un importe leído en la columna del código.
+
+   En una lectura siguiente podían validar un valor erróneo. Ahora:
+   - El lector no usa un código confirmado con comillas u otros signos ajenos, con forma de importe
+     ni, si el perfil lo declara, sin el formato de código del proveedor. DECOTAP: 3 cifras y 10
+     letras o cifras (11 de 11 códigos).
+   - La pantalla no deja guardarlos, propone la parte con forma de código y avisa en los códigos de
+     dos renglones o con texto pegado.
+   - Una quinta, de un código en dos renglones, se guardó tal como lo leyó el OCR, con un espacio
+     donde el papel lleva guion. El OCR tampoco ve el guion, así que se habría aceptado un código
+     erróneo (el único error crítico de la proyección). En los códigos de dos renglones la pantalla
+     avisa y guarda al segundo clic, tras pedir que se compare con el papel letra a letra. Las
+     confirmaciones de esos códigos anteriores a este aviso no se usan (sí la tarifa).
+   - Para aprovecharlas basta con volver a confirmar esos códigos en pantalla; no hace falta borrar
+     las mal formadas, que el lector ya no usa.
+2. **«403» de STEL** (fallo real). La búsqueda por cuenta gastó 55 consultas y la de cuentas sin CIF
+   recibió «403» (cupo). Ahora se hace una sola búsqueda en todas las cuentas, en las fechas de la
+   lectura, desde el final de la lista y con la pista del total. Solo si no termina por larga se busca
+   por cuenta.
+3. **Texto encima de la línea que es la obra** (el nombre de la obra; caso señalado por el usuario).
+   La descripción ya no queda en revisión si todas las palabras de ese texto son de la obra validada
+   o de la obra del albarán de compra de STEL. «Suministro y montaje», que sí es el primer renglón de
+   la descripción, sigue en revisión.
+4. **Descuento impreso que el OCR no lee** (fallo real: una línea con descuento leída sin él;
+   cantidad, precio e importe quedaban en revisión por no cuadrar). Si una línea no cuadra, su
+   descuento está vacío y otras líneas de la misma página tienen descuento, se relee esa casilla
+   (columna de los descuentos, fila de la línea). El valor solo se acepta si con él la línea cuadra:
+   cantidad × precio × (1 − dto) = importe.
+
+Proyección sobre esa lectura (mismas lecturas de visión, albaranes de STEL guardados; sin el
+descuento, que necesita leer el PDF):
+
+| | Correctos automáticos | Críticos |
+|---|---|---|
+| Con las confirmaciones del usuario (sin las mal formadas ni la del guion) | **568/605 (93,9 %)** | 0 |
+| Sin confirmaciones | 558/605 (92,2 %) | 0 |
+| Con el descuento releído (+4, medido en Chromium) | 572/605 (94,5 %) | 0 |
+| Y con los 4 códigos vueltos a confirmar bien | 576/605 (95,2 %) | 0 |
+
+Verificación:
+- `npm test`: 279 pruebas. Nuevas:
+  - descuento releído que cuadra (y otro que no cuadra y no se acepta);
+  - confirmaciones mal formadas;
+  - código de dos renglones con confirmación anterior o posterior al aviso;
+  - texto encima que es la obra;
+  - búsqueda de STEL sin cuentas.
+- Corpus sin visión igual: 91,0 % y 90,6 % (como la web); 0 críticos, 0 AUTO_OK con error.
+- Prueba de fuerza de obras: 0 falsas.
+- Chromium con los 3 PDF reales (Supabase, STEL y visión simulados):
+  - una sola búsqueda de STEL en todas las cuentas (9 consultas): 28 albaranes de compra, 0 erróneos;
+  - la confirmación con texto pegado no se usa, ni la antigua del código de dos renglones;
+  - el código de dos renglones se guarda al segundo clic; uno normal, al primero;
+  - el descuento de esa línea, releído y con cuadre (+4 campos);
+  - sin errores de JavaScript.
+
+Revisado en el papel, de los 5 casos que el usuario señaló como bien:
+- La puerta de paso está bien y ahora se acepta sola.
+- La cantidad −1 está bien, pero sin precios no hay cuadre que la pruebe.
+- No son exactos y el lector hace bien en marcarlos:
+  - «ll/B-M» por «II/B-M»;
+  - «JEBRBRIIRCAN» por «JEBR6R1IRCAN»;
+  - el mostrador, al que le falta el primer renglón «Suministro y montaje -».
+
 ## 2026-10-22 · Lectura con una cifra perdida, cuenta sin CIF demostrada y ABP del mismo día (lector26)
 
 **Producción:** web en `main` (versión `20261022lector26`). Sin cambios en funciones ni datos.

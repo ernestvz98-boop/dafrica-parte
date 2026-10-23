@@ -162,7 +162,7 @@ function combinarTotales(principal,lecturas){
  * Cada resolución guarda método, estrategias y evidencias.
  */
 const ESTRATEGIAS=[{psm:7},{psm:8},{psm:7,escala:2},{psm:13,escala:2},{psm:7,escala:2,umbral:"sauvola"},{psm:6,escala:2}];
-const LISTAS={numero:"0123456789./-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",fecha:"0123456789/-.",referencia:null,descripcion:null};
+const LISTAS={numero:"0123456789./-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",fecha:"0123456789/-.",referencia:null,descripcion:null,descuento:"0123456789,.%+"};
 const limpiarBordes=t=>String(t||"").replace(/^[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ(]+|[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ)%]+$/g,"");
 async function releerCaja(p,caja,lista){
  const k=p.dpi/72,[x0,y,x1,alto]=caja;
@@ -184,6 +184,11 @@ function candidatoDe(campo,texto,ctx){
  const {perfil,opcionesFecha}=ctx;
  const N=M("normalizar");
  const tokens=String(texto).split(/\s+/).map(limpiarBordes).filter(Boolean);
+ // Descuento: un único porcentaje entre 0 y 100 en la casilla («20,00%», «20», «20+5»).
+ if(campo==="descuento"){
+  const v=tokens.map(t=>N.descuento(t,ctx.opcionesNumero||{})).filter(d=>d.estado==="OK"&&d.valor>0&&d.valor<100);
+  return v.length===1?String(v[0].literal):null;
+ }
  if(campo==="numero"){
   const re=perfil?.formato_numero?new RegExp(perfil.formato_numero):/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i;
   // También dos fichas separadas solo por el espacio junto a «/», «-» o «.» («2026 /9294»).
@@ -313,6 +318,33 @@ async function segundaFase(principal,paginas,lecturas,opciones){
     evidencias:["Mismo valor en "+r.estrategias.length+" relecturas independientes de la casilla",
      campo==="numero"&&perfil?.formato_numero?"Cumple el formato de número del proveedor ("+perfil.formato_numero+")":campo==="fecha"?"Fecha válida":"Valor con forma de número de albarán"]}};
   resueltos.push(campo);
+ }
+ // Línea que no cuadra con el descuento vacío, y otras líneas con descuento leído: el OCR pudo
+ // perder el descuento impreso (fallo real 2026-10-23: descuento no leído; cantidad, precio e importe
+ // quedaban en revisión). Se relee la casilla (columna de los descuentos leídos en la misma página,
+ // fila de la línea) y solo se acepta si con ese descuento la línea cuadra:
+ // cantidad × precio × (1 − dto) = importe.
+ for(const l of principal.lineas){
+  if(l.cuadre?.estado!=="DESCUADRE"||l.descuento?.estado!=="VACIO")continue;
+  const pg=paginas.find(p=>p.numero===l.pagina);
+  const cajasDto=principal.lineas.filter(o=>o.pagina===l.pagina&&o.descuento?.caja).map(o=>o.descuento.caja);
+  const fila=[l.importe,l.precio,l.cantidad].map(c=>c?.caja).find(Boolean);
+  if(!pg||!cajasDto.length||!fila)continue;
+  const caja=[Math.min(...cajasDto.map(c=>c[0])),fila[1],Math.max(...cajasDto.map(c=>c[2])),fila[3]];
+  const r=await resolverCampo(pg,"descuento",[caja],{perfil,opcionesFecha,opcionesNumero:ctx.opcionesNumero});
+  if(!r||r.conflicto)continue;
+  const dto=N.descuento(r.valor,ctx.opcionesNumero||{});
+  const comoOK=c=>({...c,estado:"OK"});
+  const prueba={...l,cantidad:comoOK(l.cantidad),precio:comoOK(l.precio),importe:comoOK(l.importe),descuento:{...dto,estado:"OK"}};
+  const c=M("extraer").cuadre(prueba,ctx.precioPor||perfil?.precio_por||1);
+  if(c.estado!=="VERIFICADO")continue;
+  const sinDescuadre=x=>({...x,estado:"VERIFICADO",motivos:(x.motivos||[]).filter(m=>m!=="El cuadre de la línea no se cumple")});
+  for(const k of ["cantidad","precio","importe"])l[k]=sinDescuadre(l[k]);
+  l.descuento={...l.descuento,...dto,estado:"VERIFICADO",caja,motivos:[],
+   resolucion:{metodo:"relectura_dirigida_cuadre",confianza:0.97,estrategias:r.estrategias,
+    evidencias:["Relectura de la casilla del descuento: «"+r.textos[0]+"» ("+r.estrategias.length+" relecturas)","Con ese descuento la línea cuadra: "+c.detalle]}};
+  l.cuadre=c;l.motivos=(l.motivos||[]).filter(m=>!/^Descuadre:/.test(m));
+  resueltos.push("linea "+l.fila+" descuento (cuadre)");
  }
  // Líneas: código y descripción leídos con poca confianza (no hay cuadre que los confirme).
  const pendientes=[];

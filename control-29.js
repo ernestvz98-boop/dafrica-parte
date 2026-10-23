@@ -10,7 +10,7 @@
 (function(){
 const MODULO={id:"lector-albaranes",label:"Lector de albaranes",icon:"📄",permission:"costes.ver"};
 // Versión visible en la pantalla (debe coincidir con ?v= de los scripts en index.html).
-const VERSION_LECTOR="20261022lector26";
+const VERSION_LECTOR="20261023lector27";
 // Modelo de visión de los recortes de manuscritos, elegido por el usuario (2026-10-22) tras la
 // comparación sobre los mismos recortes de los 3 PDF reales: 32 de 60 códigos aceptados y
 // correctos frente a 29 del anterior (gpt-4o), 0 erróneos en ambos y menor coste. Las casillas
@@ -176,39 +176,33 @@ function montar(root){
     pintar(resultado);
    }
    // Albarán de compra de STEL de cada albarán leído, por el número del proveedor en su título
-   // (solo lectura; una consulta para toda la lectura). Solo con la búsqueda completa.
+   // (solo lectura). Una sola búsqueda en TODAS las cuentas (también las sin CIF) en las fechas de la
+   // lectura, desde el final de la lista y con la pista del total. Fallo real (2026-10-23): por cuenta
+   // gastó 55 consultas y la búsqueda siguiente recibió «403» (cupo de STEL). Si no termina por larga
+   // (fechas muy separadas), por cuenta y sin las cuentas sin CIF. Solo con la búsqueda completa.
    if(typeof sb==="function"&&lib.comprasStel&&!detener){
     const q=lib.comprasStel.consulta(resultado.documentos),sc=motores.stel_compras={consultado:false};
     if(q){
      let pista=null;try{pista=Number(localStorage.getItem("dafrica_stel_compras_total"))||null;}catch{}
      estado.textContent="Buscando los albaranes de compra en STEL (solo lectura)…";
+     const buscar=b=>sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({buscar:{...b,...(pista?{pista}:{})}}),signal:AbortSignal.timeout(170000)});
      try{
-      const resp=await sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
-       body:JSON.stringify({buscar:{...q,...(pista?{pista}:{})}}),signal:AbortSignal.timeout(170000)});
-      Object.assign(sc,{consultado:true,metodo:resp?.metodo||null,completo:!!resp?.completo,notas:(resp?.notas||[]).length,consultas:resp?.consultas??null,motivo:resp?.motivo||null});
+      let resp=await buscar({cuentas:[],desde:q.desde,hasta:q.hasta}),todas=true;
+      sc.intentos=[{cuentas:"todas",completo:!!resp?.completo,consultas:resp?.consultas??null,motivo:resp?.motivo||null}];
+      if(!resp?.completo&&resp?.motivo==="limite_paginas"&&q.cuentas.length&&!detener){
+       resp=await buscar(q);todas=false;
+       sc.intentos.push({cuentas:q.cuentas.length,completo:!!resp?.completo,consultas:resp?.consultas??null,motivo:resp?.motivo||null});
+      }
+      Object.assign(sc,{consultado:true,todas_las_cuentas:todas,metodo:resp?.metodo||null,completo:!!resp?.completo,notas:(resp?.notas||[]).length,
+       consultas:sc.intentos.reduce((n,x)=>n+(x.consultas||0),0),motivo:resp?.motivo||null});
       if(resp?.total)try{localStorage.setItem("dafrica_stel_compras_total",String(resp.total));}catch{}
       // Cuentas de STEL sin CIF válido (solo con el catálogo de proveedores completo): un proveedor
       // puede estar duplicado en STEL en una cuenta sin CIF con sus compras (fallo real 2026-10-22).
-      const cuentasSinCif=catalogo?.proveedores_completo&&lib.nif?new Set((catalogo.proveedores||[]).filter(p=>!lib.nif.validar(p.nif).valido).map(p=>String(p.id))):null;
+      const cuentasSinCif=todas&&catalogo?.proveedores_completo&&lib.nif?new Set((catalogo.proveedores||[]).filter(p=>!lib.nif.validar(p.nif).valido).map(p=>String(p.id))):null;
       if(resp?.completo)Object.assign(sc,lib.comprasStel.resolver(resultado.documentos,resp.notas||[],{cuentasSinCif}));
       // En el JSON descargado (solo en el equipo del usuario), para medir sin volver a leer.
       sc.lista=resp?.notas||[];
-      // Los que siguen sin albarán de compra: una búsqueda más en TODAS las cuentas, solo en sus fechas.
-      const q2=resp?.completo&&cuentasSinCif?lib.comprasStel.consultaSinCif(resultado.documentos):null;
-      if(q2&&!detener){
-       estado.textContent="Buscando en STEL los albaranes de compra de cuentas sin CIF (solo lectura)…";
-       const resp2=await sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({buscar:{cuentas:[],...q2,...(pista?{pista}:{})}}),signal:AbortSignal.timeout(170000)}).catch(e=>({error:String(e?.message||e).slice(0,160)}));
-       const usadas=new Set(resultado.documentos.map(d=>d.resultado?.albaran_stel?.id).filter(x=>x!=null).map(String));
-       const nuevas=(resp2?.notas||[]).filter(n=>!usadas.has(String(n.id)));
-       sc.sin_cif={consultado:true,completo:!!resp2?.completo,notas:nuevas.length,consultas:resp2?.consultas??null,motivo:resp2?.motivo||resp2?.error||null,resueltos:0};
-       if(resp2?.total)try{localStorage.setItem("dafrica_stel_compras_total",String(resp2.total));}catch{}
-       if(resp2?.completo){
-        const r2=lib.comprasStel.resolver(resultado.documentos.filter(d=>d.resultado&&!d.resultado.albaran_stel),nuevas,{cuentasSinCif});
-        sc.sin_cif.resueltos=r2.resueltos;sc.resueltos=(sc.resueltos||0)+r2.resueltos;sc.numeros=(sc.numeros||0)+r2.numeros;sc.conflictos=(sc.conflictos||0)+r2.conflictos;
-        const vistas=new Set(sc.lista.map(n=>String(n.id)));sc.lista=[...sc.lista,...nuevas.filter(n=>!vistas.has(String(n.id)))];
-       }
-      }
       // Con el nombre de la obra que la oficina escribió en STEL, el código PRY a mano puede
       // validarse con el catálogo de obras (mismo código y mismo nombre).
       sc.obras=0;
@@ -249,6 +243,8 @@ function montar(root){
    // Coherencia de los códigos de obra entre todos los PDF leídos juntos.
    const man=resultado.documentos.map(d=>d.resultado?.manuscritos).filter(Boolean);
    if(man.length&&lib.manuscritos)lib.manuscritos.coherenciaLote(man,{catalogoObras});
+   // Texto encima de una línea que es la obra del albarán (no el primer renglón de la descripción).
+   if(lib.manuscritos?.textoPrevioObra)for(const d of resultado.documentos)if(d.resultado)lib.manuscritos.textoPrevioObra(d.resultado,{catalogoObras});
    // Códigos confirmados por una persona y tarifas importadas: solo los que hacen falta.
    let confirmadas=null;
    if(typeof sb==="function"&&lib.confirmadas){
@@ -325,8 +321,23 @@ function montar(root){
    const lib=window.DafricaAlbaranes;
    const [i,f]=b.dataset.lalConfirmar.split(":").map(Number),d=r.documentos[i],l=d?.resultado?.lineas?.[f];
    const entrada=$("lalRef_"+i+"_"+f),estadoFila=$("lalRefEstado_"+i+"_"+f);
-   const referencia=String(entrada?.value||"").trim(),clave=lib.confirmadas.clave(d?.resultado?.proveedor);
+   const referencia=String(entrada?.value||"").trim().replace(/\s+/g," "),clave=lib.confirmadas.clave(d?.resultado?.proveedor);
    if(!referencia||!clave||!l)return;
+   // Solo códigos con forma de código: sin texto de la descripción pegado, sin comillas ni signos,
+   // sin forma de importe y con el formato de código del proveedor si se conoce.
+   const perfil=lib.confirmadas.perfilDe?.(d.resultado.proveedor);
+   if(lib.confirmadas.codigoValido&&!lib.confirmadas.codigoValido(referencia,perfil)){
+    estadoFila.textContent="No parece un código"+(perfil?.formato_referencia?" de este proveedor":"")+
+     ": quita el texto pegado de la descripción, las comillas o los espacios. Si en el papel no hay código, no lo confirmes.";
+    return;
+   }
+   // Código en dos renglones: el OCR pierde guiones y espacios (fallo real 2026-10-23: se confirmó un
+   // espacio donde el papel lleva guion). Se guarda al segundo clic, tras compararlo con el papel.
+   if(lib.confirmadas.dosRenglones?.(l.referencia)&&b.dataset.lalComprobado!==referencia){
+    b.dataset.lalComprobado=referencia;
+    estadoFila.textContent="Código en dos renglones: compáralo con el papel letra a letra, con sus espacios y guiones, y pulsa otra vez para guardarlo.";
+    return;
+   }
    b.disabled=true;estadoFila.textContent="Guardando…";
    try{
     await sb("/rest/v1/lector_referencias_confirmadas?on_conflict=proveedor_clave,referencia",{method:"POST",
@@ -360,10 +371,17 @@ function montar(root){
   const pendientes=(x.lineas||[]).map((l,f)=>({l,f})).filter(({l})=>l.referencia?.literal&&!(l.referencia.estado==="OK"&&(l.referencia.confianza??0)>=0.9));
   if(!pendientes.length)return "";
   if(!lib.confirmadas.clave(x.proveedor))return '<p class="muted">Códigos pendientes: identifica antes el proveedor para poder confirmarlos.</p>';
-  return '<div style="margin-top:8px"><b>Confirmar códigos</b> <span class="muted">(revisa el código con el papel; corrígelo si hace falta)</span>'+
+  // Propuesta: lo leído o, si lleva texto pegado o un espacio, la parte con forma de código.
+  const perfil=lib.confirmadas.perfilDe?.(x.proveedor);
+  const propuesta=r=>{const t=String(r.valor||r.literal||"").trim();
+   const opciones=[t,t.split(/\s+/)[0],t.replace(/\s+/g,"")];
+   return (lib.confirmadas.codigoValido?opciones.find(o=>lib.confirmadas.codigoValido(o,perfil)):null)||t;};
+  return '<div style="margin-top:8px"><b>Confirmar códigos</b> <span class="muted">(revisa el código con el papel letra a letra; corrígelo si hace falta; si dudas, no lo confirmes)</span>'+
    pendientes.map(({l,f})=>'<div style="display:flex;gap:6px;align-items:center;margin:4px 0;flex-wrap:wrap">'+
-    '<input id="lalRef_'+i+'_'+f+'" value="'+esc(l.referencia.valor||l.referencia.literal)+'" style="width:190px">'+
+    '<input id="lalRef_'+i+'_'+f+'" value="'+esc(propuesta(l.referencia))+'" style="width:190px">'+
     '<span class="muted">'+esc(l.descripcion?.valor||"")+'</span>'+
+    ((l.referencia.motivos||[]).some(m=>/dos renglones|Frontera entre código y descripción/.test(m))?
+     '<span class="error">Ojo: el código ocupa dos renglones o lleva texto pegado; escríbelo exactamente como en el papel (espacios y guiones).</span>':'')+
     '<button type="button" class="btn secondary" data-lal-confirmar="'+i+':'+f+'">Confirmar código</button>'+
     '<span id="lalRefEstado_'+i+'_'+f+'" class="muted"></span></div>').join("")+'</div>';
  }

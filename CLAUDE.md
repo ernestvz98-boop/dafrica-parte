@@ -68,6 +68,15 @@ Edge). El repositorio es **público**.
 - Un ABP escrito a mano se valida con STEL por la fecha solo si ese albarán de compra es el ÚNICO
   del proveedor ese día y no está asignado a otro albarán leído (con varios el mismo día, una cifra
   mal leída da otro); si no, hace falta el número del proveedor en STEL.
+- Un código confirmado por una persona o de una tarifa solo se usa si tiene forma de código: sin
+  texto de la descripción pegado, comillas ni signos ajenos, sin forma de importe y con el formato
+  de código del proveedor si su perfil lo declara (`formato_referencia`). La confirmación es
+  evidencia tan buena como su exactitud: se confirma comparando con el papel letra a letra. En un
+  código de dos renglones (el OCR pierde guiones y espacios) la pantalla avisa y guarda al segundo
+  clic; las confirmaciones de esos códigos anteriores a ese aviso no se usan.
+- Un descuento que el OCR no leyó se acepta por relectura solo si con él la línea cuadra.
+- Consultas a STEL: una sola búsqueda de albaranes de compra por lectura (todas las cuentas, solo
+  las fechas de la lectura); nada de consultas sueltas que agoten su cupo («403»).
 
 ## Proceso ante cada fallo real
 
