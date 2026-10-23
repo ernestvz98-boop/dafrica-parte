@@ -27,7 +27,9 @@ const ENTRADA=/(^|\/)(login|log-in|auth|signin|sign-in|session|sessions|token|oa
 const esStel=host=>/(^|\.)stelorder\.com$/i.test(host);
 const CANAL=/^\/app\/(ControladorMultiempresa|FrontController)$/;
 // Lista cerrada: solo se añaden operaciones de LECTURA revisadas (nombre y efecto).
-const OPERACIONES_LECTURA=new Set(["comprobarLogin","cargarPlanesSuscripcion","ListarProyectos"]);
+// ListarTipoUnidadFeMEX (2026-10-23, aprobado por el usuario): lista de tipos de unidad que pide el
+// formulario de producto; sin ella se queda en «Cargando…». Solo lleva el campo `operacion`.
+const OPERACIONES_LECTURA=new Set(["comprobarLogin","cargarPlanesSuscripcion","ListarProyectos","ListarTipoUnidadFeMEX"]);
 const OPERACIONES_ENTRADA=new Set(["realizarLogin"]);
 // Regla de lectura: nombres que EMPIEZAN por un verbo de consulta (y sin palabra de escritura en
 // ninguna parte, ver ESCRITURA). «cargar» no entra: en español también es «subir».

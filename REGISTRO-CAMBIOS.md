@@ -3,6 +3,29 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-23 · Robot de STEL: prueba privada de escritura autorizada (sin cambios en la web)
+
+**Producción:** sin cambios en la web ni en las funciones. La escritura desde la web sigue desactivada.
+
+- **Guardia** (`robot-stel/guardia.js`): se añade a la lista cerrada de lecturas revisadas la
+  operación `ListarTipoUnidadFeMEX`, aprobada por el usuario. Es la lista de tipos de unidad del
+  formulario de producto: sin ella, el formulario se quedaba en «Cargando…». Prueba en
+  `pruebas/robot-stel.test.js`.
+- **Prueba de escritura.** El usuario la autorizó: un albarán de compra, sus artículos nuevos y la
+  vinculación a su obra. Se hizo solo desde el entorno privado, con los datos de la salida del lector
+  de DAFRICA Control. Funcionamiento de la consola privada, fuera del repositorio:
+  - deja salir solo las operaciones de guardar producto y de guardar el documento;
+  - cada una tiene un presupuesto contado, y se comprueba su contenido contra la salida del lector
+    (proveedor, título, referencia del proveedor, proyecto, líneas por id del artículo, nombre y
+    cantidad);
+  - todo lo demás, incluidos los reintentos automáticos de la página, se cancela.
+- **Resultado:** se guardaron 3 operaciones (2 artículos y 1 albarán con su obra), verificadas
+  después en STEL. El segundo albarán del PDF quedó detenido: el lector no aceptó su fecha ni su
+  cantidad.
+- **Precios ausentes:** STEL no admite «pendiente». Las líneas quedan a 0,00 con el aviso «PRECIO
+  PENDIENTE», y las observaciones del albarán lo repiten.
+- **Fuera del repositorio:** referencias, capturas y registros.
+
 ## 2026-10-23 · Identidad del albarán de compra de STEL y paginación de la búsqueda (sin publicar)
 
 **Producción:** sin cambios. En la rama de desarrollo; la función `stel-albaranes-consulta` v7 está

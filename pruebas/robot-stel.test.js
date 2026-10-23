@@ -75,3 +75,9 @@ test("bloquear documentos no pasa; ListarProyectos sí (lista cerrada)",()=>{
  assert.equal(g.permitido("POST",U,"lectura","operacion=ListarProyectos"),true);
  for(const op of ["obtenerYBloquearDocumento","bloquearDocumento","desbloquearDocumento"])assert.equal(g.permitido("POST",U,"lectura","operacion="+op),false,op);
 });
+
+test("ListarTipoUnidadFeMEX (lista de tipos de unidad del formulario de producto) pasa; su parecido de escritura no",()=>{
+ const g=require("../robot-stel/guardia.js"),U="https://app.stelorder.com/app/FrontController";
+ assert.equal(g.permitido("POST",U,"lectura","operacion=ListarTipoUnidadFeMEX"),true);
+ for(const op of ["GuardarTipoUnidadFeMEX","ListarTipoUnidadFeMEXyGuardar","crearTipoUnidad"])assert.equal(g.permitido("POST",U,"lectura","operacion="+op),false,op);
+});
