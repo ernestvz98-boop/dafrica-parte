@@ -22,8 +22,26 @@ pendiente de desplegar y la web pendiente de publicar (con autorización).
    - al final, `comprasStel.conflictosIdentidad` deja en revisión cualquier albarán de compra (por
      id o por ABP) aceptado para dos o más albaranes leídos, con el motivo.
 
-Pruebas: `stel-compras-consulta.test.js` (lista cambiada durante la lectura; páginas solapadas sin
-pérdidas ni repeticiones), `compras-stel.test.js` y `manuscritos.test.js`. `npm test`: 292/292.
+3. **Revisión del usuario del commit 2e2d952: dos casos reproducidos con datos ficticios.**
+   - **Número contradictorio.** Un ABP escrito a mano se validaba por la fecha (único albarán de
+     compra del proveedor ese día) aunque STEL dijera otro número del proveedor en la referencia
+     externa o en el título. Ahora esa contradicción lo deja en REVISAR (`numeroContradice`). La
+     búsqueda por número del título tampoco elige un albarán cuya referencia externa dice otro número.
+   - **Páginas más cortas de lo pedido.** Con el filtro por cuenta, si STEL servía 50 filas aunque
+     se pidieran 100, se tomaba como lista entera: 50 de 200 con completo=true. Ahora una página
+     corta solo es el final si después no hay nada:
+     - con un tope fijo de STEL (la primera página de la búsqueda), se sigue con ese tamaño y se
+       lee la lista entera;
+     - con páginas recortadas a destiempo, la búsqueda queda incompleta («pagina_recortada»).
+     - Vale también para la búsqueda sin filtro.
+
+Pruebas:
+- `stel-compras-consulta.test.js`: lista cambiada durante la lectura; páginas solapadas sin pérdidas
+  ni repeticiones; servidor con tope de 50 y con páginas recortadas al azar, por cuenta y sin filtro.
+- `compras-stel.test.js` y `manuscritos.test.js`.
+- Las 3 pruebas nuevas fallan con el código anterior y pasan con el nuevo. `npm test`: 295/295.
+
+El evaluador del corpus no pasa por la validación con STEL, así que su resultado no cambia.
 
 ## 2026-10-23 · Lectura real de 2 PDF nuevos: separación, página de la línea y descripciones incompletas (lector29)
 

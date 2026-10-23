@@ -67,7 +67,10 @@ Edge). El repositorio es **público**.
   quedan sin comprobar (nunca AUTO_OK).
 - Un ABP escrito a mano se valida con STEL por la fecha solo si ese albarán de compra es el ÚNICO
   del proveedor ese día y no está asignado a otro albarán leído (con varios el mismo día, una cifra
-  mal leída da otro); si no, hace falta el número del proveedor en STEL.
+  mal leída da otro); si no, hace falta el número del proveedor en STEL. Si STEL dice OTRO número del
+  proveedor (referencia externa o título), no se valida nunca. Un albarán de compra de STEL aceptado
+  para dos albaranes leídos deja ambos en revisión. Una búsqueda con páginas recortadas o una lista
+  que cambia durante la lectura queda incompleta.
 - Un código confirmado por una persona o de una tarifa solo se usa si tiene forma de código: sin
   texto de la descripción pegado, comillas ni signos ajenos, sin forma de importe y con el formato
   de código del proveedor si su perfil lo declara (`formato_referencia`). La confirmación es

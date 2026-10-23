@@ -547,6 +547,18 @@ function fechaStel(v){
  const m=String(v).match(/^(\d{4}-\d{2}-\d{2})/);if(m)return m[1];
  const d=new Date(v);return isNaN(d)?null:d.toISOString().slice(0,10);
 }
+// Número del albarán del proveedor según STEL (referencia externa y números del título antes de la
+// fecha, «600.111 14/10/2026 OBRA»): contradice el papel si STEL dice otro número. Un albarán de
+// compra con otro número NO es el de este albarán aunque sea el único del proveedor ese día (fallo
+// reproducido 2026-10-23: se aceptaba por la fecha).
+function numeroContradice(d,numero){
+ const n=canon(numero);if(!n)return false;
+ if(d?.extraReference&&canon(d.extraReference)!==n)return true;
+ const t=String(d?.title||""),m=t.match(/\d{1,2}[\/.-]\d{1,2}[\/.-]\d{4}/);
+ const previo=m?t.slice(0,m.index):t;
+ const numeros=previo.split(/\s+/).map(canon).filter(x=>x.length>=4&&(x.match(/\d/g)||[]).length>=3);
+ return numeros.length>0&&!numeros.includes(n);
+}
 // cuentasProveedor: cuentas de STEL SIN CIF que otros albaranes del lote ya han demostrado de este
 // proveedor (su número en el título de un único albarán de compra de esa cuenta, con la misma fecha).
 // delMismoDia(nota): cuántos OTROS albaranes de compra del proveedor tienen esa fecha (null si no se
@@ -576,11 +588,12 @@ async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null,cu
   const mismaFecha=r.fecha?.estado==="OK"&&!!r.fecha.valor&&fechaStel(d.date)===r.fecha.valor;
   const mismoNum=!!r.numero?.valor&&!!d.extraReference&&canon(d.extraReference)===canon(r.numero.valor);
   const otros=typeof delMismoDia==="function"?delMismoDia(d):null,usada=!!asignadas?.has(String(d.id));
-  const porFecha=mismaFecha&&otros===0;
+  const contradice=numeroContradice(d,r.numero?.valor);
+  const porFecha=mismaFecha&&otros===0&&!contradice;
   if(typeof diagnostico==="function")diagnostico({ref:d.fullReference,proveedor_stel:d.supplier,cuenta_stel:d.accountId??null,proveedor:nombre,cuenta:cuenta??null,
    fecha_stel:d.date,fecha_stel_normalizada:fechaStel(d.date),fecha:r.fecha?.valor??null,referencia_externa:d.extraReference||null,numero:r.numero?.valor??null,
-   mismo_proveedor:mismoProv,misma_fecha:mismaFecha,mismo_numero:mismoNum,otros_del_dia:otros,ya_asignado:usada});
-  if(mismoProv&&!usada&&(porFecha||mismoNum))validas.push({c,id:d.id??null,ev:"Albarán de compra STEL "+d.fullReference+" (solo lectura): "+
+   mismo_proveedor:mismoProv,misma_fecha:mismaFecha,mismo_numero:mismoNum,otros_del_dia:otros,ya_asignado:usada,numero_contradice:contradice});
+  if(mismoProv&&!usada&&!contradice&&(porFecha||mismoNum))validas.push({c,id:d.id??null,ev:"Albarán de compra STEL "+d.fullReference+" (solo lectura): "+
    (vinculada?"cuenta de STEL sin CIF del mismo proveedor (por otros albaranes del lote)":"proveedor «"+d.supplier+"»")+
    (porFecha?", misma fecha "+r.fecha.valor+" (su único albarán de compra ese día)":"")+(mismoNum?", referencia del proveedor «"+d.extraReference+"»":"")});
  }
@@ -640,5 +653,5 @@ function textoPrevioObra(r,{catalogoObras=null}={}){
  return n;
 }
 
-return {textoPrevioObra,sinComprobar,revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,fechaStel,FORMATOS};
+return {textoPrevioObra,sinComprobar,revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,numeroContradice,fechaStel,FORMATOS};
 });

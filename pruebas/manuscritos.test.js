@@ -415,3 +415,22 @@ test('validarStel registra el albarán de compra asignado: el siguiente albarán
  assert.equal(await M.validarStel(b,async()=>[nota],opc),false);
  assert.equal(b.manuscritos.stel.estado,'REVISAR');
 });
+
+test('ABP por fecha: si el número del proveedor en STEL (referencia externa o título) contradice el papel, no se valida aunque sea el único del día',async()=>{
+ const {validarStel}=require("../albaranes/manuscritos.js");
+ const base=()=>({fecha:{estado:"OK",valor:"2026-10-14"},numero:{valor:"600.111",estado:"OK",confianza:0.95},proveedor:{nombre:"PROVEEDOR FICTICIO, S.L."},
+  manuscritos:{stel:{valor:"ABP26-1234",literal:"ABP26 1234",estado:"REVISAR",resolucion:{alternativas:["ABP261234"]}}}});
+ const nota={id:8,fullReference:"ABP26-1234",supplier:"Proveedor Ficticio SL",date:"2026-10-14",extraReference:"",title:""};
+ const unico={delMismoDia:()=>0};
+ // Referencia externa con OTRO número del proveedor.
+ let r=base();assert.equal(await validarStel(r,async()=>[{...nota,extraReference:"600.999"}],unico),false);
+ assert.equal(r.manuscritos.stel.estado,"REVISAR");
+ // Título con OTRO número del proveedor («número fecha obra»).
+ r=base();assert.equal(await validarStel(r,async()=>[{...nota,title:"600.999 14/10/2026 OBRA FICTICIA"}],unico),false);
+ assert.equal(r.manuscritos.stel.estado,"REVISAR");
+ // Título con el MISMO número, o sin número: sí (único del día).
+ r=base();assert.equal(await validarStel(r,async()=>[{...nota,title:"600.111 14/10/2026 OBRA FICTICIA"}],unico),true);
+ r=base();assert.equal(await validarStel(r,async()=>[{...nota,title:"OBRA FICTICIA"}],unico),true);
+ // Contradicción aunque coincida la referencia externa: el título dice otro número → no.
+ r=base();assert.equal(await validarStel(r,async()=>[{...nota,extraReference:"600111",title:"600.999 14/10/2026 OBRA FICTICIA"}],unico),false);
+});

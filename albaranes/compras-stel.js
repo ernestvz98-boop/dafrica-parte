@@ -58,6 +58,8 @@ function resolver(docs,notas,{cuentasSinCif=null}={}){
   if(cands.length!==1)continue;
   const n=cands[0],t=partesTitulo(n.title),abp=formatoAbp(n.fullReference);
   if(!abp||!mismaFecha(n))continue;
+  // Referencia externa de STEL con otro número del proveedor: contradicción, no se elige.
+  if(n.extraReference&&canon(n.extraReference)!==num){res.conflictos++;continue;}
   elegidos.push({r,n,abp,t,sinCif});
  }
  // Un mismo albarán de STEL para dos albaranes leídos: ninguno.

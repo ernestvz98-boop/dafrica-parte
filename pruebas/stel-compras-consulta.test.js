@@ -73,8 +73,8 @@ test('la lista cambia durante la lectura (un albarán borrado): búsqueda incomp
  const r=await buscarNotas(async url=>{
   const u=new URL(url),s=Number(u.searchParams.get('start')),l=Number(u.searchParams.get('limit'));
   const pagina=lista.slice(s,s+l);
-  // Sondeo de la cuenta (1.ª lectura de página) y primera página del final (2.ª); después, un borrado.
-  if(l>1&&++leidas===2)lista=lista.filter(n=>n.id!==200);
+  // Tras la primera página leída desde el final (no la del principio de la lista), un borrado.
+  if(l>1&&s>0&&++leidas===1)lista=lista.filter(n=>n.id!==200);
   return response(pagina);
  },'k',{cuentas:[1],desde:'2026-07-20',hasta:'2026-10-30',dormir:async()=>{}});
  assert.equal(r.completo,false);assert.equal(r.motivo,'lista_cambiada');assert.equal(r.notas.length,0);
@@ -85,4 +85,28 @@ test('páginas solapadas: sin cambios, la lectura hacia atrás no pierde ni repi
  assert.equal(r.completo,true);
  const esperadas=NOTAS.filter(n=>n.date.slice(0,10)>='2026-07-15').map(n=>n.id);
  assert.deepEqual(r.notas.map(n=>n.id).sort((a,b)=>a-b),esperadas);
+});
+
+test('servidor que devuelve menos filas de las pedidas (50 de 100) con el filtro por cuenta: lista completa o búsqueda incompleta, nunca 50 de 200 «completa»',async()=>{
+ const {buscarNotas}=await mod();
+ // 200 albaranes de la cuenta 7 (uno por día) y 30 de la cuenta 8; el servidor sirve como mucho 50 por página.
+ const d=i=>new Date(Date.UTC(2026,3,1)+i*864e5).toISOString().slice(0,10);
+ const lista=[...Array.from({length:200},(_,i)=>({id:i+1,'full-reference':'ABP'+i,'account-id':7,date:d(i)+'T00:00:00+0000','creation-date':d(i),title:'t'})),
+  ...Array.from({length:30},(_,i)=>({id:900+i,'full-reference':'ABQ'+i,'account-id':8,date:d(170+i)+'T00:00:00+0000','creation-date':d(170+i),title:'t'}))]
+  .sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.id-b.id); // STEL: del más antiguo al más nuevo
+ const servidor=(tope,errático=false)=>{let n=0;return async url=>{const u=new URL(url),s=Number(u.searchParams.get('start')),l=Number(u.searchParams.get('limit')),c=u.searchParams.get('account-id');
+  const f=c?lista.filter(x=>String(x['account-id'])===c):lista;
+  // Errático: una de cada tres páginas grandes llega recortada a 50 filas.
+  const lim=errático?(l>1&&++n%3===0?Math.min(l,50):l):Math.min(l,tope);
+  return response(f.slice(s,s+lim));};};
+ const buscar=srv=>buscarNotas(srv,'k',{cuentas:[7,8],desde:d(0),hasta:d(199),dormir:async()=>{}});
+ const r=await buscar(servidor(50));
+ if(r.completo){assert.equal(r.notas.filter(n=>n.accountId===7).length,200);assert.equal(r.notas.filter(n=>n.accountId===8).length,30);}
+ else assert.match(r.motivo,/pagina_recortada/);
+ assert.equal(r.completo,true,'con un tope fijo de página se recupera la lista entera: '+JSON.stringify({...r,notas:r.notas.length}));
+ const e=await buscar(servidor(100,true));
+ if(e.completo)assert.equal(e.notas.length,230);else assert.ok(/pagina_recortada|lista_cambiada/.test(e.motivo),e.motivo);
+ // Sin filtro (búsqueda global) con tope fijo: tampoco se pierde nada.
+ const g=await buscarNotas(servidor(50),'k',{cuentas:[],desde:d(150),hasta:d(199),dormir:async()=>{}});
+ if(g.completo)assert.equal(g.notas.length,80);else assert.match(g.motivo,/pagina_recortada|lista_cambiada/);
 });

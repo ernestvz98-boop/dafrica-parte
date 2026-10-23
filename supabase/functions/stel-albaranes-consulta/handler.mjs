@@ -17,6 +17,8 @@
  *   v6: el final se acota a una página (no al albarán exacto): unas 7 consultas menos por lista.
  * 2026-10-23: v7. Páginas solapadas en un albarán con comprobación de continuidad: si la lista
  *   cambia durante la lectura, la búsqueda queda incompleta («lista_cambiada»), nunca con huecos.
+ *   Página con menos filas de las pedidas: fin de la lista solo si después no hay nada; con un tope
+ *   fijo de STEL se sigue con ese tamaño; si no, incompleta («pagina_recortada»).
  */
 const cors={"Access-Control-Allow-Origin":"https://ernestvz98-boop.github.io","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...cors,"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}});
@@ -71,16 +73,28 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
   // una página entera se creó antes de `desde` (con 2 días de margen).
   const limite=new Date(Date.parse(desde)-2*864e5).toISOString().slice(0,10);
   let paginas=0;
+  const hay=async(filtro,n)=>n>=0&&(await get({...filtro,limit:1,start:n})).length>0;
+  // Página que llega con menos filas de las pedidas: solo es el final de la lista si después no hay
+  // nada. Si hay más, STEL sirve páginas más cortas: con un tope fijo (la primera página de la
+  // búsqueda) se sigue con ese tamaño; con páginas recortadas a destiempo, la búsqueda queda
+  // incompleta («pagina_recortada»), nunca «completa» con huecos (fallo reproducido 2026-10-23:
+  // 50 de 200 albaranes de un proveedor y completo=true).
+  let tamFijado=false;
+  const corta=async(filtro,inicio,f)=>{
+   if(f.length>=tam||!await hay(filtro,inicio+f.length))return false;
+   if(!tamFijado&&inicio===0&&f.length>1){tam=f.length;tamFijado=true;return false;}
+   throw Error("pagina_recortada");
+  };
   // Final de una lista (con o sin filtro): galope desde lo ya conocido y búsqueda binaria; después,
   // páginas hacia atrás hasta las fechas anteriores. `filtro`: parámetros fijos de la consulta.
   const leerDesdeElFinal=async(filtro,{conocido=-1,pista=null,valida=()=>true}={})=>{
-   const hay=async n=>n>=0&&(await get({...filtro,limit:1,start:n})).length>0;
+   const hay1=n=>hay(filtro,n);
    let lo=conocido,hi;
-   if(Number.isInteger(pista)&&pista>0&&pista-1>lo&&await hay(pista-1)){lo=pista-1;let paso=50;hi=lo+paso;
-    while(await hay(hi)){lo=hi;paso*=2;hi=lo+paso;if(paso>1e6)break;}}
-   else{hi=Math.max(1000,2*(lo+1));while(await hay(hi)){lo=hi;hi*=2;if(hi>2e6)break;}}
+   if(Number.isInteger(pista)&&pista>0&&pista-1>lo&&await hay1(pista-1)){lo=pista-1;let paso=50;hi=lo+paso;
+    while(await hay1(hi)){lo=hi;paso*=2;hi=lo+paso;if(paso>1e6)break;}}
+   else{hi=Math.max(1000,2*(lo+1));while(await hay1(hi)){lo=hi;hi*=2;if(hi>2e6)break;}}
    // Basta acotar el final a menos de una página: la primera página leída (desde `lo`) lo contiene.
-   while(hi-lo>tam){const m=Math.floor((lo+hi)/2);if(await hay(m))lo=m;else hi=m;}
+   while(hi-lo>tam){const m=Math.floor((lo+hi)/2);if(await hay1(m))lo=m;else hi=m;}
    // Las páginas se solapan en un albarán y se comprueba que es el mismo: si la lista cambia
    // mientras se lee (un albarán borrado desplaza las posiciones), se notaría un hueco silencioso
    // (un «no existe» o un «único del día» falsos). Lista cambiada = búsqueda incompleta.
@@ -89,6 +103,8 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
     if(paginas>=maxPaginas)throw Error("limite_paginas");
     const f=await get({...filtro,limit:tam,start:inicio});paginas++;
     if(!f.every(valida))throw Error("filtro_inconsistente");
+    // La primera página (la del final) tiene que llegar entera hasta el final de la lista.
+    if(!anterior&&f.length<tam&&await hay1(inicio+f.length))throw Error("pagina_recortada");
     if(anterior&&String(f[anterior.inicio-inicio]?.id)!==String(anterior.id))throw Error("lista_cambiada");
     if(total===null){if(!f.length&&inicio>0)throw Error("lista_cambiada");total=inicio+f.length;}
     filas.push(...f);
@@ -103,6 +119,7 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
   for(const c of cuentas){
    const p=await get({"account-id":c,limit:tam,start:0});
    if(!p.length)continue;
+   await corta({"account-id":c},0,p);
    // Aplicado de verdad: todas sus filas son de la cuenta y, sin filtro, la lista tiene otras.
    aplicado=p.every(x=>String(x["account-id"])===String(c))&&(await get({limit:tam,start:0})).some(x=>String(x["account-id"])!==String(c));
    if(!aplicado)break;
@@ -111,13 +128,15 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
     const valida=x=>String(x["account-id"])===String(cuenta);
     const primera=cuenta===c?p:await get({"account-id":cuenta,limit:tam,start:0});
     if(!primera.every(valida))return fin("filtro_cuenta",false,[],{motivo:"filtro_inconsistente"});
+    if(cuenta!==c)await corta({"account-id":cuenta},0,primera);
     // Lista corta: ya está entera. Larga: desde el final.
     const filas=primera.length<tam?primera:(await leerDesdeElFinal({"account-id":cuenta},{conocido:tam-1,valida})).filas;
     notas.push(...unicas(filas).filter(enIntervalo));
    }
    return fin("filtro_cuenta",true,notas);
   }
-  // 2. Sin filtro: la lista completa desde el final.
+  // 2. Sin filtro: la lista completa desde el final (antes, el tamaño de página que sirve STEL).
+  if(!tamFijado){const p0=await get({limit:tam,start:0});await corta({},0,p0);}
   const {filas,total}=await leerDesdeElFinal({},{pista});
   const notas=unicas(filas).filter(x=>enIntervalo(x)&&(!delasCuentas.size||delasCuentas.has(String(x["account-id"]))));
   return fin("recientes",true,notas,{total});

@@ -132,3 +132,12 @@ test('identidad ABP: un mismo albarán de compra de STEL para dos albaranes leí
  const d2=[doc('1',{id:5,abp:'ABP26-0005',estado:'OK'}),doc('2',null,{valor:'ABP26-0050',estado:'OK',confianza:0.95,resolucion:{id_stel:5}})];
  assert.equal(conflictosIdentidad(d2),2);
 });
+
+test("número en el título pero la referencia externa de STEL dice otro número del proveedor: contradicción, no se elige",()=>{
+ const d=doc();
+ const r=C.resolver([d],[{...nota("ABP261111","123.456 03/03/2026 X"),extraReference:"999.999"}]);
+ assert.equal(r.resueltos,0);assert.equal(r.conflictos,1);
+ assert.notEqual(d.resultado.manuscritos.stel.estado,"OK");assert.equal(d.resultado.albaran_stel,undefined);
+ // La misma referencia externa (otro formato): sí.
+ const e=doc();assert.equal(C.resolver([e],[{...nota("ABP261111","123.456 03/03/2026 X"),extraReference:"123456"}]).resueltos,1);
+});
