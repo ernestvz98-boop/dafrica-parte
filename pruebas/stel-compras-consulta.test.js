@@ -110,3 +110,27 @@ test('servidor que devuelve menos filas de las pedidas (50 de 100) con el filtro
  const g=await buscarNotas(servidor(50),'k',{cuentas:[],desde:d(150),hasta:d(199),dormir:async()=>{}});
  if(g.completo)assert.equal(g.notas.length,80);else assert.match(g.motivo,/pagina_recortada|lista_cambiada/);
 });
+
+test('pedidos a proveedor por referencia: artículos y unidades, nunca precios; consulta validada',async()=>{
+ const {handler}=await mod();
+ const PED=[{id:5,'full-reference':'PAP90001','account-id':77,'extra-reference':'700.001','document-state':'Pendiente de recibir',date:'2026-10-26',title:'OBRA FICTICIA','total-amount':999.99,
+  lines:[{'item-reference':'A-100','item-id':11,units:1,'item-base-price':500},{'item-reference':'DEP',units:2,'item-base-price':300}]},
+  {id:6,'full-reference':'PAP900011','account-id':78,lines:[]}];
+ const consultas=[];
+ const fetcher=async(url,op)=>{
+  if(!url.includes('stelorder'))return stel(true)(url,op);
+  consultas.push(url);assert.match(url,/purchaseOrders/);
+  return response(PED.filter(p=>p['full-reference'].startsWith(new URL(url).searchParams.get('full-reference'))));
+ };
+ const r=await handler(req({pedidos:{codigos:['PAP90001']}}),{env,fetcher});
+ assert.equal(r.status,200);const d=await r.json();
+ assert.equal(d.completo,true);assert.equal(d.solo_lectura,true);assert.equal(d.pedidos.length,1);
+ assert.deepEqual(d.pedidos[0].lineas,[{ref:'A-100',idArticulo:11,unidades:1},{ref:'DEP',idArticulo:null,unidades:2}]);
+ assert.equal(d.pedidos[0].accountId,77);
+ assert.ok(!JSON.stringify(d).includes('999.99')&&!JSON.stringify(d).includes('500')&&!JSON.stringify(d).includes('300'));
+ for(const malo of [{codigos:[]},{codigos:['ABP261234']},{codigos:Array.from({length:21},(_,i)=>'PAP'+String(90000+i))}])
+  assert.equal((await handler(req({pedidos:malo}),{env,fetcher})).status,400);
+ // STEL no responde: incompleto, sin pedidos (nunca «no existe»).
+ const caido=await handler(req({pedidos:{codigos:['PAP90001']}}),{env,fetcher:async(url,op)=>url.includes('stelorder')?new Response('',{status:500}):stel(true)(url,op)});
+ const c=await caido.json();assert.equal(c.completo,false);assert.equal(c.pedidos.length,0);
+});

@@ -3,6 +3,30 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-26 · El lector reconoce el pedido a proveedor escrito a mano (PAP), sin publicar
+
+**Producción:** sin cambios. Pendiente de autorización:
+- desplegar `albaranes-manuscritos` (nuevo tipo PAP);
+- desplegar `stel-albaranes-consulta` v8 (modo `pedidos`);
+- publicar la web.
+
+1. **Lectura.** La visión tendrá el tipo `PAP`. Mientras no esté desplegado, también se acepta un
+   «OTRO» con forma de PAP. Las letras confundidas en la parte numérica se corrigen («PAPO9001» →
+   PAP09001), solo con el prefijo PAP completo.
+2. **Validación con STEL** (`validarPedido`, solo lectura). Se acepta solo si:
+   - el pedido existe una sola vez con esa referencia;
+   - es de la misma cuenta de proveedor;
+   - contiene todos los artículos aceptados del albarán.
+
+   Sin eso, o con dos lecturas que encajan, o si STEL no responde, queda en REVISAR o AMBIGUO y
+   el albarán no puede ser AUTO_OK. No tener PAP no impide AUTO_OK.
+3. **Consulta de STEL:** la función de solo lectura gana el modo `{pedidos: {codigos}}`
+   (`purchaseOrders`), con identificación, proveedor, estado, y artículos con sus unidades, sin
+   precios. Los nombres de los campos de las líneas están por comprobar con STEL real al desplegar.
+4. **Pantalla:** una consulta por lectura con todos los PAP, y una columna «Pedido (manuscrito)».
+
+Pruebas en `manuscritos.test.js` y `stel-compras-consulta.test.js`. `npm test`: todas pasan.
+
 ## 2026-10-26 · Robot de STEL: albarán generado desde su pedido (prueba privada autorizada)
 
 **Producción:** sin cambios en la web ni en las funciones.

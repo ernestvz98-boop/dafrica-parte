@@ -434,3 +434,44 @@ test('ABP por fecha: si el número del proveedor en STEL (referencia externa o t
  // Contradicción aunque coincida la referencia externa: el título dice otro número → no.
  r=base();assert.equal(await validarStel(r,async()=>[{...nota,extraReference:"600111",title:"600.999 14/10/2026 OBRA FICTICIA"}],unico),false);
 });
+
+test("pedido PAP escrito a mano: se lee (también como OTRO y con O por 0) y queda en revisión hasta validarlo con STEL",()=>{
+ const M=require("../albaranes/manuscritos.js");
+ assert.equal(M.normalizarPedido("PAPO9001"),"PAP09001");
+ assert.equal(M.normalizarPedido("PAP 9O0I2"),"PAP90012");
+ assert.equal(M.normalizarPedido("PAP123"),null);assert.equal(M.normalizarPedido("XPAP12345"),null);
+ const v=M.validarCodigos([{indice:0,texto_literal:"PAPO9001",tachado:false,tipo:"OTRO",lecturas:[]}]);
+ assert.equal(v.pedido.valor,"PAP09001");assert.equal(v.pedido.estado,"REVISAR");
+ const t=M.validarCodigos([{indice:0,texto_literal:"PAP90001",tachado:false,tipo:"PAP",lecturas:[{codigo:"PAP90001",confianza:0.6},{codigo:"PAP90007",confianza:0.5}]}]);
+ assert.equal(t.pedido.estado,"AMBIGUO");assert.deepEqual(t.pedido.resolucion.alternativas.sort(),["PAP90001","PAP90007"]);
+ // Sin PAP: vacío y no exige nada (el pedido es opcional).
+ const n=M.validarCodigos([]);assert.equal(n.pedido.estado,"VACIO");
+ const r={estado:"AUTO_OK",incidencias:[],manuscritos:{obra:{valor:"PRY90001",estado:"OK"},stel:{valor:"ABP26-0001",estado:"OK"},pedido:{...v.pedido}}};
+ M.aplicarEstado(r);assert.equal(r.estado,"REVISAR");assert.match(r.incidencias.join(" "),/pedido «PAPO9001»/);
+ const s={estado:"AUTO_OK",incidencias:[],manuscritos:{obra:{valor:"PRY90001",estado:"OK"},stel:{valor:"ABP26-0001",estado:"OK"},pedido:n.pedido}};
+ M.aplicarEstado(s);assert.equal(s.estado,"AUTO_OK");
+});
+
+test("pedido PAP validado con STEL: mismo proveedor y con los artículos del albarán; si no, o con dos candidatos, no",async()=>{
+ const M=require("../albaranes/manuscritos.js");
+ const base=alt=>({numero:{valor:"700.001"},proveedor:{account_id:77},
+  lineas:[{referencia:{valor:"A-100",estado:"OK"}},{referencia:{valor:"B-200",estado:"VERIFICADO"}}],
+  manuscritos:{pedido:{valor:null,literal:"PAP9000?",estado:"AMBIGUO",resolucion:{alternativas:alt}}}});
+ const ped=(ref,cuenta,refs,extra="")=>({id:1,fullReference:ref,accountId:cuenta,extraReference:extra,state:"Pendiente de recibir",lineas:refs.map(x=>({ref:x,unidades:1}))});
+ // Solo una lectura es un pedido del mismo proveedor con esos artículos.
+ let r=base(["PAP90001","PAP90007"]);
+ assert.equal(await M.validarPedido(r,async()=>[ped("PAP90001",77,["A-100","B-200","DEP"],"700.001"),ped("PAP90007",77,["X-1"])]),true);
+ assert.equal(r.manuscritos.pedido.valor,"PAP90001");assert.equal(r.manuscritos.pedido.estado,"OK");
+ assert.match(r.manuscritos.pedido.resolucion.evidencias.at(-1),/mismo proveedor.*su referencia del proveedor es este albarán/);
+ // Otro proveedor, o falta un artículo del albarán en el pedido: no.
+ r=base(["PAP90001"]);assert.equal(await M.validarPedido(r,async()=>[ped("PAP90001",78,["A-100","B-200"])]),false);
+ r=base(["PAP90001"]);assert.equal(await M.validarPedido(r,async()=>[ped("PAP90001",77,["A-100"])]),false);
+ // Una línea sin referencia aceptada: no se puede comprobar el pedido.
+ r=base(["PAP90001"]);r.lineas[1].referencia.estado="REVISAR";assert.equal(await M.validarPedido(r,async()=>[ped("PAP90001",77,["A-100","B-200"])]),false);
+ // Las dos lecturas encajan: no se resuelve.
+ r=base(["PAP90001","PAP90007"]);
+ assert.equal(await M.validarPedido(r,async()=>[ped("PAP90001",77,["A-100","B-200"]),ped("PAP90007",77,["A-100","B-200"])]),false);
+ assert.equal(r.manuscritos.pedido.estado,"AMBIGUO");
+ // STEL no responde: sin validar (nunca «no existe»).
+ r=base(["PAP90001"]);assert.equal(await M.validarPedido(r,async()=>null),false);assert.equal(r.manuscritos.pedido.estado,"AMBIGUO");
+});

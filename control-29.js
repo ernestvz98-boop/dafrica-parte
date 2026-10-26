@@ -246,6 +246,22 @@ function montar(root){
    }
    // Un mismo albarán de compra de STEL para dos albaranes leídos: ninguno se acepta.
    if(lib.comprasStel?.conflictosIdentidad)stelAlb.conflictos_identidad=lib.comprasStel.conflictosIdentidad(resultado.documentos);
+   // Pedidos a proveedor (PAP) escritos a mano: UNA consulta de solo lectura con todos los códigos de
+   // la lectura; se aceptan solo con el mismo proveedor y los artículos del albarán en el pedido.
+   if(typeof sb==="function"&&lib.manuscritos?.validarPedido&&!detener&&!stelNoDisponible){
+    const conPedido=resultado.documentos.filter(d=>["REVISAR","AMBIGUO"].includes(d.resultado?.manuscritos?.pedido?.estado));
+    const codigos=[...new Set(conPedido.flatMap(d=>d.resultado.manuscritos.pedido.resolucion?.alternativas||[]))].slice(0,20);
+    const sp=motores.stel_pedidos={consultado:false,codigos:codigos.length,validados:0};
+    if(codigos.length){
+     estado.textContent="Comprobando los pedidos a proveedor en STEL (solo lectura)…";
+     let resp=null;
+     try{resp=await sb("/functions/v1/stel-albaranes-consulta",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({pedidos:{codigos}}),signal:AbortSignal.timeout(60000)});}catch(e){sp.error=String(e?.message||e).slice(0,160);}
+     sp.consultado=!!resp;sp.completo=!!resp?.completo;
+     const pedidos=resp?.completo?resp.pedidos:null;
+     for(const d of conPedido)if(await lib.manuscritos.validarPedido(d.resultado,async()=>pedidos))sp.validados++;
+    }
+   }
    // Coherencia de los códigos de obra entre todos los PDF leídos juntos.
    const man=resultado.documentos.map(d=>d.resultado?.manuscritos).filter(Boolean);
    if(man.length&&lib.manuscritos)lib.manuscritos.coherenciaLote(man,{catalogoObras});
@@ -299,11 +315,12 @@ function montar(root){
    esc(n("REVISAR"))+'</b> REVISAR · <b>'+esc(n("ERROR_DOCUMENTO"))+'</b> ERROR_DOCUMENTO</p>'+segunda+
    (r.documentos.length?'<p><button type="button" class="btn secondary" id="lalJson">Descargar resultado (JSON)</button> '+
     '<button type="button" class="btn secondary" id="lalCsv">Descargar líneas (CSV)</button></p>':'')+
-   '<div class="table-wrap" style="overflow:auto;max-height:420px"><table><thead><tr><th>#</th><th>PDF · páginas</th><th>Proveedor</th><th>Número</th><th>Fecha</th><th>Líneas</th><th>Total</th><th>Obra (manuscrito)</th><th>Estado</th></tr></thead><tbody>'+
-   r.documentos.map((d,i)=>{const x=d.resultado||{},o=x.manuscritos?.obra;
+   '<div class="table-wrap" style="overflow:auto;max-height:420px"><table><thead><tr><th>#</th><th>PDF · páginas</th><th>Proveedor</th><th>Número</th><th>Fecha</th><th>Líneas</th><th>Total</th><th>Obra (manuscrito)</th><th>Pedido (manuscrito)</th><th>Estado</th></tr></thead><tbody>'+
+   r.documentos.map((d,i)=>{const x=d.resultado||{},o=x.manuscritos?.obra,pe=x.manuscritos?.pedido;
     return '<tr><td>'+(i+1)+'</td><td>'+esc(d.archivo)+' · '+esc(d.paginas.join(", "))+'</td><td>'+esc(x.proveedor?.nombre||x.proveedor?.nif||"—")+'</td><td>'+
      esc(x.numero?.valor||"—")+'</td><td>'+esc(x.fecha?.valor||"—")+'</td><td>'+esc((x.lineas||[]).length)+'</td><td>'+esc(x.totales?.total?.literal||"—")+'</td><td>'+
-     esc(o?.valor?(o.valor+(o.estado==="OK"?"":" (a revisar)")):"—")+'</td><td>'+(ETIQ[d.estado_documento]||esc(d.estado_documento))+(d.error?' · '+esc(d.error):'')+'</td></tr>';}).join("")+
+     esc(o?.valor?(o.valor+(o.estado==="OK"?"":" (a revisar)")):"—")+'</td><td>'+
+     esc(pe?.valor?(pe.valor+(pe.estado==="OK"?"":" (a revisar)")):pe?.estado==="AMBIGUO"?"dudoso: "+(pe.resolucion?.alternativas||[]).join(" / "):"—")+'</td><td>'+(ETIQ[d.estado_documento]||esc(d.estado_documento))+(d.error?' · '+esc(d.error):'')+'</td></tr>';}).join("")+
    '</tbody></table></div>';
   $("lalErrores").innerHTML=r.errores.length?'<details open><summary>'+esc(r.errores.length)+' error(es) de lectura</summary>'+
    r.errores.map(e=>'<p class="error">'+esc(e.archivo)+(e.paginas?.length?' · páginas '+esc(e.paginas.join(", ")):'')+': '+esc(e.error)+'</p>').join("")+'</details>':"";

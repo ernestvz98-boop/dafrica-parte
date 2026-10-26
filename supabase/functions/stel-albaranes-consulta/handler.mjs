@@ -19,10 +19,13 @@
  *   cambia durante la lectura, la búsqueda queda incompleta («lista_cambiada»), nunca con huecos.
  *   Página con menos filas de las pedidas: fin de la lista solo si después no hay nada; con un tope
  *   fijo de STEL se sigue con ese tamaño; si no, incompleta («pagina_recortada»).
+ * 2026-10-26: v8. Modo {pedidos: {codigos: ["PAP01234", …]}}: pedidos a proveedor por referencia,
+ *   con sus artículos y unidades, sin precios (validar un «PAP» escrito a mano).
  */
 const cors={"Access-Control-Allow-Origin":"https://ernestvz98-boop.github.io","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...cors,"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}});
 const BASE="https://app.stelorder.com/app/purchaseDeliveryNotes";
+const BASE_PEDIDOS="https://app.stelorder.com/app/purchaseOrders";
 const dia=v=>String(v||"").slice(0,10);
 const RE_DIA=/^\d{4}-\d{2}-\d{2}$/;
 
@@ -39,11 +42,11 @@ export function resumen(x){
 
 // GET con reintentos: STEL responde 403/429 cuando se agota su cupo o hay consultas simultáneas.
 // maxConsultas: tope por llamada (cupo de STEL y tiempo máximo de la función).
-function cliente(fetcher,clave,{esperas=[1500,4000],dormir=ms=>new Promise(r=>setTimeout(r,ms)),maxConsultas=110}={}){
+function cliente(fetcher,clave,{esperas=[1500,4000],dormir=ms=>new Promise(r=>setTimeout(r,ms)),maxConsultas=110,base=BASE}={}){
  const estado={consultas:0};
  const get=async params=>{
   if(estado.consultas>=maxConsultas)throw Error("limite_consultas");
-  const url=new URL(BASE);for(const [k,v] of Object.entries(params))url.searchParams.set(k,String(v));
+  const url=new URL(base);for(const [k,v] of Object.entries(params))url.searchParams.set(k,String(v));
   let r;
   for(let intento=0;;intento++){
    estado.consultas++;
@@ -143,6 +146,33 @@ export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=nu
  }catch(e){return fin("error",false,[],{motivo:String(e?.message||e).slice(0,80)});}
 }
 
+/*
+ * Pedidos a proveedor por su referencia (validar un «PAP» escrito a mano en el albarán):
+ * identificación, proveedor, estado y artículos con sus unidades. Nunca precios ni importes.
+ * 2026-10-26: v8. Pendiente de comprobar con STEL real los nombres de los campos de las líneas.
+ */
+export function resumenPedido(x){
+ const lineas=(Array.isArray(x.lines)?x.lines:Array.isArray(x.lineas)?x.lineas:[]).slice(0,200).map(l=>({
+  ref:String(l["item-reference"]??l.reference??l["item-full-reference"]??"").slice(0,60),
+  idArticulo:l["item-id"]??l.itemId??null,
+  unidades:Number.isFinite(Number(l.units??l.quantity))?Number(l.units??l.quantity):null}));
+ return {id:Number.isSafeInteger(Number(x.id))?Number(x.id):null,
+  fullReference:String(x["full-reference"]||x.fullReference||""),date:String(x.date||""),title:String(x.title||"").slice(0,160),
+  accountId:x["account-id"]??x.accountId??x.account?.id??null,extraReference:String(x["extra-reference"]||x.extraReference||""),
+  state:String(x["document-state"]||x.status||""),lineas};
+}
+export async function buscarPedidos(fetcher,clave,codigos,opciones={}){
+ const {get,estado}=cliente(fetcher,clave,{...opciones,base:BASE_PEDIDOS});
+ const pedidos=[];
+ try{
+  for(const c of codigos){
+   const lista=await get({"full-reference":c,limit:20});
+   pedidos.push(...lista.filter(x=>String(x["full-reference"]||x.fullReference||"").toUpperCase().replace(/[^A-Z0-9]/g,"")===c).map(resumenPedido));
+  }
+  return {completo:true,pedidos,consultas:estado.consultas};
+ }catch(e){return {completo:false,pedidos:[],consultas:estado.consultas,motivo:String(e?.message||e).slice(0,80)};}
+}
+
 async function autorizado(req,{fetcher,env}){
  const token=req.headers.get("Authorization")||req.headers.get("authorization")||"";
  if(!token.startsWith("Bearer "))return 401;
@@ -172,6 +202,13 @@ export async function handler(req,{fetcher=fetch,env}={}){
     (b.pista!=null&&!(Number.isInteger(b.pista)&&b.pista>0&&b.pista<1e7)))
     return reply({error:"Búsqueda no válida"},400);
    const r=await buscarNotas(fetcher,stelKey,{cuentas:cuentas.map(Number),desde:b.desde,hasta:b.hasta,pista:b.pista??null});
+   return reply({...r,solo_lectura:true});
+  }
+  if(body&&body.pedidos){
+   const codigos=[...new Set((Array.isArray(body.pedidos.codigos)?body.pedidos.codigos:[]).map(c=>String(c).toUpperCase()))];
+   if(Object.keys(body).length!==1||!codigos.length||codigos.length>20||!codigos.every(c=>/^PAP\d{5}$/.test(c)))
+    return reply({error:"Consulta de pedidos no válida"},400);
+   const r=await buscarPedidos(fetcher,stelKey,codigos);
    return reply({...r,solo_lectura:true});
   }
   const fullReference=String(body.fullReference||"").trim().toUpperCase();

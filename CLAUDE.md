@@ -90,6 +90,10 @@ Edge). El repositorio es **público**.
   evidencia tan buena como su exactitud: se confirma comparando con el papel letra a letra. En un
   código de dos renglones (el OCR pierde guiones y espacios) la pantalla avisa y guarda al segundo
   clic; las confirmaciones de esos códigos anteriores a ese aviso no se usan.
+- Un pedido a proveedor escrito a mano («PAP01234») se valida con STEL solo si el pedido es de la
+  MISMA cuenta de proveedor y contiene todos los artículos del albarán (los números son
+  correlativos: existir no basta). Si encajan dos lecturas, o STEL no responde, queda sin validar.
+  El PAP es opcional: no tenerlo no impide AUTO_OK, pero leído y sin validar sí.
 - Un descuento que el OCR no leyó se acepta por relectura solo si con él la línea cuadra.
 - Separación: dos páginas con números de albarán distintos nunca se unen; «Página k» solo prueba la
   continuación si es la siguiente. Las relecturas y recortes de una línea, siempre en su página.

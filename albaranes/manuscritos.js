@@ -154,8 +154,17 @@ function agrupar(items,unir){
 const FORMATOS={
  obra:/^PRY\d{5}$/,
  // Serie del año (ABP26) + número: «ABP261234» se guarda como «ABP26-1234».
- stel:/^ABP\d{2}\d{4}$/
+ stel:/^ABP\d{2}\d{4}$/,
+ // Pedido a proveedor de STEL (2026-10-26): «PAP09001». Opcional: no todos los albaranes tienen pedido.
+ pedido:/^PAP\d{5}$/
 };
+// Código de pedido escrito a mano: la visión confunde letras y cifras en la parte numérica
+// («PAPO9001» → PAP09001). Solo con el prefijo PAP completo y 5 posiciones.
+const CIFRA_DE={O:"0",Q:"0",D:"0",I:"1",L:"1",Z:"2",S:"5",B:"8",G:"6"};
+function normalizarPedido(t){
+ const m=canon(t).match(/^PAP([0-9OQDILZSBG]{5})$/);
+ return m?"PAP"+[...m[1]].map(c=>CIFRA_DE[c]||c).join(""):null;
+}
 const canon=t=>String(t||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
 const formatoStel=c=>c.slice(0,5)+"-"+c.slice(5);
 const cifrasObra=t=>{const m=String(t||"").match(/\b(\d{5})\s*$/);return m?m[1]:null;};
@@ -225,6 +234,7 @@ function validarCodigos(lecturas,ctx={}){
    salida[campo]={valor:null,literal,estado:"AMBIGUO",confianza:0,motivos:["Interpretaciones plausibles sin validar: "+alternativas.join(" / ")],resolucion:{alternativas}};
   }
  }
+ salida.pedido=leerPedido(lecturas);
  // Obra por nombre + segunda prueba (número impreso o lectura a una cifra), si no quedó validada.
  const o=salida.obra;
  if(o&&o.estado!=="OK"&&!(o.motivos||[]).some(m=>/^(Varias interpretaciones validadas|Solo hay anotaciones tachadas)/.test(m))){
@@ -233,6 +243,29 @@ function validarCodigos(lecturas,ctx={}){
  }
  return salida;
 }
+/*
+ * Código de pedido a proveedor (PAP) escrito a mano. La visión puede darlo como tipo PAP o, antes de
+ * conocer ese tipo, como OTRO. Aquí solo se lee: lo valida después validarPedido con el pedido de
+ * STEL (mismo proveedor y sus artículos). Sin validar queda en REVISAR o AMBIGUO.
+ */
+function leerPedido(lecturas){
+ const deTexto=l=>[l.texto_literal,...(l.lecturas||[]).map(x=>x.codigo)].map(normalizarPedido).filter(Boolean);
+ const vistas=(lecturas||[]).filter(l=>(l.tipo==="PAP"||l.tipo==="OTRO")&&deTexto(l).length);
+ const limpias=vistas.filter(l=>!l.tachado),tachadas=vistas.filter(l=>l.tachado).map(l=>l.texto_literal);
+ if(!limpias.length)return {...vacio(tachadas.length?["Solo hay pedidos tachados: "+tachadas.join(", ")]:[]),literal:tachadas.join(" | ")};
+ const cand=new Map();
+ for(const v of limpias){
+  const lect=(v.lecturas||[]).map(x=>({c:normalizarPedido(x.codigo),conf:Number(x.confianza)||0})).filter(x=>x.c);
+  const todas=lect.length?lect:[{c:normalizarPedido(v.texto_literal),conf:0.9}];
+  for(const x of todas)if(x.c)cand.set(x.c,Math.max(cand.get(x.c)||0,x.conf));
+ }
+ const literal=limpias.map(v=>v.texto_literal).join(" | "),alternativas=[...cand.keys()];
+ if(alternativas.length===1&&cand.get(alternativas[0])>=0.9)
+  return {valor:alternativas[0],literal,estado:"REVISAR",confianza:0.8,motivos:["Pedido sin validar con STEL (proveedor y artículos)"],
+   resolucion:{metodo:"vision_recorte",evidencias:["Visión: «"+literal+"»"],alternativas}};
+ return {valor:null,literal,estado:"AMBIGUO",confianza:0,motivos:["Lecturas del pedido sin validar: "+alternativas.join(" / ")],resolucion:{alternativas}};
+}
+
 /*
  * Obra identificada por su NOMBRE (impreso, escrito o del título del albarán de compra de STEL) en
  * el catálogo de obras, más una segunda prueba independiente:
@@ -447,7 +480,7 @@ async function leerManuscritos(paginas,resultado,vision,ctx={}){
    recortes.push({pagina:p.numero,caja:[x0,y0,x1-x0,y1-y0],png:p.recortePng([x0,y0,x1-x0,y1-y0])});
   }
  }
- if(!recortes.length)return {obra:vacio([]),stel:vacio([]),obraImpresa:[],obraEscrita:[],recortes:[]};
+ if(!recortes.length)return {obra:vacio([]),stel:vacio([]),pedido:vacio([]),obraImpresa:[],obraEscrita:[],recortes:[]};
  for(let i=0;i<recortes.length;i+=8){
   const r=await vision(recortes.slice(i,i+8).map(x=>x.png));
   for(const x of r||[])if(Number.isInteger(x.indice)&&recortes[i+x.indice])lecturas.push({...x,indice:i+x.indice});
@@ -456,7 +489,7 @@ async function leerManuscritos(paginas,resultado,vision,ctx={}){
  const obraImpresa=[...obrasImpresas(lineas),...(resultado.lineas_ignoradas||[]).map(x=>String(x.texto||""))
   // Anotación corta impresa o escrita en la tabla («Vegas», «OBRA VEGAS»), no nombres ni cifras.
   .filter(t=>t.split(/\s+/).length<=3&&!/\d/.test(t)&&palabrasObra(t).size)];
- const obraEscrita=lecturas.filter(l=>l.tipo==="OTRO"&&!l.tachado&&palabrasObra(l.texto_literal).size).map(l=>l.texto_literal);
+ const obraEscrita=lecturas.filter(l=>l.tipo==="OTRO"&&!l.tachado&&!normalizarPedido(l.texto_literal)&&palabrasObra(l.texto_literal).size).map(l=>l.texto_literal);
  const ctxValidar={...ctx,obraImpresa,obraEscrita,proveedorId:resultado.proveedor?.id,numero:resultado.numero?.valor,fecha:resultado.fecha?.valor};
  const v=validarCodigos(lecturas,ctxValidar);
  const salida={...v,obraImpresa,obraEscrita,recortes:recortes.map((x,i)=>({pagina:x.pagina,caja:x.caja,lectura:lecturas.find(l=>l.indice===i)||null}))};
@@ -498,7 +531,7 @@ async function compararModelos(recortes,principal,ctxValidar,{modelos=[],vision}
  */
 const PREFIJO_PENDIENTE="Código manuscrito sin validar";
 function pendientes(m){
- return m?["obra","stel"].filter(k=>m[k]&&(["REVISAR","AMBIGUO"].includes(m[k].estado)||(m[k].estado==="VACIO"&&m[k].literal))):[];
+ return m?["obra","stel","pedido"].filter(k=>m[k]&&(["REVISAR","AMBIGUO"].includes(m[k].estado)||(m[k].estado==="VACIO"&&m[k].literal))):[];
 }
 // Ningún código detectado (ni leído): la anotación puede existir y no haberse visto (fallo real,
 // 2026-10-22: un código de obra y un ABP escritos no detectados en albaranes dados por AUTO_OK).
@@ -522,7 +555,7 @@ function aplicarEstado(r){
  const p=pendientes(r.manuscritos);
  if(p.length){
   if(r.estado==="AUTO_OK")r.estado="REVISAR";
-  r.incidencias.push(PREFIJO_PENDIENTE+": "+p.map(k=>(k==="obra"?"obra":"STEL")+" «"+(r.manuscritos[k].literal||r.manuscritos[k].valor||"sin leer")+"» ("+r.manuscritos[k].estado+")").join(", "));
+  r.incidencias.push(PREFIJO_PENDIENTE+": "+p.map(k=>(k==="obra"?"obra":k==="pedido"?"pedido":"STEL")+" «"+(r.manuscritos[k].literal||r.manuscritos[k].valor||"sin leer")+"» ("+r.manuscritos[k].estado+")").join(", "));
  }
  const faltan=["obra","stel"].filter(k=>!r.manuscritos[k]||(r.manuscritos[k].estado==="VACIO"&&!r.manuscritos[k].literal));
  if(faltan.length){
@@ -607,6 +640,46 @@ async function validarStel(r,consultar,{proveedorNombre=null,diagnostico=null,cu
 }
 
 /*
+ * Pedido a proveedor (PAP) escrito a mano, contrastado con los pedidos de STEL (SOLO LECTURA).
+ * Los números de pedido son correlativos: una cifra mal leída da otro pedido que también existe.
+ * Por eso existir no basta. Se acepta una interpretación si STEL tiene exactamente un pedido con esa
+ * referencia, de la MISMA cuenta de proveedor que el albarán, y si cada artículo aceptado del albarán
+ * está en el pedido. Si validan dos interpretaciones, no se resuelve.
+ * consultar(codigos) → [{id, fullReference, accountId, extraReference, state, lineas:[{ref, idArticulo, unidades}]}],
+ * o null si STEL no respondió (el pedido queda sin validar; nunca cuenta como «no existe»).
+ */
+async function validarPedido(r,consultar){
+ const m=r?.manuscritos?.pedido;
+ if(!m||!["REVISAR","AMBIGUO"].includes(m.estado)||typeof consultar!=="function")return false;
+ const alternativas=[...new Set((m.resolucion?.alternativas||[]).map(canon).filter(c=>FORMATOS.pedido.test(c)))];
+ const cuenta=r.proveedor?.account_id;
+ if(!alternativas.length||cuenta==null)return false;
+ const docs=await consultar(alternativas);
+ if(docs==null)return false;
+ const refsAlbaran=(r.lineas||[]).map(l=>l.referencia?.estado==="OK"||l.referencia?.estado==="VERIFICADO"?canon(l.referencia.valor):null);
+ const validas=[];
+ for(const c of alternativas){
+  const exactos=docs.filter(d=>canon(d.fullReference)===c);
+  if(exactos.length!==1)continue;
+  const d=exactos[0];
+  if(d.accountId==null||String(d.accountId)!==String(cuenta))continue;
+  const delPedido=new Set((d.lineas||[]).map(l=>canon(l.ref)).filter(Boolean));
+  if(!refsAlbaran.length||refsAlbaran.some(x=>!x||!delPedido.has(x)))continue;
+  const mismoNum=!!d.extraReference&&!!r.numero?.valor&&canon(d.extraReference)===canon(r.numero.valor);
+  validas.push({c,d,ev:"Pedido STEL "+c+" (solo lectura): mismo proveedor y con los "+refsAlbaran.length+" artículos del albarán"+
+   (mismoNum?"; su referencia del proveedor es este albarán":"")+(d.state?"; estado «"+d.state+"»":"")});
+ }
+ if(validas.length!==1){
+  if(validas.length>1)r.manuscritos.pedido={...m,estado:"AMBIGUO",valor:null,confianza:0,motivos:["Varios pedidos de STEL encajan: "+validas.map(x=>x.c).join(" / ")]};
+  return false;
+ }
+ const x=validas[0];
+ r.manuscritos.pedido={...m,valor:x.c,estado:"OK",confianza:0.95,motivos:[],
+  resolucion:{...m.resolucion,metodo:"vision_recorte_pedido_stel",id_stel:x.d.id??null,estado_stel:x.d.state||null,evidencias:[...(m.resolucion?.evidencias||[]),x.ev]}};
+ return true;
+}
+
+/*
  * Vuelve a validar el código de obra con más contexto (después de leer): el nombre de la obra
  * del albarán de compra de STEL (lo escribió la oficina) y el catálogo de obras disponible. Usa
  * las mismas lecturas de la visión y la misma regla (validarCodigos); solo cambia un código que
@@ -653,5 +726,5 @@ function textoPrevioObra(r,{catalogoObras=null}={}){
  return n;
 }
 
-return {textoPrevioObra,sinComprobar,revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,numeroContradice,fechaStel,FORMATOS};
+return {textoPrevioObra,sinComprobar,revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,numeroContradice,fechaStel,FORMATOS,normalizarPedido,validarPedido};
 });
