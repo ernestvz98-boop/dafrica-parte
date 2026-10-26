@@ -12,13 +12,20 @@ const TIPOS={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=
 const b64=o=>Buffer.from(JSON.stringify(o)).toString('base64url');
 const jwt=aal=>b64({alg:'HS256'})+'.'+b64({sub:'usuario-ficticio',aal,exp:Math.floor(Date.now()/1000)+3600})+'.firma';
 
-function servidor(){
+// `todos`: sirve control-1.js con el interruptor DOS_PASOS_PARA_TODOS encendido.
+function servidor({todos=false}={}){
   return new Promise(res=>{
     const s=http.createServer((req,resp)=>{
       const ruta=decodeURIComponent(new URL(req.url,'http://x').pathname);
       const f=path.join(root,ruta==='/'?'index.html':ruta);
       if(!f.startsWith(root)||!fs.existsSync(f)||fs.statSync(f).isDirectory()){resp.writeHead(404);resp.end();return;}
-      resp.writeHead(200,{'Content-Type':TIPOS[path.extname(f)]||'application/octet-stream'});fs.createReadStream(f).pipe(resp);
+      resp.writeHead(200,{'Content-Type':TIPOS[path.extname(f)]||'application/octet-stream'});
+      if(todos&&ruta==='/control-1.js'){
+        const js=fs.readFileSync(f,'utf8');
+        assert.match(js,/const DOS_PASOS_PARA_TODOS = false;/);
+        resp.end(js.replace('const DOS_PASOS_PARA_TODOS = false;','const DOS_PASOS_PARA_TODOS = true;'));return;
+      }
+      fs.createReadStream(f).pipe(resp);
     });
     s.listen(0,'127.0.0.1',()=>res(s));
   });
@@ -79,10 +86,33 @@ const nivelGuardado=async page=>{const s=await guardada(page);return s?JSON.pars
 
 if(require.main===module)(async()=>{
   const {chromium}=require('playwright');
-  const srv=await servidor();const base='http://127.0.0.1:'+srv.address().port;
+  const srv=await servidor({todos:true});const base='http://127.0.0.1:'+srv.address().port;
+  const srvReal=await servidor();const baseReal='http://127.0.0.1:'+srvReal.address().port;
   const browser=await chromium.launch();
   try{
-    // 1. Primera entrada: alta obligatoria con QR; código mal escrito, incorrecto y correcto.
+    // 0. Interruptor apagado (lo publicado): sin el código activado se entra con la contraseña, sin
+    //    alta; con el código activado, se pide siempre.
+    {
+      const s0=simulador();
+      const {page,ctx,errores}=await nuevaPagina(browser,baseReal,s0);
+      await page.fill('#loginEmail','prueba@example.org');await page.fill('#loginPassword','clave-ficticia');await page.click('#loginButton');
+      await page.waitForSelector('#appView:not(.hidden)');
+      assert.equal(await visible(page,'#mfaForm'),false);
+      assert.ok(!s0.st.llamadas.includes('POST /auth/v1/factors'),'sin el interruptor no se crea ningún alta');
+      assert.deepEqual(errores,[]);
+      await ctx.close();
+      const s1=simulador();s1.st.factores.push({id:'fv',factor_type:'totp',status:'verified'});
+      const r=await nuevaPagina(browser,baseReal,s1);
+      await r.page.fill('#loginEmail','prueba@example.org');await r.page.fill('#loginPassword','clave-ficticia');await r.page.click('#loginButton');
+      await r.page.waitForSelector('#mfaForm:not(.hidden)');
+      assert.equal(await visible(r.page,'#mfaAlta'),false);
+      assert.equal(await visible(r.page,'#appView'),false);
+      await r.page.fill('#mfaCodigo','123456');await r.page.click('#mfaBoton');
+      await r.page.waitForSelector('#appView:not(.hidden)');
+      assert.equal(await nivelGuardado(r.page),'aal2');
+      await r.ctx.close();
+    }
+    // 1. Interruptor encendido. Primera entrada: alta obligatoria con QR; código mal escrito, incorrecto y correcto.
     const sim=simulador();sim.st.factores.push({id:'f0',factor_type:'totp',status:'unverified'});
     let {page,ctx,errores}=await nuevaPagina(browser,base,sim);
     await page.fill('#loginEmail','prueba@example.org');await page.fill('#loginPassword','clave-ficticia');await page.click('#loginButton');
@@ -152,6 +182,6 @@ if(require.main===module)(async()=>{
     await page.waitForFunction(()=>/Invalid/.test(document.querySelector('#loginMsg').textContent));
     assert.equal(await visible(page,'#mfaForm'),false);
     await ctx.close();
-    console.log('Navegador OK: alta con QR, código incorrecto, entrada con aal2, recarga, contraseña sola, cancelar, inactividad y contraseña incorrecta.');
-  }finally{await browser.close();srv.close();}
+    console.log('Navegador OK: solo quien lo tiene activado (interruptor apagado), alta con QR, código incorrecto, entrada con aal2, recarga, contraseña sola, cancelar, inactividad y contraseña incorrecta.');
+  }finally{await browser.close();srv.close();srvReal.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -36,6 +36,11 @@ imagen. Ahora el QR se dibuja en el navegador desde la dirección otpauth con `a
 (y, si no cargara, el SVG se codifica bien). La prueba de navegador usa el formato real de Supabase
 y lee el QR con jsQR.
 
+**Decisión del usuario (mismo día):** de momento el código solo lo tiene activado su cuenta
+(comprobado: con su cuenta, solo contraseña → 0 permisos; con código → 31). Los demás entran con la
+contraseña hasta encender `DOS_PASOS_PARA_TODOS` en `control-1.js`; quien tiene el código activado
+siempre tiene que ponerlo (también lo exige la base de datos).
+
 **Perder el móvil:** un administrador borra el factor del usuario en Supabase (Authentication →
 Users → MFA) y la persona se vuelve a dar de alta con el QR.
 

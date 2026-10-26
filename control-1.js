@@ -5,6 +5,10 @@ const SUPABASE_KEY = "sb_publishable_fb3jW4X72iBoPs_bfUA6Dw_y5_z06r0";
 const SESSION_KEY = "dafrica_web_session";
 // Revisión de seguridad 2026-10-26: tras 12 horas sin usar la web hay que volver a entrar.
 const INACTIVIDAD_MAX = 12 * 3600 * 1000;
+// Alta obligatoria del código del móvil para TODOS los usuarios. Por decisión del usuario
+// (2026-10-26), de momento solo lo tiene activado su cuenta: los demás entran con la contraseña
+// hasta que se encienda este interruptor. Quien ya lo tiene activado siempre tiene que ponerlo.
+const DOS_PASOS_PARA_TODOS = false;
 
 const state = {
   session: null,
@@ -227,6 +231,7 @@ async function dosPasos(){
   const totp = (user.factors || []).filter(f => f.factor_type === "totp");
   let factor = totp.find(f => f.status === "verified");
   let alta = null;
+  if(!factor && !DOS_PASOS_PARA_TODOS) return;
   if(!factor){
     // Altas sin terminar (QR mostrado y nunca confirmado): se borran y se empieza otra.
     for(const f of totp) await authJson("factors/" + encodeURIComponent(f.id), null, "DELETE").catch(()=>{});
