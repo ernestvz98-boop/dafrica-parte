@@ -152,9 +152,13 @@ function montar(root){
    const catalogoObras=catalogo?.obras_completo?catalogo.obras:(Array.isArray(obrasLector)&&obrasLector.length?obrasLector:null);
    motores.catalogo.obras_lector=Array.isArray(obrasLector)?obrasLector.length:null;
    motores.catalogo.obras_lector_completa=listaCompleta;
+   // PDF de cada albarán leído, para guardarlo con su orden en la cola de STEL (Fase 2).
+   const pdfDeDoc=new Map();
    for(const [i,f] of lista.entries()){
     if(detener)break;
     const bytes=new Uint8Array(await f.arrayBuffer());
+    // Copia: pdf.js puede quedarse con el original al abrirlo.
+    const copiaPdf=bytes.slice();
     // Un PDF dañado o vacío da error solo en ese fichero; los demás se leen (prueba de fuerza
     // 2026-10-22: un PDF roto en la misma lectura detenía todos con «Invalid PDF structure»).
     const fuente=await lib.motorNavegador.abrirFuente(pdfjs,bytes,{alProgresar:t=>{estado.textContent=f.name+" · "+t;}})
@@ -171,7 +175,8 @@ function montar(root){
      resultado.archivos.push({nombre:f.name,paginas:fuente.numPaginas,...r.resumen});
      for(const d of r.documentos){
       if(catalogo&&d.resultado?._ctx)lib.verificacion.verificar(d.resultado,catalogo);
-      resultado.documentos.push({archivo:f.name,...d});
+      const doc={archivo:f.name,...d};
+      resultado.documentos.push(doc);pdfDeDoc.set(doc,copiaPdf);
      }
      for(const e of r.errores)resultado.errores.push({archivo:f.name,...e});
      if(!r.resumen.paginas_completas&&!r.resumen.paginas_no_procesadas.length)resultado.errores.push({archivo:f.name,paginas:[],error:"Comprobación de páginas fallida: alguna página no está en exactamente un documento"});
@@ -293,11 +298,61 @@ function montar(root){
    // la validación con el catálogo sin volver a leer los PDF. Solo en el fichero que descarga el usuario.
    if(catalogo)resultado.catalogo_stel={articulos_completo:!!catalogo.articulos_completo,proveedores_completo:!!catalogo.proveedores_completo,
     creado:catalogo.creado||null,articulos:catalogo.articulos||[],proveedores:catalogo.proveedores||[]};
+   // Fase 2 (aprobada 2026-10-26): cada albarán y su PDF a la cola de STEL. Los AUTO_OK con todo
+   // resuelto quedan PENDIENTES para el robot; el resto, en REVISAR. Solo con permiso de edición.
+   if(!detener&&has("costes.editar")&&lib.colaStel&&typeof sb==="function"){
+    estado.textContent="Enviando los albaranes a la cola de STEL…";
+    try{await enviarColaStel(resultado,catalogo,pdfDeDoc);}
+    catch(e){resultado.cola_stel={...(resultado.cola_stel||{}),error:String(e?.message||e).slice(0,160)};}
+   }
    ultimo=resultado;pintar(resultado);
    estado.textContent=(detener?"Lectura detenida. ":"Lectura terminada. ")+resultado.documentos.length+" albaranes en "+resultado.archivos.length+" PDF.";
   }catch(e){estado.textContent="No se ha podido leer: "+(e?.message||e);}
   finally{leer.disabled=false;cancelar.disabled=true;barra.style.display="none";}
  };
+ // Cola de STEL: la orden de cada albarán (albaranes/cola-stel.js) y su PDF, una vez por fichero y
+ // por su huella SHA-256, en el almacén privado. La base de datos nunca pisa uno ya procesado.
+ async function enviarColaStel(r,catalogo,pdfDeDoc){
+  const lib=window.DafricaAlbaranes,info=r.cola_stel={enviados:0,pendientes:0,revisar:0,ya_existe:0,sin_cambios:0,sin_clave:0};
+  const ordenes=[];
+  for(const d of r.documentos){
+   if(!d.resultado)continue;
+   const o=lib.colaStel.orden(d,catalogo);
+   if(!o.clave||!o.plan){info.sin_clave++;d.cola_stel={estado:"SIN_ENVIAR",motivos:o.motivos};continue;}
+   ordenes.push({d,o});
+  }
+  // Dos albaranes de la lectura con el mismo proveedor, número y fecha: ninguno automático.
+  const veces=new Map();for(const {o} of ordenes)veces.set(o.clave,(veces.get(o.clave)||0)+1);
+  for(const {o} of ordenes)if(veces.get(o.clave)>1&&o.estado==="PENDIENTE"){o.estado="REVISAR";o.motivos.push("Mismo proveedor, número y fecha que otro albarán de la lectura");}
+  const huellas=new Map(),subidos=new Map(),filas=[];
+  for(const {d,o} of ordenes){
+   const bytes=pdfDeDoc.get(d);let sha=null;
+   if(bytes){
+    if(!huellas.has(bytes))huellas.set(bytes,[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(b=>b.toString(16).padStart(2,"0")).join(""));
+    const h=huellas.get(bytes);
+    if(!subidos.has(h)){
+     const resp=await authFetch(SUPABASE_URL+"/storage/v1/object/albaranes-stel/"+h+".pdf",{method:"POST",headers:{"Content-Type":"application/pdf","x-upsert":"false"},body:bytes});
+     // El mismo PDF ya subido en otra lectura: vale el que hay.
+     const ya=!resp.ok&&/duplicate|already exists/i.test(await resp.text().catch(()=>""));
+     subidos.set(h,resp.ok||ya);
+    }
+    sha=subidos.get(h)?h:null;
+   }
+   if(!sha&&o.estado==="PENDIENTE"){o.estado="REVISAR";o.motivos.push("No se pudo guardar el PDF");}
+   filas.push({clave:o.clave,estado:o.estado,motivos:o.motivos,plan:o.plan,pdf_ruta:sha?sha+".pdf":null,pdf_sha256:sha});
+   d.cola_stel={estado:o.estado,motivos:o.motivos};
+  }
+  for(let i=0;i<filas.length;i+=50){
+   const res=await sb("/rest/v1/rpc/stel_cola_enviar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({p_filas:filas.slice(i,i+50)})});
+   for(const x of res||[]){
+    info.enviados++;
+    if(x.accion==="sin_cambios")info.sin_cambios++;
+    else if(x.estado==="PENDIENTE")info.pendientes++;else if(x.estado==="REVISAR")info.revisar++;else if(x.estado==="YA_EXISTE")info.ya_existe++;
+    const d=ordenes.find(z=>z.o.clave===x.clave)?.d;
+    if(d&&x.accion==="sin_cambios")d.cola_stel={estado:x.estado,motivos:["Ya enviado antes ("+x.estado+"); no se cambia"]};
+   }
+  }
+ }
  function pintar(r){
   const n=e=>r.documentos.filter(d=>d.estado_documento===e).length;
   const ETIQ={AUTO_OK:"AUTO_OK · verificado",REVISAR:'<span class="error">REVISAR</span>',ERROR_DOCUMENTO:'<b class="error">ERROR_DOCUMENTO</b>'};
@@ -313,6 +368,9 @@ function montar(root){
    (cat.disponible&&(!v.activa||!v.fallos)?'':'. Sin ellos, los campos dudosos quedan en REVISAR.')+'</p>';
   $("lalResumen").innerHTML='<p><b>'+esc(r.documentos.length)+'</b> documentos: <b>'+esc(n("AUTO_OK"))+'</b> AUTO_OK · <b>'+
    esc(n("REVISAR"))+'</b> REVISAR · <b>'+esc(n("ERROR_DOCUMENTO"))+'</b> ERROR_DOCUMENTO</p>'+segunda+
+   (r.cola_stel?'<p>Cola de STEL: '+(r.cola_stel.error?'<b class="error">no se pudo enviar</b> ('+esc(r.cola_stel.error)+')':
+    '<b>'+esc(r.cola_stel.pendientes)+'</b> pendientes de crear · <b>'+esc(r.cola_stel.revisar)+'</b> en revisión · '+esc(r.cola_stel.ya_existe)+' ya en STEL'+
+    (r.cola_stel.sin_cambios?' · '+esc(r.cola_stel.sin_cambios)+' ya enviados antes (sin cambios)':'')+(r.cola_stel.sin_clave?' · '+esc(r.cola_stel.sin_clave)+' sin proveedor, número o fecha (no enviados)':''))+'</p>':'')+
    (r.documentos.length?'<p><button type="button" class="btn secondary" id="lalJson">Descargar resultado (JSON)</button> '+
     '<button type="button" class="btn secondary" id="lalCsv">Descargar líneas (CSV)</button></p>':'')+
    '<div class="table-wrap" style="overflow:auto;max-height:420px"><table><thead><tr><th>#</th><th>PDF · páginas</th><th>Proveedor</th><th>Número</th><th>Fecha</th><th>Líneas</th><th>Total</th><th>Obra (manuscrito)</th><th>Pedido (manuscrito)</th><th>Estado</th></tr></thead><tbody>'+
@@ -320,7 +378,8 @@ function montar(root){
     return '<tr><td>'+(i+1)+'</td><td>'+esc(d.archivo)+' · '+esc(d.paginas.join(", "))+'</td><td>'+esc(x.proveedor?.nombre||x.proveedor?.nif||"—")+'</td><td>'+
      esc(x.numero?.valor||"—")+'</td><td>'+esc(x.fecha?.valor||"—")+'</td><td>'+esc((x.lineas||[]).length)+'</td><td>'+esc(x.totales?.total?.literal||"—")+'</td><td>'+
      esc(o?.valor?(o.valor+(o.estado==="OK"?"":" (a revisar)")):"—")+'</td><td>'+
-     esc(pe?.valor?(pe.valor+(pe.estado==="OK"?"":" (a revisar)")):pe?.estado==="AMBIGUO"?"dudoso: "+(pe.resolucion?.alternativas||[]).join(" / "):"—")+'</td><td>'+(ETIQ[d.estado_documento]||esc(d.estado_documento))+(d.error?' · '+esc(d.error):'')+'</td></tr>';}).join("")+
+     esc(pe?.valor?(pe.valor+(pe.estado==="OK"?"":" (a revisar)")):pe?.estado==="AMBIGUO"?"dudoso: "+(pe.resolucion?.alternativas||[]).join(" / "):"—")+'</td><td>'+(ETIQ[d.estado_documento]||esc(d.estado_documento))+(d.error?' · '+esc(d.error):'')+
+     (d.cola_stel?'<br><span class="muted" title="'+esc((d.cola_stel.motivos||[]).join(" · "))+'">STEL: '+esc({PENDIENTE:"pendiente de crear",REVISAR:"en revisión",YA_EXISTE:"ya existe",SIN_ENVIAR:"no enviado"}[d.cola_stel.estado]||d.cola_stel.estado)+'</span>':'')+'</td></tr>';}).join("")+
    '</tbody></table></div>';
   $("lalErrores").innerHTML=r.errores.length?'<details open><summary>'+esc(r.errores.length)+' error(es) de lectura</summary>'+
    r.errores.map(e=>'<p class="error">'+esc(e.archivo)+(e.paginas?.length?' · páginas '+esc(e.paginas.join(", ")):'')+': '+esc(e.error)+'</p>').join("")+'</details>':"";

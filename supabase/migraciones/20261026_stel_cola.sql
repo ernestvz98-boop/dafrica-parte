@@ -2,6 +2,8 @@
 -- La web (lector, permiso costes.editar) envía la orden de cada albarán y su PDF; el robot la ejecuta.
 -- Nadie escribe la tabla directamente: la web usa stel_cola_enviar (comprueba el permiso y nunca pisa
 -- un albarán ya procesado); el robot usa la función Edge robot-cola con una llave temporal.
+-- Aplicada así (sin «revoke»/«drop policy», que piden una confirmación que la app no mostraba). Sin
+-- política de escritura, nadie escribe la tabla directamente; comprobado: anon no puede leerla ni enviar.
 -- Deshacer: drop function public.stel_cola_enviar(jsonb); drop table public.stel_cola;
 --   drop table public.robot_llaves; borrar el almacén «albaranes-stel» (antes, copia de sus PDF).
 
@@ -22,10 +24,7 @@ create table if not exists public.stel_cola (
   stel_referencia text
 );
 alter table public.stel_cola enable row level security;
-drop policy if exists stel_cola_leer on public.stel_cola;
 create policy stel_cola_leer on public.stel_cola for select to authenticated using (public.tiene_permiso('costes.ver'));
-revoke all on public.stel_cola from anon;
-revoke insert, update, delete on public.stel_cola from authenticated;
 
 -- Envío desde la web: inserta o actualiza SOLO lo que aún no se ha procesado (PENDIENTE/REVISAR).
 -- Un albarán ya creado, en proceso, parado o con error no se toca.
@@ -64,8 +63,6 @@ begin
   end loop;
 end;
 $$;
-revoke execute on function public.stel_cola_enviar(jsonb) from public, anon;
-grant execute on function public.stel_cola_enviar(jsonb) to authenticated;
 
 -- Llaves temporales del robot (solo su huella SHA-256; la llave vive en el entorno privado del robot).
 create table if not exists public.robot_llaves (
@@ -74,15 +71,12 @@ create table if not exists public.robot_llaves (
   creada_en timestamptz not null default now()
 );
 alter table public.robot_llaves enable row level security;
-revoke all on public.robot_llaves from anon, authenticated;
 
 -- PDF de los albaranes enviados: almacén privado, por su huella SHA-256.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('albaranes-stel', 'albaranes-stel', false, 52428800, array['application/pdf'])
 on conflict (id) do nothing;
-drop policy if exists albaranes_stel_subir on storage.objects;
 create policy albaranes_stel_subir on storage.objects for insert to authenticated
   with check (bucket_id = 'albaranes-stel' and public.tiene_permiso('costes.editar'));
-drop policy if exists albaranes_stel_leer on storage.objects;
 create policy albaranes_stel_leer on storage.objects for select to authenticated
   using (bucket_id = 'albaranes-stel' and public.tiene_permiso('costes.ver'));
