@@ -25,6 +25,19 @@ Edge). El repositorio es **público**.
   credenciales solo en variables del entorno; no pulsa botones salvo la entrada y los enlaces del
   menú principal (navegación).
 - No contratar servicios externos (OCR, visión) sin mostrar antes resultados y costes.
+- Pedidos a proveedor (regla del usuario, 2026-10-26; cálculo en `robot-stel/pedidos.js`).
+  - **Por qué:** en STEL, generar un albarán desde un pedido lo pasa entero a «Recibido» y ya no
+    deja generar otro.
+  - **Lo pendiente:** el robot vigila qué falta en cada pedido, a partir del pedido y de los
+    albaranes anteriores con su PAP.
+  - **Entrega que no completa el pedido:** albarán A MANO, con «PAPxxxxx» en el título, las
+    observaciones y cada línea, los precios del pedido y su obra. La Ref. Documento Proveedor lleva
+    el número del albarán del proveedor.
+  - **Entrega que completa lo que falta:** albarán GENERADO DESDE EL PEDIDO, con solo lo de ese
+    papel, para dejarlo cerrado y enlazado.
+  - **Se para:** si hay líneas fuera del pedido, más cantidad que la pendiente o el pedido ya está
+    cerrado.
+  - **Precio ausente en el albarán:** se toma el del pedido.
 
 ## Datos reales
 
