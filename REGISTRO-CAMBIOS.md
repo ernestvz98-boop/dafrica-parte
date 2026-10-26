@@ -41,6 +41,12 @@ y lee el QR con jsQR.
 contraseña hasta encender `DOS_PASOS_PARA_TODOS` en `control-1.js`; quien tiene el código activado
 siempre tiene que ponerlo (también lo exige la base de datos).
 
+**Cuentas bloqueadas (decisión del usuario, mismo día):** las otras 3 cuentas no se usarán por el
+momento: quedan bloqueadas (`auth.users.banned_until` = 2100-01-01) y se cerraron sus 7 sesiones
+guardadas. No se borra ningún dato, rol ni permiso. Solo puede entrar la cuenta con el código del
+móvil. Desbloquear: `update auth.users set banned_until = null where id = '…';` (o desde
+Authentication → Users), y la persona vuelve a entrar con su contraseña.
+
 **Perder el móvil:** un administrador borra el factor del usuario en Supabase (Authentication →
 Users → MFA) y la persona se vuelve a dar de alta con el QR.
 
