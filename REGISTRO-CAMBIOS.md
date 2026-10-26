@@ -3,6 +3,23 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-26 · Robot de STEL: albarán generado desde su pedido (prueba privada autorizada)
+
+**Producción:** sin cambios en la web ni en las funciones.
+
+- **Guardia:** se añade a la lista cerrada de lecturas `isDocumentoComercialCerrado`, aprobada por el
+  usuario. Solo pregunta si un pedido está cerrado antes de generar un albarán desde él. Prueba en
+  `pruebas/robot-stel.test.js`.
+- **Prueba privada.** Se generó un albarán de compra desde su pedido a proveedor, con estas reglas:
+  - solo las líneas recibidas según el papel;
+  - precios del pedido, porque el albarán no los trae;
+  - obra del lector;
+  - una sola escritura, cuyo contenido se comprueba antes de salir, incluido el enlace al pedido
+    (`idDocumentoComercialPadre`).
+- **Comportamiento de STEL:** al generar el albarán, marca el pedido entero como «Recibido» aunque
+  quede una línea sin recibir. El estado es del documento, no de cada línea.
+- **Fuera del repositorio:** referencias, capturas y registros.
+
 ## 2026-10-23 · Robot de STEL: prueba privada de escritura autorizada (sin cambios en la web)
 
 **Producción:** sin cambios en la web ni en las funciones. La escritura desde la web sigue desactivada.

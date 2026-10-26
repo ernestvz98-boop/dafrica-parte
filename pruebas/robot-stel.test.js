@@ -81,3 +81,9 @@ test("ListarTipoUnidadFeMEX (lista de tipos de unidad del formulario de producto
  assert.equal(g.permitido("POST",U,"lectura","operacion=ListarTipoUnidadFeMEX"),true);
  for(const op of ["GuardarTipoUnidadFeMEX","ListarTipoUnidadFeMEXyGuardar","crearTipoUnidad"])assert.equal(g.permitido("POST",U,"lectura","operacion="+op),false,op);
 });
+
+test("isDocumentoComercialCerrado (¿está cerrado el pedido?) pasa; cerrar o abrir documentos no",()=>{
+ const g=require("../robot-stel/guardia.js"),U="https://app.stelorder.com/app/FrontController";
+ assert.equal(g.permitido("POST",U,"lectura","operacion=isDocumentoComercialCerrado&idDocumentoComercial=1"),true);
+ for(const op of ["cerrarDocumentoComercial","isDocumentoComercialCerradoYGuardar","generarAlbaranDesdePedido"])assert.equal(g.permitido("POST",U,"lectura","operacion="+op),false,op);
+});
