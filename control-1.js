@@ -236,6 +236,26 @@ async function dosPasos(){
   await pedirCodigo(factor.id, alta?.totp || null);
 }
 
+// QR del alta: se dibuja en el navegador desde la dirección otpauth (qrcode-generator de
+// albaranes/vendor). El SVG que envía Supabase («data:image/svg+xml;utf-8,<svg … fill="#…">») no
+// se muestra en una imagen: el «#» corta la dirección (fallo real, 2026-10-26).
+function imagenQr(totp){
+  try{
+    if(typeof qrcode === "function" && totp.uri){
+      const q = qrcode(0, "M");
+      q.addData(totp.uri);
+      q.make();
+      return q.createDataURL(6, 4);
+    }
+  }catch{}
+  const svg = String(totp.qr_code || "").replace(/^data:image\/svg\+xml[^,]*,/, "");
+  let texto = svg;
+  if(!svg.trim().startsWith("<")){
+    try{ texto = decodeURIComponent(svg); }catch{}
+  }
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(texto);
+}
+
 function mfaMensaje(texto, clase=""){
   $("mfaMsg").textContent = texto;
   $("mfaMsg").className = clase;
@@ -259,7 +279,7 @@ function pedirCodigo(factorId, totp){
     $("mfaForm").classList.remove("hidden");
     $("mfaAlta").classList.toggle("hidden", !totp);
     if(totp){
-      $("mfaQr").src = totp.qr_code;
+      $("mfaQr").src = imagenQr(totp);
       $("mfaSecreto").textContent = totp.secret;
     }
     mfaMensaje("");

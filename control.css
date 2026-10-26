@@ -30,7 +30,7 @@ textarea{min-height:88px;resize:vertical}
 #loginMsg{min-height:20px;margin-top:10px;font-size:13px}
 #mfaMsg{min-height:20px;margin-top:10px;font-size:13px}
 #mfaForm p,#mfaForm ol{font-size:13px;line-height:1.45}#mfaForm ol{padding-left:20px}
-.mfa-qr{display:block;width:200px;height:200px;margin:8px auto;background:#fff;border:1px solid var(--border);border-radius:10px;padding:6px}
+.mfa-qr{display:block;width:200px;height:200px;margin:8px auto;background:#fff;border:1px solid var(--border);border-radius:10px;padding:6px;image-rendering:pixelated}
 #mfaSecreto{word-break:break-all;font-size:12px}
 .login-card .btn.secondary{margin-top:8px}
 .private-note{margin-top:16px;border-top:1px solid var(--border);padding-top:13px;font-size:12px;color:var(--muted)}

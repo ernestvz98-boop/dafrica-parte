@@ -30,6 +30,12 @@ mal escrito e incorrecto, entrada, recarga, sesión de solo contraseña, cancela
 contraseña incorrecta. `npm test`: 305/305. (`licitaciones.navegador.cjs` ya fallaba antes de este
 cambio, en un filtro de licitaciones; no carga estos ficheros.)
 
+**Fallo real tras publicar (corregido el mismo día):** el QR del alta no se veía. Supabase envía el
+SVG sin codificar («data:image/svg+xml;utf-8,<svg … fill="#…">») y el «#» corta la dirección de la
+imagen. Ahora el QR se dibuja en el navegador desde la dirección otpauth con `albaranes/vendor/qrcode.js`
+(y, si no cargara, el SVG se codifica bien). La prueba de navegador usa el formato real de Supabase
+y lee el QR con jsQR.
+
 **Perder el móvil:** un administrador borra el factor del usuario en Supabase (Authentication →
 Users → MFA) y la persona se vuelve a dar de alta con el QR.
 

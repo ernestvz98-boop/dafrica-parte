@@ -39,7 +39,7 @@ function simulador(){
     if(p==='/auth/v1/user')return responder(route,200,{id:'usuario-ficticio',email:'prueba@example.org',factors:st.factores});
     if(p==='/auth/v1/factors'&&m==='POST'){
       const id='f'+st.siguiente++;st.factores.push({id,factor_type:'totp',status:'unverified'});
-      return responder(route,200,{id,type:'totp',totp:{qr_code:"data:image/svg+xml;utf-8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>",secret:'SECRETOFICTICIO',uri:'otpauth://totp/x'}});
+      return responder(route,200,{id,type:'totp',totp:{qr_code:'data:image/svg+xml;utf-8,<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#ffffff"/><path d="M1 1h3v3H1z" fill="#000000"/></svg>',secret:'SECRETOFICTICIO',uri:'otpauth://totp/DAFRICA%20Control:prueba@example.org?secret=SECRETOFICTICIO&issuer=DAFRICA%20Control'}});
     }
     let x=p.match(/^\/auth\/v1\/factors\/([^/]+)$/);
     if(x&&m==='DELETE'){st.factores=st.factores.filter(f=>f.id!==x[1]);return responder(route,200,{id:x[1]});}
@@ -68,6 +68,7 @@ async function nuevaPagina(browser,base,sim,{sesion}={}){
   await ctx.route(/^https:\/\/(?!sbocfjxamjmwabmqbeyw)/,r=>r.abort());
   if(sesion)await ctx.addInitScript(s=>{if(!sessionStorage.getItem('puesta')){localStorage.setItem('dafrica_web_session',JSON.stringify(s));sessionStorage.setItem('puesta','1');}},sesion);
   const page=await ctx.newPage();
+  await ctx.addInitScript({path:path.join(root,'albaranes/vendor/jsQR.js')});
   const errores=[];page.on('pageerror',e=>errores.push(String(e)));
   await page.goto(base+'/');
   return {page,ctx,errores};
@@ -88,7 +89,12 @@ if(require.main===module)(async()=>{
     await page.waitForSelector('#mfaForm:not(.hidden)');
     assert.equal(await visible(page,'#loginForm'),false);
     assert.equal(await visible(page,'#mfaAlta'),true,'la primera vez se muestra el alta con QR');
-    assert.match(await page.getAttribute('#mfaQr','src'),/^data:image\/svg\+xml/);
+    // El QR se ve y contiene la dirección otpauth (fallo real: el SVG de Supabase no se mostraba).
+    await page.waitForFunction(()=>document.querySelector('#mfaQr').complete);
+    assert.ok(await page.evaluate(()=>document.querySelector('#mfaQr').naturalWidth>0),'la imagen del QR se carga');
+    const leido=await page.evaluate(()=>{const i=document.querySelector('#mfaQr'),c=document.createElement('canvas');c.width=i.naturalWidth;c.height=i.naturalHeight;
+      const x=c.getContext('2d');x.drawImage(i,0,0);const d=x.getImageData(0,0,c.width,c.height);return jsQR(d.data,c.width,c.height)?.data||null;});
+    assert.match(leido||'',/^otpauth:\/\/totp\/.*secret=SECRETOFICTICIO/);
     assert.equal(await page.textContent('#mfaSecreto'),'SECRETOFICTICIO');
     assert.equal(await page.inputValue('#loginPassword'),'','la contraseña no se queda en el formulario');
     assert.ok(sim.st.llamadas.includes('DELETE /auth/v1/factors/f0'),'el alta a medias anterior se borra');
