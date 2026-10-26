@@ -3,6 +3,33 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-26 · Fase 2: de la lectura a STEL (aprobada por el usuario)
+
+**Decisiones del usuario:** el lector queda aprobado para escribir en STEL; automático solo si está
+todo OK (los dudosos esperan revisión); el robot se ejecuta de momento desde la sesión de Claude, y
+Claude revisa cada albarán contra su PDF antes de crearlo; sin precio ni pedido, 0,00 con «PRECIO
+PENDIENTE»; artículos nuevos solo sin parecidos. El robot entra con el usuario de STEL del usuario.
+
+**Producción:** sí. Supabase: cola `stel_cola` + `stel_cola_enviar`, `robot_llaves`, almacén privado
+`albaranes-stel` (permisos mínimos: la web solo lee la cola y envía por la función; el robot solo
+lee y actualiza), función Edge `robot-cola` v1. Web: envío a la cola tras la lectura (con
+`costes.editar`).
+
+1. `albaranes/cola-stel.js`: orden de cada albarán (PENDIENTE / REVISAR / YA_EXISTE con motivos).
+   Hueco encontrado al probarlo: una referencia leída con un cero de más se habría creado como
+   artículo nuevo (la regla anti-duplicados de `articulos.js` no lo veía). Antes de un alta automática
+   se exige además que ninguna referencia esté a un carácter ni tenga las mismas cifras, y que la
+   descripción no esté contenida en la de otro artículo.
+2. `robot-stel/escritura.js`: autorizador de escrituras (albarán exacto de la orden, artículos nuevos de
+   la orden, un adjunto en ese albarán; una vez cada uno). `robot-stel/procesar-cola.js`: preparar /
+   ensayo / crear.
+3. Pendiente: calibrar en STEL los pasos del robot con un ensayo sin guardar (requiere entrar con el
+   usuario de STEL, que cierra su sesión abierta) y automatizar las entregas con pedido (PAP).
+
+**Pruebas:** `cola-stel.test.js`, `robot-cola.test.js`, `robot-escritura.test.js`; Chromium con
+Supabase simulado (el PDF se sube una vez; sin permiso de edición no se envía nada); la puerta del
+robot rechaza una llave inventada y las acciones no permitidas.
+
 ## 2026-10-26 · Verificación en dos pasos y cierre de accesos antiguos (autorizado por el usuario)
 
 **Producción:** sí, base de datos y funciones Edge. La web con la pantalla del código está en la rama

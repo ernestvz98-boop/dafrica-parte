@@ -50,3 +50,26 @@ Lecturas añadidas a la guardia: `ListarTipoUnidadFeMEX` e `isDocumentoComercial
 
 El robot entra con un usuario de STEL. Si es el mismo que usa una persona, las sesiones se cierran
 entre sí: conviene un usuario de STEL solo para el robot.
+
+## Fase 2: crear en STEL los albaranes leídos (aprobada por el usuario, 2026-10-26)
+
+La web envía cada albarán leído y su PDF a la cola `stel_cola` (orden de `albaranes/cola-stel.js`).
+El robot la ejecuta desde la sesión de Claude, con una llave temporal de la cola (la huella va en
+`robot_llaves` con caducidad de 12 h; la llave, en un fichero del entorno privado):
+
+```
+ROBOT_LLAVE_FICHERO=<llave.txt> node robot-stel/procesar-cola.js preparar <carpeta-privada>
+#   → PDF e imágenes de cada albarán + su orden. Claude los compara y escribe aprobados.json:
+#     {"<id>": {"aprobado": true}, "<id>": {"aprobado": false, "motivo": "…"}}
+STEL_WEB_ESTADO=<sesion.json> node robot-stel/procesar-cola.js ensayo <carpeta-privada> <id>
+#   → rellena en STEL SIN guardar (la guardia cancela cualquier escritura) y deja capturas
+STEL_WEB_ESTADO=<sesion.json> ROBOT_LLAVE_FICHERO=<llave.txt> node robot-stel/procesar-cola.js crear <carpeta-privada>
+```
+
+Por cada albarán aprobado: busca su número en los albaranes de proveedor de STEL (si aparece, se para:
+posible duplicado); crea los artículos nuevos de la orden (vuelve a buscar su referencia antes); crea
+el albarán A MANO con proveedor, fecha, Ref. Documento Proveedor, obra, título «número fecha obra» y las
+líneas (sin precio: 0,00 y «PRECIO PENDIENTE»); adjunta su PDF en «Adjuntos»; y anota en la cola
+CREADO, PARADO o ERROR con el motivo. `escritura.js` solo deja salir esas escrituras, una vez cada una
+y si coinciden con la orden. Con pedido (PAP) o con varios descuentos en una línea, de momento se para.
+Pruebas: `pruebas/robot-escritura.test.js`, `pruebas/robot-cola.test.js`, `pruebas/cola-stel.test.js`.

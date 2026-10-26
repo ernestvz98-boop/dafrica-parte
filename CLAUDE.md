@@ -5,12 +5,22 @@ Edge). El repositorio es **público**.
 
 ## Fases y aprobación
 
-- **Fase 1 (en curso): lector de albaranes.** PDF digitales, escaneados y mixtos, de cualquier
-  tamaño; separación de albaranes; manuscritos relevantes (códigos de obra); campos de
-  cabecera, líneas y totales; resolución automática solo con evidencia; 0 errores críticos.
-- **Fase 2 (solo con aprobación expresa del usuario):** STEL (artículos, albaranes, obra),
-  precios pendientes y facturación, robot de vinculación de obra, CRM.
-- No se avanza de fase sin que el usuario apruebe el informe de la fase anterior.
+- **Fase 1: lector de albaranes** (aprobado por el usuario el 2026-10-26 para escribir en STEL; se
+  sigue mejorando). PDF digitales, escaneados y mixtos, de cualquier tamaño; separación de
+  albaranes; manuscritos relevantes (códigos de obra); campos de cabecera, líneas y totales;
+  resolución automática solo con evidencia; 0 errores críticos.
+- **Fase 2 (aprobada por el usuario el 2026-10-26): albaranes leídos → STEL.**
+  - La web envía cada albarán leído y su PDF a la cola privada `stel_cola` (`albaranes/cola-stel.js`).
+    Automático solo si el lector lo da por bueno (AUTO_OK) y proveedor, número, fecha, obra con su
+    proyecto de STEL y cada artículo están resueltos; si no, REVISAR. Si ya existe en STEL, no se crea.
+  - Sin precio y sin pedido: línea a 0,00 con «PRECIO PENDIENTE» (nunca un precio estimado).
+  - Artículo inexistente: se crea solo sin ninguno parecido en el catálogo completo; si no, REVISAR.
+  - El robot (`robot-stel/procesar-cola.js`) se ejecuta de momento desde la sesión de Claude. Antes de
+    crear, Claude compara el PDF de cada albarán con la orden (petición del usuario) y solo crea los
+    aprobados. Escrituras: solo las que `robot-stel/escritura.js` autoriza (el albarán exacto de la
+    orden, sus artículos nuevos y su PDF adjunto, una vez). Si el número del proveedor ya aparece en
+    STEL, se para. Con pedido (PAP), de momento se para.
+- Pendiente de aprobación: precios pendientes y facturación, CRM.
 
 ## Ramas y producción
 
@@ -20,10 +30,11 @@ Edge). El repositorio es **público**.
   recuperable y confirmación.
 - STEL solo a través de funciones Edge con el secreto `STEL_API_KEY`; nunca copiar, imprimir ni
   registrar el valor de ningún secreto. Antes de escribir en STEL, acceso solo de lectura.
-- Excepción aprobada por el usuario (2026-10-22): el robot de la web de STEL (`robot-stel/`) **solo
-  para revisar**. Toda petición pasa por `robot-stel/guardia.js` (cualquier escritura se cancela);
-  credenciales solo en variables del entorno; no pulsa botones salvo la entrada y los enlaces del
-  menú principal (navegación).
+- Robot de la web de STEL (`robot-stel/`), aprobado por el usuario (2026-10-22 para revisar,
+  2026-10-26 para la Fase 2). Toda petición pasa por `robot-stel/guardia.js` (solo lectura); las únicas
+  escrituras son las de la Fase 2, autorizadas una a una por `robot-stel/escritura.js`. Entra con el
+  usuario de STEL del usuario (no el de superadministrador); credenciales y sesión solo en el entorno
+  privado. Su llave de la cola es temporal (huella en `robot_llaves`, 12 h) y nunca va al repositorio.
 - No contratar servicios externos (OCR, visión) sin mostrar antes resultados y costes.
 - Pedidos a proveedor (regla del usuario, 2026-10-26; cálculo en `robot-stel/pedidos.js`).
   - **Por qué:** en STEL, generar un albarán desde un pedido lo pasa entero a «Recibido» y ya no
@@ -126,7 +137,9 @@ evaluación del corpus (`node pruebas/evaluar.js --incluir-sin-revisar`, tambié
 | `albaranes/compras-stel.js` | albarán de compra de STEL por el número del proveedor en su título (ABP sin leer la letra a mano) |
 | `albaranes/datos-referencia.js` | importación de listas de obras (`lector_obras`) y tarifas de proveedor desde CSV/Excel, nunca precios |
 | `albaranes/etiquetas.js` | etiquetas de obra con QR: hoja para imprimir y lectura del QR en el escaneo |
-| `robot-stel/` | robot de la web de STEL Order, solo lectura (guardia, exploración); ver su `LEEME.md` |
+| `robot-stel/` | robot de la web de STEL Order: guardia (solo lectura), exploración, pedidos y Fase 2 (`procesar-cola.js`, `escritura.js`); ver su `LEEME.md` |
+| `albaranes/cola-stel.js` | Fase 2: orden para STEL de cada albarán leído (PENDIENTE / REVISAR / YA_EXISTE) |
+| `supabase/functions/robot-cola/` | puerta del robot a la cola `stel_cola` (llave temporal; pendientes, PDF, empezar, terminar) |
 | `albaranes/vendor/` | librerías de terceros servidas por la web (jsQR, qrcode-generator, xlsx); ver su `LEEME.md` |
 | `albaranes/motor-navegador.js` | pdf.js + tesseract.js en el navegador (renderizado bajo demanda) |
 | `control-29.js` | módulo «Lector de albaranes» del menú (permiso `costes.ver`) |
