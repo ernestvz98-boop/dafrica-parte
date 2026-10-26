@@ -3,6 +3,8 @@
 const SUPABASE_URL = "https://sbocfjxamjmwabmqbeyw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_fb3jW4X72iBoPs_bfUA6Dw_y5_z06r0";
 const SESSION_KEY = "dafrica_web_session";
+// Revisión de seguridad 2026-10-26: tras 12 horas sin usar la web hay que volver a entrar.
+const INACTIVIDAD_MAX = 12 * 3600 * 1000;
 
 const state = {
   session: null,
@@ -71,10 +73,28 @@ function storeSession(s){
   const obj = {
     access_token:s.access_token,
     refresh_token:s.refresh_token || state.session?.refresh_token || "",
-    expires_at:s.expires_at || (Date.now() + ((s.expires_in || 3600) * 1000))
+    expires_at:s.expires_at || (Date.now() + ((s.expires_in || 3600) * 1000)),
+    ultimo_uso:Date.now()
   };
   localStorage.setItem(SESSION_KEY, JSON.stringify(obj));
   state.session = obj;
+}
+
+// Sesión abandonada: sin uso durante INACTIVIDAD_MAX se cierra. El último uso se guarda como mucho
+// una vez por minuto.
+function sesionCaducadaPorInactividad(){
+  const s = state.session;
+  if(!s) return false;
+  const ultimo = Number(s.ultimo_uso) || Date.now();
+  if(Date.now() - ultimo > INACTIVIDAD_MAX){
+    storeSession(null);
+    return true;
+  }
+  if(Date.now() - ultimo > 60000){
+    s.ultimo_uso = Date.now();
+    try{ localStorage.setItem(SESSION_KEY, JSON.stringify(s)); }catch{}
+  }
+  return false;
 }
 
 async function rawFetch(url, options={}){
@@ -106,6 +126,7 @@ async function refreshSession(){
 async function authFetch(url, options={}, retry=true){
   if(!state.session) state.session = getStoredSession();
   if(!state.session?.access_token) throw new Error("AUTH_REQUIRED");
+  if(sesionCaducadaPorInactividad()) throw new Error("AUTH_REQUIRED");
 
   if((state.session.expires_at || 0) < Date.now() + 45000){
     const renewed = await refreshSession();
@@ -172,6 +193,112 @@ async function logout(){
   location.replace("./");
 }
 
+/*
+ * Verificación en dos pasos (TOTP de Supabase Auth), obligatoria para entrar (2026-10-26).
+ * Primera vez: alta con el QR en una aplicación de códigos del móvil. Después: el código en cada
+ * entrada. La base de datos (tiene_permiso) no da ningún permiso a quien tiene la verificación
+ * activada y entra solo con la contraseña, aunque se salte esta pantalla.
+ */
+function nivelSesion(token){
+  try{
+    const p = String(token || "").split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
+    return JSON.parse(atob(p)).aal || "aal1";
+  }catch{
+    return "aal1";
+  }
+}
+
+async function authJson(path, body, method="POST"){
+  const r = await authFetch(SUPABASE_URL + "/auth/v1/" + path, {method, ...(body ? {body:JSON.stringify(body)} : {})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){
+    const err = new Error(d.msg || d.error_description || d.message || ("HTTP " + r.status));
+    err.status = r.status;
+    throw err;
+  }
+  return d;
+}
+
+async function dosPasos(){
+  if(nivelSesion(state.session?.access_token) === "aal2") return;
+  const r = await authFetch(SUPABASE_URL + "/auth/v1/user");
+  if(!r.ok) throw new Error("AUTH_REQUIRED");
+  const user = await r.json();
+  const totp = (user.factors || []).filter(f => f.factor_type === "totp");
+  let factor = totp.find(f => f.status === "verified");
+  let alta = null;
+  if(!factor){
+    // Altas sin terminar (QR mostrado y nunca confirmado): se borran y se empieza otra.
+    for(const f of totp) await authJson("factors/" + encodeURIComponent(f.id), null, "DELETE").catch(()=>{});
+    alta = await authJson("factors", {factor_type:"totp", friendly_name:"DAFRICA Control " + new Date().toISOString().slice(0,19), issuer:"DAFRICA Control"});
+    factor = alta;
+  }
+  await pedirCodigo(factor.id, alta?.totp || null);
+}
+
+function mfaMensaje(texto, clase=""){
+  $("mfaMsg").textContent = texto;
+  $("mfaMsg").className = clase;
+}
+
+function cerrarPantallaMfa(){
+  $("mfaForm").classList.add("hidden");
+  $("mfaAlta").classList.add("hidden");
+  $("mfaQr").removeAttribute("src");
+  $("mfaSecreto").textContent = "";
+  $("mfaCodigo").value = "";
+  mfaMensaje("");
+  $("loginForm").classList.remove("hidden");
+}
+
+function pedirCodigo(factorId, totp){
+  return new Promise((resolve, reject) => {
+    $("appView").classList.add("hidden");
+    $("loginView").classList.remove("hidden");
+    $("loginForm").classList.add("hidden");
+    $("mfaForm").classList.remove("hidden");
+    $("mfaAlta").classList.toggle("hidden", !totp);
+    if(totp){
+      $("mfaQr").src = totp.qr_code;
+      $("mfaSecreto").textContent = totp.secret;
+    }
+    mfaMensaje("");
+    $("mfaCodigo").value = "";
+    $("mfaCodigo").focus();
+    const id = encodeURIComponent(factorId);
+    $("mfaForm").onsubmit = async e => {
+      e.preventDefault();
+      const code = $("mfaCodigo").value.replace(/\s/g,"");
+      if(!/^\d{6}$/.test(code)){
+        mfaMensaje("Escribe los 6 números que muestra la aplicación.", "error");
+        return;
+      }
+      $("mfaBoton").disabled = true;
+      mfaMensaje("Comprobando…", "muted");
+      try{
+        const reto = await authJson("factors/" + id + "/challenge", {});
+        const d = await authJson("factors/" + id + "/verify", {challenge_id:reto.id, code});
+        storeSession({access_token:d.access_token, refresh_token:d.refresh_token, expires_in:d.expires_in || 3600});
+        cerrarPantallaMfa();
+        resolve();
+      }catch(err){
+        if(err.message === "AUTH_REQUIRED"){
+          cerrarPantallaMfa();
+          reject(err);
+          return;
+        }
+        mfaMensaje(err.status === 400 || err.status === 422 ? "Código incorrecto o caducado. Espera al siguiente y vuelve a probar." : err.message, "error");
+      }finally{
+        $("mfaBoton").disabled = false;
+      }
+    };
+    $("mfaSalir").onclick = () => {
+      cerrarPantallaMfa();
+      reject(new Error("MFA_CANCELADO"));
+    };
+  });
+}
+
 async function loadIdentity(){
   const userResp = await authFetch(SUPABASE_URL + "/auth/v1/user");
   if(!userResp.ok) throw new Error("AUTH_REQUIRED");
@@ -189,6 +316,7 @@ async function loadIdentity(){
 }
 
 function showLogin(message=""){
+  cerrarPantallaMfa();
   $("appView").classList.add("hidden");
   $("loginView").classList.remove("hidden");
   $("loginMsg").textContent = message;

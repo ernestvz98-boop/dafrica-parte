@@ -3,6 +3,36 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-26 · Verificación en dos pasos y cierre de accesos antiguos (autorizado por el usuario)
+
+**Producción:** sí, base de datos y funciones Edge. La web con la pantalla del código está en la rama
+de trabajo, **pendiente de publicar en `main`**.
+
+1. **Web:** después de la contraseña se pide el código de 6 números de una aplicación del móvil
+   (TOTP de Supabase Auth). La primera vez es obligatorio darse de alta con el QR. Sin terminar la
+   verificación no se cargan permisos ni datos; al cancelar se cierra la sesión también en el
+   servidor. Tras 12 horas sin usar la web hay que volver a entrar. La contraseña no se queda en
+   el formulario.
+2. **Base de datos** (`supabase/migraciones/20261026_dos_pasos.sql`): `tiene_permiso` (y con ella
+   todas las políticas RLS, el almacenamiento, `mis_permisos` y las funciones Edge) no da ningún
+   permiso a quien tiene la verificación activada y entra solo con la contraseña, aunque se salte la
+   web. Comprobado: los permisos de los 4 usuarios no cambian hoy (misma huella antes y después);
+   con un factor simulado (deshecho), sesión aal1 → 0 permisos y aal2 → todos.
+3. **`compras-verificar-documento` v15:** el justificante de auditoría (escritura con la clave de
+   servicio) solo se guarda para quien tiene `costes.editar`. Hoy no cambia nada para nadie.
+   Copia anterior en `respaldo-v14.ts`.
+4. **`maquina-qr` v8:** la página antigua con formulario de contraseña propio (sin código) se
+   sustituye por una redirección a `maquina.html` de la web; los QR impresos siguen funcionando.
+   Ya no sirve la clave anónima heredada. Copia anterior en `respaldo-v7.ts` (sin la clave).
+
+**Pruebas:** `pruebas/dos-pasos.navegador.cjs` (Chromium, Supabase simulado): alta con QR, código
+mal escrito e incorrecto, entrada, recarga, sesión de solo contraseña, cancelar, inactividad y
+contraseña incorrecta. `npm test`: 305/305. (`licitaciones.navegador.cjs` ya fallaba antes de este
+cambio, en un filtro de licitaciones; no carga estos ficheros.)
+
+**Perder el móvil:** un administrador borra el factor del usuario en Supabase (Authentication →
+Users → MFA) y la persona se vuelve a dar de alta con el QR.
+
 ## 2026-10-26 · Revisión de seguridad: funciones y permisos (autorizada por el usuario)
 
 **Producción:** sí, funciones Edge y permisos de la base de datos. La web (`main`) no cambia.

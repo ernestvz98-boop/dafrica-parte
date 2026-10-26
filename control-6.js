@@ -58,11 +58,14 @@ async function bootstrap(){
     $("loginMsg").className = "muted";
     try{
       await login($("loginEmail").value.trim(), $("loginPassword").value);
+      $("loginPassword").value = "";
+      await dosPasos();
       await loadIdentity();
       await enterApp();
     }catch(err){
-      storeSession(null);
-      $("loginMsg").textContent = err.message === "AUTH_REQUIRED" ? "Sesión no válida." : err.message;
+      cerrarSesionPendiente();
+      $("loginMsg").textContent = err.message === "AUTH_REQUIRED" ? "Sesión no válida." :
+        err.message === "MFA_CANCELADO" ? "Entrada cancelada." : err.message;
       $("loginMsg").className = "error";
     }finally{
       btn.disabled = false;
@@ -75,14 +78,22 @@ async function bootstrap(){
   state.session = getStoredSession();
   if(state.session){
     try{
+      await dosPasos();
       await loadIdentity();
       await enterApp();
       return;
     }catch{
-      storeSession(null);
+      cerrarSesionPendiente();
     }
   }
   showLogin();
+}
+
+// Entrada sin terminar (código no puesto, cancelada o caducada): se cierra también en el servidor.
+function cerrarSesionPendiente(){
+  if(state.session?.access_token)
+    rawFetch(SUPABASE_URL + "/auth/v1/logout", {method:"POST", headers:{apikey:SUPABASE_KEY, Authorization:"Bearer " + state.session.access_token}}).catch(()=>{});
+  storeSession(null);
 }
 
 async function enterApp(){
