@@ -35,7 +35,9 @@ const INSTRUCCIONES=[
  "tachado=true si la anotación está tachada o rayada.",
  "lecturas: interpretaciones normalizadas sin espacios (p. ej. PRY00123). Si un carácter es dudoso (una cifra corregida o sobrescrita, 1/7, 0/6, 5/6…) da UNA lectura por cada interpretación plausible, con su confianza 0–1. No inventes ni completes cifras que no se vean.",
  "Nunca leas ni devuelvas precios, cantidades ni importes."].join("\n");
-const MODELOS=["gpt-4o","gpt-4.1","gpt-5","gpt-5-mini","gpt-5.1","gpt-5.2","o3","o4-mini"];
+// Solo los modelos que usa la web (control-29.js: MODELO_MANUSCRITOS y MODELOS_COMPARAR); revisión de
+// seguridad 2026-10-26: una sesión robada no puede elegir modelos más caros.
+const MODELOS=["gpt-5.1","gpt-4o","gpt-4.1","gpt-5","o4-mini"];
 async function autorizado(req:Request){
  const auth=req.headers.get("Authorization")||"",base=Deno.env.get("SUPABASE_URL")||"",servicio=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
  if(!auth.startsWith("Bearer ")||!base||!servicio)return false;

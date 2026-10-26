@@ -3,12 +3,40 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
-## 2026-10-26 · El lector reconoce el pedido a proveedor escrito a mano (PAP), sin publicar
+## 2026-10-26 · Revisión de seguridad: funciones y permisos (autorizada por el usuario)
 
-**Producción:** sin cambios. Pendiente de autorización:
-- desplegar `albaranes-manuscritos` (nuevo tipo PAP);
-- desplegar `stel-albaranes-consulta` v8 (modo `pedidos`);
-- publicar la web.
+**Producción:** sí, funciones Edge y permisos de la base de datos. La web (`main`) no cambia.
+Copias de lo anterior en el repositorio (commit 55976a5) para poder deshacer.
+
+1. **`geocodificar-direccion` v7:** exige sesión real de usuario (la clave pública anónima ya no
+   basta: 401), solo responde a la web de DAFRICA (CORS) y la búsqueda se corta a 200 caracteres.
+2. **`ubicaly-kilometraje` v5:** CORS solo para la web de DAFRICA (antes `*`). Ya exigía
+   `vehiculos.ver`.
+3. **`compras-auto-v2` v5:** retirada. Responde siempre 410 sin leer ni escribir nada (era la carga
+   antigua que guardaba PDF y creaba registros; la web no la usa). Código anterior en
+   `compras-auto-v2/respaldo-v4.ts`.
+4. **Base de datos** (`supabase/migraciones/20261026_revocar_ejecucion_triggers.sql`): `anon` y
+   `authenticated` ya no pueden ejecutar las dos funciones de trigger de facturas (SECURITY
+   DEFINER). El trigger sigue funcionando: PostgreSQL no comprueba EXECUTE al dispararlo. El aviso
+   del asesor de seguridad de Supabase desaparece.
+5. **`albaranes-manuscritos` v4:** tipo PAP (entrada siguiente) y lista de modelos limitada a los que
+   usa la web (gpt-5.1, gpt-4o, gpt-4.1, gpt-5, o4-mini): una sesión robada no puede pedir modelos
+   más caros.
+6. **`stel-albaranes-consulta`** (v7 en Supabase, «v8» en el código): páginas solapadas y recortadas
+   (revisadas en 2e2d952 / b1b02fa) y modo `pedidos`. Las respuestas de `buscar` y `fullReference`
+   no cambian de forma: la web publicada sigue funcionando.
+
+**Verificación:** con la clave pública anónima (la que cualquiera puede ver), geocodificar → 401,
+compras-auto-v2 → 410, ubicaly → 403, manuscritos → 403, consulta STEL → 401; CORS de otro origen no
+recibe permiso. Asesor de seguridad sin avisos para `anon`. `npm test`: 305/305.
+
+**Pendiente:** comprobar con una lectura real con PAP los nombres de los campos de las líneas del
+pedido en STEL (si no coinciden, el PAP queda sin validar, nunca aceptado por error).
+
+## 2026-10-26 · El lector reconoce el pedido a proveedor escrito a mano (PAP)
+
+**Producción:** las dos funciones se desplegaron en la revisión de seguridad (entrada anterior).
+Pendiente de autorización: publicar la web.
 
 1. **Lectura.** La visión tendrá el tipo `PAP`. Mientras no esté desplegado, también se acepta un
    «OTRO» con forma de PAP. Las letras confundidas en la parte numérica se corrigen («PAPO9001» →

@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const projectUrl = Deno.env.get("SUPABASE_URL") || "https://sbocfjxamjmwabmqbeyw.supabase.co";
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
-const responseHeaders = { "Content-Type":"application/json; charset=utf-8", "Cache-Control":"no-store", "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Methods":"POST, OPTIONS", "Access-Control-Allow-Headers":"authorization, apikey, content-type, x-client-info" };
+const responseHeaders = { "Content-Type":"application/json; charset=utf-8", "Cache-Control":"no-store", "Access-Control-Allow-Origin":"https://ernestvz98-boop.github.io", "Access-Control-Allow-Methods":"POST, OPTIONS", "Access-Control-Allow-Headers":"authorization, apikey, content-type, x-client-info" };
 function json(data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:responseHeaders});}
 function ymRange(ym:string){
  if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(ym)) throw new Error("Mes inválido: utiliza AAAA-MM");

@@ -1,11 +1,22 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
+// 2026-10-26 (revisión de seguridad): solo desde la web de DAFRICA Control y con una sesión real de
+// usuario (la clave pública anónima ya no basta).
 const cors = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": "https://ernestvz98-boop.github.io",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json; charset=utf-8",
 };
+
+async function sesionValida(req: Request) {
+  const auth = req.headers.get("authorization") || "";
+  const base = Deno.env.get("SUPABASE_URL") || "";
+  const anon = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+  if (!/^Bearer\s+\S+/i.test(auth) || !base || !anon) return false;
+  const r = await fetch(base + "/auth/v1/user", { headers: { apikey: anon, authorization: auth }, signal: AbortSignal.timeout(10000) });
+  return r.ok;
+}
 
 function uniqByCoord(rows: any[]) {
   const seen = new Set<string>();
@@ -133,8 +144,11 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    if (!await sesionValida(req)) {
+      return new Response(JSON.stringify({ error: "Sesión no válida", results: [] }), { status: 401, headers: cors });
+    }
     const body = await req.json().catch(() => ({}));
-    const q = String(body?.q || "").trim();
+    const q = String(body?.q || "").trim().slice(0, 200);
     if (!q) {
       return new Response(JSON.stringify({ error: "Escribe una dirección o lugar.", results: [] }), { status: 400, headers: cors });
     }
