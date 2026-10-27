@@ -225,7 +225,8 @@ async function elegirArticulo(p,i,ref){
 }
 
 async function crearArticulo(p,ref,nombre){
- await ir(p,"#main_catalogo");
+ // A la lista de productos (tras guardar otro artículo, STEL se queda en su ficha, sin botón «Crear»).
+ await ir(p,"#main_catalogo","Productos");
  await p.locator("button.opcionMenuCrear:visible").first().click({timeout:15000});await p.waitForTimeout(8000);
  // Serie MANUAL (valor -2), referencia y nombre del lector; nada más.
  await p.locator("#comboReferencias").first().selectOption("-2",{force:true});await p.locator("#comboReferencias").first().dispatchEvent("change");await p.waitForTimeout(1500);
@@ -373,7 +374,7 @@ async function procesar(dir,orden,{real}){
  const autorizador={actual:null,autorizar:(...a)=>autorizador.actual?autorizador.actual.autorizar(...a):[false,"aún no hay escrituras autorizadas",{}]};
  const {nav,p,registro,captura}=await abrirStel(dir,real?autorizador:null);
  try{return await pasos();}
- catch(e){await captura("error").catch(()=>{});throw e;}
+ catch(e){await captura("error").catch(()=>{});e.registro=registro;throw e;}
  finally{await nav.close();}
  async function pasos(){
   const dup=await hayDuplicado(p,plan.numero);
@@ -436,7 +437,8 @@ async function procesar(dir,orden,{real}){
    return neg?{estado:"PARADO",motivo:"La guardia canceló el albarán (no se ha creado): "+neg.motivo,registro}:{estado:"ERROR",motivo:"No se pudo confirmar el albarán creado",registro};
   }
   autorizador.actual.idAlbaran(id);
-  const referencia=await p.locator("#referencia").first().inputValue().catch(()=>"");
+  // La referencia del albarán (la del formulario visible: la ficha de un artículo creado antes también tiene «#referencia»).
+  const referencia=await p.locator("#referencia:visible").first().inputValue().catch(()=>"");
   await adjuntar(p,registro,adj);
   const adjOk=autorizador.actual.gastado.adjunto&&autorizador.actual.gastado.enlace&&(await p.locator("body").innerText()).includes(path.basename(adj));
   await captura("albaran-creado");
@@ -463,7 +465,7 @@ async function principal(){
    if(!tomado){console.log(cid+": ya no está pendiente");continue;}
    let r;
    try{r=dec.aprobado?await procesar(dir,orden,{real:true}):{estado:"PARADO",motivo:"Revisión: "+dec.motivo};}
-   catch(e){r={estado:"ERROR",motivo:String(e?.message||e).slice(0,300)};}
+   catch(e){r={estado:"ERROR",motivo:String(e?.message||e).slice(0,300),registro:e?.registro};}
    const resultado={motivo:r.motivo||null,adjunto:r.adjunto??null,revisado_por:"Claude (comparación con el PDF)",
     escrituras:(r.registro?.escrituras||[]).map(x=>({op:x.op,permitida:x.permitida,motivo:x.motivo})),canceladas:(r.registro?.canceladas||[]).length};
    await cola({accion:"terminar",id:cid,estado:r.estado,resultado,stel_id:r.stel_id,stel_referencia:r.stel_referencia});
