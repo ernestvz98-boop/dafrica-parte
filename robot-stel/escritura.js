@@ -20,6 +20,22 @@ const numPunto=v=>{const s=String(v??"").trim();return /^-?\d+(\.\d+)?$/.test(s)
 const igual=(a,b)=>Math.abs(a-b)<0.0005;
 
 /*
+ * Descuento de la línea en la ÚNICA casilla de STEL. Varios descuentos en cascada (60 + 10) se combinan
+ * (1 − 0,40 × 0,90 = 64 %) solo si el resultado es exacto con 2 decimales y, con precio e importe del
+ * papel, la línea cuadra (±0,01). Si no, null: el albarán se para (nunca se redondea un descuento).
+ */
+function descuentoLinea(l){
+ const d=(l.descuentos||[]).filter(Number.isFinite);
+ if(!d.length)return 0;
+ if(d.some(x=>x<0||x>=100))return null;
+ const total=(1-d.reduce((f,x)=>f*(1-x/100),1))*100;
+ if(Math.abs(total*100-Math.round(total*100))>1e-6)return null;
+ const dto=Math.round(total*100)/100;
+ if(Number.isFinite(l.precio)&&Number.isFinite(l.importe)&&Number.isFinite(l.cantidad)&&Math.abs(l.cantidad*l.precio*(1-dto/100)-l.importe)>0.01)return null;
+ return dto;
+}
+
+/*
  * Lo que se espera escribir para un albarán. plan: la orden de la cola (albaranes/cola-stel.js).
  * ids: {referencia → id de STEL} de los artículos (existentes o recién creados).
  * Devuelve {albaran:{idCliente,fecha,titulo,referenciaDocumentoExtra,stringIdsProyectos,lineas:[{id,unidades,precio}]},
@@ -32,7 +48,9 @@ function esperado(plan,{ids={},fichero=null}={}){
   if(id==null)throw Error("Artículo sin id de STEL: "+l.referencia);
   // Sin precio: el del pedido (lo pone el robot en la orden) o 0,00 con el aviso PRECIO PENDIENTE.
   const precio=Number.isFinite(l.precio)?l.precio:Number.isFinite(l.precio_pedido)?l.precio_pedido:0;
-  return {id:String(id),unidades:l.cantidad,precio};
+  const descuento=descuentoLinea(l);
+  if(descuento==null)throw Error("Descuento no representable en STEL: "+l.referencia);
+  return {id:String(id),unidades:l.cantidad,precio,descuento};
  });
  const productos={};
  for(const l of plan.lineas)if(l.articulo?.estado==="crear")productos[l.articulo.propuesta.referencia]=l.articulo.propuesta.descripcion;
@@ -79,7 +97,11 @@ function crearAutorizador(esp){
    for(const x of L){
     if(!nuevo(x?.id)||!nuevo(x?.idDocumentoPadre))return [false,"línea enlazada a otro documento",diag];
     const precios=Object.entries(x||{}).filter(([k])=>/precio/i.test(k)).map(([,v])=>numPunto(v));
-    const l=libres.find(e=>!e.usada&&e.id===String(x?.idObjetoCatalogo)&&igual(numPunto(x?.unidades),e.unidades)&&precios.some(p=>igual(p,e.precio)));
+    // Descuento: si la línea trae casilla de descuento, ha de ser el de la orden; sin casilla, solo vale sin descuento.
+    // Solo el porcentaje («porcentajeDescuento»): «precioDescuento» es un precio, no un descuento.
+    const dtos=Object.entries(x||{}).filter(([k])=>/porcentaje.*descuento|^descuento$/i.test(k)).map(([,v])=>numPunto(v)).filter(Number.isFinite);
+    const dtoOk=e=>dtos.length?dtos.some(v=>igual(v,e.descuento)):e.descuento===0;
+    const l=libres.find(e=>!e.usada&&e.id===String(x?.idObjetoCatalogo)&&igual(numPunto(x?.unidades),e.unidades)&&precios.some(p=>igual(p,e.precio))&&dtoOk(e));
     if(!l)return [false,"línea distinta de la orden (artículo "+String(x?.idObjetoCatalogo)+")",diag];
     l.usada=true;
    }
@@ -109,4 +131,4 @@ function crearAutorizador(esp){
  return {autorizar,gastado,idAlbaran:id=>{idCreado=id==null?null:String(id);}};
 }
 
-module.exports={esperado,crearAutorizador,titulo};
+module.exports={esperado,crearAutorizador,titulo,descuentoLinea};

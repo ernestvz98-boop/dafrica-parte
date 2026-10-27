@@ -87,3 +87,24 @@ test("isDocumentoComercialCerrado (¿está cerrado el pedido?) pasa; cerrar o ab
  assert.equal(g.permitido("POST",U,"lectura","operacion=isDocumentoComercialCerrado&idDocumentoComercial=1"),true);
  for(const op of ["cerrarDocumentoComercial","isDocumentoComercialCerradoYGuardar","generarAlbaranDesdePedido"])assert.equal(g.permitido("POST",U,"lectura","operacion="+op),false,op);
 });
+
+test("guardia: un GET/HEAD a STEL con una operación de escritura se cancela (fallo real 2026-10-27)", ()=>{
+ const G=require("../robot-stel/guardia.js");
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/FrontController?operacion=guardarDocumentoComercial&id="),false);
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/guardarAlbaran.do?x=1"),false);
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/FrontController"),false,"canal sin operación de lectura");
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/FileUploadServlet"),false);
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/stelorder/lib/altas/nuevoCalendario.js"),true,"ficheros de la web");
+ assert.equal(G.permitido("HEAD","https://app.stelorder.com/app/FrontController?operacion=eliminarDocumentosComerciales"),false);
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/FrontController?operacion=listarProyectosPaginado"),true);
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/js/principal.js"),true);
+ assert.equal(G.permitido("GET","https://otra.example.com/guardar.js"),true);
+});
+
+test("guardia: una petición cancelada hacia STEL recibe un 204 local (STEL no la reenvía); fuera de STEL, abort", async()=>{
+ const G=require("../robot-stel/guardia.js");const hechos=[];
+ const ruta=url=>({request:()=>({url:()=>url}),fulfill:o=>hechos.push(["fulfill",o.status]),abort:()=>hechos.push(["abort"])});
+ await G.cancelar(ruta("https://app.stelorder.com/app/FrontController"));
+ await G.cancelar(ruta("https://www.google.com/x"));
+ assert.deepEqual(hechos,[["fulfill",204],["abort"]]);
+});

@@ -49,8 +49,17 @@ function soloPlantilla(cuerpo){
 function operacion(cuerpo){try{return new URLSearchParams(String(cuerpo||"")).get("operacion")||"";}catch{return "";}}
 function permitido(metodo,url,fase="lectura",cuerpo=""){
  const m=String(metodo||"").toUpperCase();
- if(LECTURA.has(m))return true;
  let u;try{u=new URL(url);}catch{return false;}
+ // 2026-10-27 (fallo real): con la guardia cancelando el «Guardar» (POST), en STEL quedó creado el
+ // albarán de ensayo. Un GET/HEAD a STEL que lleve una operación (en la dirección) pasa por las MISMAS
+ // reglas que un POST; uno de escritura se cancela siempre, sea cual sea el método.
+ if(LECTURA.has(m)){
+  if(!esStel(u.hostname))return true;
+  const opUrl=[...u.searchParams.entries()].filter(([k])=>/^operaci[oó]n$|^op$|^accion$|^action$/i.test(k)).map(([,v])=>v);
+  // Canal de operaciones o servlet de ficheros por GET: solo con una operación de lectura explícita.
+  if((CANAL.test(u.pathname)||/Servlet$|\.do$/i.test(u.pathname))&&(!opUrl.length||ESCRITURA.test(u.pathname)))return false;
+  return opUrl.every(op=>!ESCRITURA.test(op)&&(OPERACIONES_LECTURA.has(op)||(VERBO_LECTURA.test(op)&&!AUTENTICACION.test(op))||(fase==="entrada"&&(OPERACIONES_ENTRADA.has(op)||AUTENTICACION.test(op)))));
+ }
  if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&PLANTILLA.test(u.pathname))return soloPlantilla(cuerpo);
  if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&CANAL.test(u.pathname)){
   // El nombre de la operación va en el cuerpo o, en las tablas paginadas, en la dirección.
@@ -62,9 +71,20 @@ function permitido(metodo,url,fase="lectura",cuerpo=""){
  if(fase==="entrada"&&m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&ENTRADA.test(u.pathname))return true;
  return false;
 }
+/*
+ * Cómo se cancela (fallo real 2026-10-27): la web de STEL REENVÍA en bucle una petición que falla sin
+ * respuesta («abort», estado 0), y al cerrar el navegador del robot un reenvío en vuelo llegó a STEL y
+ * creó un albarán. Una petición cancelada hacia STEL recibe una respuesta local «204 sin contenido»
+ * (nunca sale): la web no la reenvía y solo quita su aviso de «Guardando». Fuera de STEL, abort.
+ */
+async function cancelar(ruta){
+ let stel=false;try{stel=esStel(new URL(ruta.request().url()).hostname);}catch{}
+ if(stel)return ruta.fulfill({status:204,headers:{"Content-Type":"text/plain","Cache-Control":"no-store"},body:""});
+ return ruta.abort("blockedbyclient");
+}
 /* Ruta sin valores (para el informe): sin consulta ni identificadores largos. */
 function rutaSinDatos(url){
  try{const u=new URL(url);return u.hostname+u.pathname.replace(/\/\d{3,}(?=\/|$)/g,"/:id");}catch{return "(url no válida)";}
 }
-return {permitido,rutaSinDatos,operacion,OPERACIONES_LECTURA,OPERACIONES_ENTRADA,ESCRITURA,VERBO_LECTURA};
+return {permitido,cancelar,rutaSinDatos,operacion,OPERACIONES_LECTURA,OPERACIONES_ENTRADA,ESCRITURA,VERBO_LECTURA};
 });

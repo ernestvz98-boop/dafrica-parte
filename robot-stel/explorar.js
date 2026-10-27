@@ -15,7 +15,7 @@
  *   albaranes de compra.
  */
 const fs=require("fs"),path=require("path");
-const {permitido,rutaSinDatos,operacion}=require("./guardia.js");
+const {permitido,cancelar,rutaSinDatos,operacion}=require("./guardia.js");
 const cargarPlaywright=()=>{try{return require("playwright");}catch{return require("/opt/node-tools/node_modules/playwright");}};
 
 const INICIO="https://app.stelorder.com/app/";
@@ -49,7 +49,7 @@ async function explorar(salida){
     // Sin nombre de operación: solo el tipo de contenido y los NOMBRES de los campos (nunca valores).
     if(!op&&r.method()==="POST"){const k=(r.headers()["content-type"]||"").split(";")[0]+" · "+(()=>{try{return [...new URLSearchParams(cuerpo).keys()].slice(0,15).join(",");}catch{return "?";}})();
      informe.sin_operacion=informe.sin_operacion||{};informe.sin_operacion[k]=(informe.sin_operacion[k]||0)+1;}
-    return ruta.abort("blockedbyclient");}
+    return cancelar(ruta);}
    if(r.resourceType()==="xhr"||r.resourceType()==="fetch")informe.leidas[clave]=(informe.leidas[clave]||0)+1;
    // Tablas paginadas pedidas (STEL_WEB_TABLAS="listarProyectosPaginado,…"): se guarda la petición
    // original (filtros y columnas de la tabla) para pedir después todas las filas de una vez.

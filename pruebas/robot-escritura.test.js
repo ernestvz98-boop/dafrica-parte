@@ -10,7 +10,7 @@ const esp=()=>E.esperado(plan,{ids:{"ZZ-1":888},fichero:"albaran-123456.pdf"});
 const q=o=>new URLSearchParams(Object.entries(o).map(([k,v])=>[k,typeof v==="string"?v:JSON.stringify(v)]));
 const albaran=(cambios={})=>q({id:"",tipo:"ALBARANDEPROVEEDOR",idCliente:"9001",fecha:"22/10/2026",titulo:"123.456 22/10/2026 OBRA FICTICIA",
  referenciaDocumentoExtra:"123.456",stringIdsProyectos:"555",idDocumentoComercialPadre:"",
- lineasDocumentoComercial:[{id:"",idObjetoCatalogo:"777",unidades:"4",precioBaseTarifa:"2.5"},{id:"",idObjetoCatalogo:"888",unidades:"1",precioBaseTarifa:"0"}],...cambios});
+ lineasDocumentoComercial:[{id:"",idObjetoCatalogo:"777",unidades:"4",precioBaseTarifa:"2.5",porcentajeDescuento:"0",precioDescuento:"2.5"},{id:"",idObjetoCatalogo:"888",unidades:"1",precioBaseTarifa:"0",porcentajeDescuento:"0"}],...cambios});
 
 test("el albarán exacto de la orden se autoriza una sola vez", ()=>{
  const a=E.crearAutorizador(esp());
@@ -87,4 +87,23 @@ test("orden incompleta: no se prepara ninguna escritura", ()=>{
 test("título como los de la oficina, con el pedido si lo hay", ()=>{
  assert.equal(E.titulo(plan),"123.456 22/10/2026 OBRA FICTICIA");
  assert.equal(E.titulo({...plan,pedido:{codigo:"PAP09001"}}),"123.456 22/10/2026 OBRA FICTICIA · PAP09001");
+});
+
+test("descuentos en cascada: combinados solo si son exactos y la línea cuadra", ()=>{
+ assert.equal(E.descuentoLinea({descuentos:[]}),0);
+ assert.equal(E.descuentoLinea({descuentos:[45],cantidad:200,precio:1.083,importe:119.13}),45);
+ assert.equal(E.descuentoLinea({descuentos:[60,10],cantidad:25,precio:2.08,importe:18.72}),64);
+ assert.equal(E.descuentoLinea({descuentos:[60,10],cantidad:25,precio:2.08,importe:19.5}),null,"no cuadra con el importe");
+ assert.equal(E.descuentoLinea({descuentos:[33.33,10]}),null,"no exacto con 2 decimales");
+ assert.equal(E.descuentoLinea({descuentos:[100]}),null);
+});
+
+test("el descuento de la línea ha de ser el de la orden", ()=>{
+ const p2={...plan,lineas:[{...plan.lineas[0],descuentos:[60,10],precio:2.08,cantidad:25,importe:18.72}]};
+ const a=E.crearAutorizador(E.esperado(p2));
+ const linea=d=>q({id:"",tipo:"ALBARANDEPROVEEDOR",idCliente:"9001",fecha:"22/10/2026",titulo:"123.456 22/10/2026 OBRA FICTICIA",referenciaDocumentoExtra:"123.456",
+  stringIdsProyectos:"555",idDocumentoComercialPadre:"",lineasDocumentoComercial:[{idObjetoCatalogo:"777",unidades:"25",precioBaseTarifa:"2.08",...d}]});
+ assert.equal(a.autorizar("guardarDocumentoComercial",linea({porcentajeDescuento:"60"}))[0],false);
+ assert.equal(a.autorizar("guardarDocumentoComercial",linea({}))[0],false,"sin casilla y con descuento");
+ assert.equal(a.autorizar("guardarDocumentoComercial",linea({porcentajeDescuento:"64,00",precioDescuento:"0.7488"}))[0],true);
 });

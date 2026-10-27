@@ -21,7 +21,7 @@
  * (la regla de entregas parciales y «generar desde el pedido» aún no está automatizada).
  */
 const fs=require("fs"),path=require("path"),{execFileSync}=require("child_process");
-const {permitido,rutaSinDatos,operacion}=require("./guardia.js");
+const {permitido,cancelar,rutaSinDatos,operacion}=require("./guardia.js");
 const E=require("./escritura.js");
 const COLA=process.env.ROBOT_COLA_URL||"https://sbocfjxamjmwabmqbeyw.supabase.co/functions/v1/robot-cola";
 const STEL="https://app.stelorder.com/app/";
@@ -72,12 +72,14 @@ async function abrirStel(dir,autorizador){
  const {chromium}=(()=>{try{return require("playwright");}catch{return require("/opt/node-tools/node_modules/playwright");}})();
  const estado=process.env.STEL_WEB_ESTADO;if(!estado||!fs.existsSync(estado))throw Error("Falta STEL_WEB_ESTADO (entra antes con explorar.js)");
  const nav=await chromium.launch(fs.existsSync("/opt/pw-browsers/chromium")?{executablePath:"/opt/pw-browsers/chromium"}:{});
- const ctx=await nav.newContext({storageState:estado,viewport:{width:1500,height:1000}});
- const registro={canceladas:[],escrituras:[],adjuntoAbierto:false,respuestas:[]};
+ const ctx=await nav.newContext({storageState:estado,viewport:{width:1500,height:1000},serviceWorkers:"block"});
+ const registro={canceladas:[],escrituras:[],adjuntoAbierto:false,respuestas:[],diario:[]};
  const autorizadas=new Set();
  await ctx.route("**/*",async ruta=>{
   const r=ruta.request(),cuerpo=r.postData()||"";
   let op=operacion(cuerpo);if(!op){try{op=new URL(r.url()).searchParams.get("operacion")||"";}catch{}}
+  // Diario de TODAS las peticiones a STEL (método, ruta y operación; nunca datos).
+  try{const u=new URL(r.url());if(/(^|\.)stelorder\.com$/i.test(u.hostname))registro.diario.push(new Date().toISOString().slice(11,23)+" "+r.method()+" "+rutaSinDatos(r.url())+(op?" op="+op:"")+(r.resourceType()?" ["+r.resourceType()+"]":""));}catch{}
   if(!permitido(r.method(),r.url(),"lectura",cuerpo)){
    let u=null;try{u=new URL(r.url());}catch{}
    const deStel=u&&r.method()==="POST"&&/(^|\.)stelorder\.com$/i.test(u.hostname);
@@ -91,13 +93,16 @@ async function abrirStel(dir,autorizador){
      const campos=res[0]||multipart?undefined:[...new URLSearchParams(cuerpo).keys()].slice(0,40);
      registro.escrituras.push({t:new Date().toISOString(),op:multipart?"adjunto":op,permitida:res[0],motivo:res[1],diag:res[2],...(campos?{campos}:{})});
      if(res[0]){autorizadas.add(r);return ruta.continue();}
-     return ruta.abort("blockedbyclient");
+     return cancelar(ruta);
     }
    }
    // De una subida cancelada solo se anotan los NOMBRES de sus campos (nunca valores ni el fichero).
    const campos=multipart?[...new Set(((r.postDataBuffer()||Buffer.alloc(0)).toString("latin1").match(/name="[^"]{1,60}"/g)||[]).map(x=>x.slice(6,-1)))].slice(0,30):undefined;
-   registro.canceladas.push({t:new Date().toISOString(),ruta:rutaSinDatos(r.url()),op:multipart?"(subida)":op,...(campos?{campos}:{})});
-   return ruta.abort("blockedbyclient");
+   let clavesLinea;
+   if(!multipart&&op==="guardarDocumentoComercial"){try{const L=JSON.parse(new URLSearchParams(cuerpo).get("lineasDocumentoComercial")||"[]");clavesLinea=Object.keys(L[0]||{}).slice(0,80);}catch{}}
+   registro.canceladas.push({t:new Date().toISOString(),ruta:rutaSinDatos(r.url()),op:multipart?"(subida)":op,...(campos?{campos}:{}),
+    ...(clavesLinea?{campos_documento:[...new URLSearchParams(cuerpo).keys()].slice(0,80),claves_linea:clavesLinea}:{})});
+   return cancelar(ruta);
   }
   let host="";try{host=new URL(r.url()).hostname;}catch{}
   if(TERCEROS.test(host))return ruta.fulfill({status:200,contentType:"application/javascript",body:SUSTITUTO});
@@ -110,6 +115,9 @@ async function abrirStel(dir,autorizador){
  await p.waitForTimeout(20000);
  if(await p.locator("#form_login_boton:visible").count())throw Error("La sesión de STEL ha caducado: vuelve a entrar con explorar.js");
  const captura=async n=>{const f=path.join(dir,n+".png");await p.screenshot({path:f});return f;};
+ const cerrar=nav.close.bind(nav);
+ // Antes de cerrar, fuera de STEL (página en blanco): que no quede ninguna petición suya en marcha.
+ nav.close=async()=>{try{await p.goto("about:blank",{timeout:15000});await p.waitForTimeout(1000);}catch{}try{fs.writeFileSync(path.join(dir,"diario-"+new Date().toISOString().replace(/[:.]/g,"-")+".txt"),registro.diario.join("\n"));}catch{}return cerrar();};
  return {nav,p,registro,captura};
 }
 
@@ -155,6 +163,7 @@ async function elegirArticulo(p,i,ref){
  const html=await p.locator("#modalObjetosCatalogo_dialog tbody").first().evaluate(e=>e.innerHTML);
  const exactas=(html.match(new RegExp(">"+ref.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"<","g"))||[]).length;
  if((await filas.count())!==1||exactas!==1)throw Error("el selector no da una única fila para "+ref);
+ if(process.env.DETALLE)console.error("DIAG-FILA-ARTICULO",JSON.stringify(await filas.first().evaluate(e=>e.outerHTML.replace(/>[^<]{2,}</g,">…<").slice(0,2500))));
  await p.locator('#modalObjetosCatalogo_dialog tbody tr td.tdBold').first().click({timeout:15000});await p.waitForTimeout(6000);
 }
 
@@ -195,7 +204,10 @@ async function rellenarAlbaran(p,plan,{captura}){
    await p.locator("textarea[name=_descripcionCompleta]:visible").nth(i).fill("PRECIO PENDIENTE (el albarán del proveedor no trae precio)");
   await p.locator("input[name=_precioBaseTarifa]:visible").nth(i).fill(precio.toFixed(2).replace(".",","));await p.keyboard.press("Tab");await p.waitForTimeout(800);
   await p.locator("input[name=_unidades]:visible").nth(i).fill(String(l.cantidad).replace(".",","));await p.keyboard.press("Tab");await p.waitForTimeout(800);
-  if(l.descuentos?.length===1){await p.locator("input[name=_descuento]:visible").nth(i).fill(String(l.descuentos[0]).replace(".",","));await p.keyboard.press("Tab");await p.waitForTimeout(800);}
+  const dto=E.descuentoLinea(l);
+  if(dto==null)throw Error("descuento no representable en la línea "+(i+1));
+  // Tabulador desde el descuento (última casilla) abre una línea nueva en STEL: se confirma hacia atrás.
+  if(dto>0){await p.locator("input[name=_descuento]:visible").nth(i).fill(dto.toFixed(2).replace(".",","));await p.keyboard.press("Shift+Tab");await p.waitForTimeout(800);}
  }
  await p.locator('li:visible:text-is("Más información"), a:visible:text-is("Más información")').first().click();await p.waitForTimeout(3000);
  // El desplegable de la obra está oculto (select2): el del formulario abierto es el último; se comprueba en pantalla.
@@ -212,18 +224,37 @@ async function rellenarAlbaran(p,plan,{captura}){
  // pulsarla; escribir en la casilla oculta no vale. Como una persona: pulsar el título, escribir en el
  // buscador que aparece y confirmar con Intro.
  const tit=E.titulo(plan),campoTit=p.locator("#tituloALBARANDEPROVEEDOR").last();
+ // Solo dentro de la celda del título: las líneas también tienen desplegables del mismo tipo (fallo del
+ // ensayo de 2026-10-27: el título se escribió en una línea y el Intro añadió otra).
+ const celdaTit=p.locator("td:has(#tituloALBARANDEPROVEEDOR)").last();
  for(let i=0;i<3;i++){
   await p.evaluate(()=>window.scrollTo(0,0));await p.waitForTimeout(500);
-  const visible=p.locator('input#tituloALBARANDEPROVEEDOR:visible:not(.select2-offscreen), ul.select2-choices:visible').last();
-  await visible.click({timeout:15000});await p.waitForTimeout(1500);
-  const busca=p.locator("input.select2-input.select2-focused");
-  await busca.first().pressSequentially(tit,{delay:25});await p.waitForTimeout(3000);
-  await p.keyboard.press("Enter");await p.waitForTimeout(2000);
+  await celdaTit.locator("ul.select2-choices:visible, input#tituloALBARANDEPROVEEDOR:visible:not(.select2-offscreen)").first().click({timeout:15000});await p.waitForTimeout(1500);
+  const busca=celdaTit.locator("input.select2-input:visible").first();
+  if(!await busca.count())continue;
+  await busca.fill("");await busca.pressSequentially(tit,{delay:25});await p.waitForTimeout(2500);
+  await busca.press("Enter");await p.waitForTimeout(2000);
   if(await campoTit.inputValue()===tit)break;
  }
  const comp={proveedor:[await p.locator("#nombreClienteALBARANDEPROVEEDOR:visible").inputValue(),nombre],fecha:[await p.locator("#fechaALBARANDEPROVEEDOR:visible").inputValue(),plan.fecha],
   titulo:[await p.locator("#tituloALBARANDEPROVEEDOR").last().inputValue(),tit],ref_proveedor:[await p.locator("#referenciaDocumentoExtraALBARANDEPROVEEDOR:visible").inputValue(),plan.numero]};
  const mal=Object.entries(comp).filter(([,[v,e]])=>v!==e).map(([k])=>k);
+ // STEL añade sola una línea vacía al terminar la última (sin referencia ni nombre de artículo): se
+ // quita con su papelera, como haría una persona (solo en pantalla; nada se guarda todavía).
+ for(let i=0;i<3;i++){
+  const vacias=p.locator("tr:has(input[name=_precioBaseTarifa]:visible)").filter({has:p.locator("input[name=_referenciaObjetoCatalogo]")});
+  let quitada=false;
+  for(let k=(await vacias.count())-1;k>=0;k--){
+   const fila=vacias.nth(k);
+   const ref=await fila.locator("input[name=_referenciaObjetoCatalogo]").first().inputValue(),nom=await fila.locator("textarea[name=_nombreObjetoCatalogo]").first().inputValue();
+   if(ref.trim()||nom.trim())continue;
+   await fila.locator("button.button_soloIconoFichaSinBorde").first().click({timeout:10000});await p.waitForTimeout(1500);
+   await descartarSinGuardar(p);quitada=true;break;
+  }
+  if(!quitada)break;
+ }
+ const lineasForm=await p.locator("input[name=_precioBaseTarifa]:visible").count();
+ if(lineasForm!==plan.lineas.length)mal.push("líneas ("+lineasForm+" en pantalla, "+plan.lineas.length+" en la orden)");
  if(mal.length&&process.env.DETALLE)console.error("DIAGNÓSTICO título:",JSON.stringify(await p.evaluate(()=>[...document.querySelectorAll("#tituloALBARANDEPROVEEDOR")].map(e=>({valor:e.value,clase:e.className,
   visibleContenedor:!!e.parentElement?.offsetParent,padre:(e.parentElement?.outerHTML||"").replace(/value="[^"]*"/g,'value="…"').slice(0,1500),
   select2:typeof window.jQuery?.fn?.select2,datos:(()=>{try{return JSON.stringify(window.jQuery(e).select2("data"));}catch(x){return "ERR "+x.message;}})()})))));
@@ -246,7 +277,7 @@ async function adjuntar(p,registro,fichero){
 async function procesar(dir,orden,{real}){
  const plan=JSON.parse(JSON.stringify(orden.plan));
  if(plan.pedido)return {estado:"PARADO",motivo:"Lleva pedido "+plan.pedido.codigo+": las entregas con pedido aún no se crean solas (regla de entregas parciales)"};
- if(plan.lineas.some(l=>(l.descuentos||[]).length>1))return {estado:"PARADO",motivo:"Línea con varios descuentos: pendiente de automatizar"};
+ if(plan.lineas.some(l=>E.descuentoLinea(l)==null))return {estado:"PARADO",motivo:"Descuentos de una línea que no caben exactos en la casilla de STEL o que no cuadran con su importe"};
  const fichero=path.join(dir,orden.id+".pdf");
  const adj=path.join(dir,"albaran-"+String(plan.numero).replace(/[^0-9A-Za-z]/g,"")+".pdf");
  fs.copyFileSync(fichero,adj);
@@ -281,6 +312,8 @@ async function procesar(dir,orden,{real}){
   if(!real)plan.lineas=plan.lineas.filter(l=>l.articulo?.estado!=="crear");
   await rellenarAlbaran(p,plan,{captura});
   if(!real)registro.botonGuardarAlbaran=await botonGuardar(p).count();
+  // Ensayo: «Guardar» con la guardia cancelando el envío (no se escribe nada), para ver qué campos manda STEL.
+  if(!real&&process.env.ENSAYO_GUARDAR){await botonGuardar(p).first().click({timeout:15000});await p.waitForTimeout(6000);await captura("ensayo-guardar-cancelado");}
   if(!real){
    // Adjunto de ensayo en un albarán YA existente (ENSAYO_ADJUNTO_EN=referencia): la guardia cancela
    // la subida y queda anotado cómo la envía STEL.
@@ -313,7 +346,7 @@ async function principal(){
  if(modo==="ensayo"){
   const orden=JSON.parse(fs.readFileSync(path.join(dir,id+".orden.json"),"utf8"));
   const r=await procesar(dir,orden,{real:false});
-  console.log(JSON.stringify({estado:r.estado,motivo:r.motivo,botones_guardar:{articulo:r.registro?.botonGuardarArticulo,albaran:r.registro?.botonGuardarAlbaran},canceladas:(r.registro?.canceladas||[]).filter(x=>x.op!=="obtenerNuevasNotificacionesPUSH").slice(-8)},null,1));return;
+  console.log(JSON.stringify({estado:r.estado,motivo:r.motivo,botones_guardar:{articulo:r.registro?.botonGuardarArticulo,albaran:r.registro?.botonGuardarAlbaran},canceladas:(r.registro?.canceladas||[]).filter(x=>x.op!=="obtenerNuevasNotificacionesPUSH").slice(-4)},null,1));return;
  }
  if(modo==="crear"){
   const aprobados=JSON.parse(fs.readFileSync(path.join(dir,"aprobados.json"),"utf8"));
@@ -332,4 +365,4 @@ async function principal(){
  }
 }
 if(require.main===module)principal().catch(e=>{console.error("Robot detenido:",String(e?.message||e).slice(0,process.env.DETALLE?3000:300));process.exit(1);});
-module.exports={preparar,procesar};
+module.exports={preparar,procesar,abrirStel,ir,buscarEnLista};
