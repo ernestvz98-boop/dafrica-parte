@@ -9,7 +9,8 @@
  *  - guardarDocumentoComercial: un albarán de proveedor NUEVO, no generado desde otro documento, con el
  *    proveedor, la fecha, el título, la Ref. Documento Proveedor, la obra y exactamente las líneas de
  *    la orden (artículo, unidades y precio); una vez.
- *  - el adjunto: UNA subida de fichero, después de crear el albarán, con el nombre del PDF de la orden.
+ *  - el adjunto: UNA subida del PDF de la orden y UNA petición que lo enlaza a ESE albarán (con su id y el
+ *    nombre del fichero), después de crearlo.
  * Todo lo demás (otra operación, otro valor, un reintento) se cancela. Nunca se modifica ni se borra
  * nada que ya existiera en STEL.
  */
@@ -84,14 +85,24 @@ function crearAutorizador(esp){
    }
    gastado.albaran=true;return [true,"ok",diag];
   }
+  // Adjunto en dos pasos (medido en el ensayo de 2026-10-27): 1) la subida del fichero
+  // (FileUploadServlet, solo el fichero, sin el albarán); 2) la petición que lo enlaza al albarán.
   if(op==="adjunto"){
    const diag={multipart:!!extra.multipart};
    if(!esp.adjunto)return [false,"la orden no lleva adjunto",diag];
    if(gastado.adjunto)return [false,"adjunto ya subido (reintento o repetido)",diag];
    if(!idCreado)return [false,"el albarán aún no está creado",diag];
-   const t=String(extra.cuerpoTexto||"");
-   if(!extra.multipart||!t.includes(esp.adjunto.fichero)||!t.includes(String(idCreado)))return [false,"subida distinta (otro fichero u otro documento)",diag];
+   if(!extra.multipart||!String(extra.cuerpoTexto||"").includes(esp.adjunto.fichero))return [false,"subida distinta (otro fichero)",diag];
    gastado.adjunto=true;return [true,"ok",diag];
+  }
+  if(op==="enlazarAdjunto"){
+   const diag={operacion:String(extra.operacion||"")};
+   if(!gastado.adjunto)return [false,"no hay fichero subido que enlazar",diag];
+   if(gastado.enlace)return [false,"adjunto ya enlazado (reintento o repetido)",diag];
+   if(/eliminar|borrar|cambiarEstado|guardarDocumentoComercial|guardarProducto/i.test(diag.operacion))return [false,"operación que no es un enlace de adjunto",diag];
+   const t=String(extra.cuerpoTexto||"");
+   if(!t.includes(String(idCreado))||!t.includes(esp.adjunto.fichero))return [false,"enlace distinto (otro albarán u otro fichero)",diag];
+   gastado.enlace=true;return [true,"ok",diag];
   }
   return [false,"operación de escritura no autorizada",{}];
  }

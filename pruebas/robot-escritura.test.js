@@ -56,16 +56,22 @@ test("artículos: solo los nuevos de la orden, serie MANUAL, nombre del lector, 
  assert.equal(a.autorizar("guardarProducto",p())[0],false);
 });
 
-test("adjunto: uno, después de crear el albarán, con el PDF de la orden y en ese albarán", ()=>{
+test("adjunto: subida del PDF de la orden y enlace a ESE albarán, una vez cada uno y después de crearlo", ()=>{
  const a=E.crearAutorizador(esp());
  const sub=(t,m=true)=>a.autorizar("adjunto",null,{multipart:m,cuerpoTexto:t});
- assert.equal(sub("filename=\"albaran-123456.pdf\" idDocumento=42")[0],false,"antes de crear el albarán");
+ const enl=(t,op="guardarDocumentoAdjunto")=>a.autorizar("enlazarAdjunto",null,{operacion:op,cuerpoTexto:t});
+ assert.equal(sub('name="file-1"; filename="albaran-123456.pdf"')[0],false,"antes de crear el albarán");
  a.idAlbaran(42);
- assert.equal(sub("filename=\"otro.pdf\" idDocumento=42")[0],false);
- assert.equal(sub("filename=\"albaran-123456.pdf\" idDocumento=43")[0],false);
- assert.equal(sub("filename=\"albaran-123456.pdf\" idDocumento=42",false)[0],false);
- assert.equal(sub("filename=\"albaran-123456.pdf\" idDocumento=42")[0],true);
- assert.equal(sub("filename=\"albaran-123456.pdf\" idDocumento=42")[0],false);
+ assert.equal(enl("idDocumento=42&nombre=albaran-123456.pdf")[0],false,"enlace sin subida");
+ assert.equal(sub('filename="otro.pdf"')[0],false);
+ assert.equal(sub('filename="albaran-123456.pdf"',false)[0],false);
+ assert.equal(sub('name="file-1"; filename="albaran-123456.pdf"')[0],true);
+ assert.equal(sub('name="file-1"; filename="albaran-123456.pdf"')[0],false,"segunda subida");
+ assert.equal(enl("idDocumento=43&nombre=albaran-123456.pdf")[0],false,"otro albarán");
+ assert.equal(enl("idDocumento=42&nombre=otro.pdf")[0],false,"otro fichero");
+ assert.equal(enl("idsDocumentosComerciales=42&nombre=albaran-123456.pdf","eliminarDocumentosComerciales")[0],false,"borrar nunca");
+ assert.equal(enl("idDocumento=42&nombre=albaran-123456.pdf")[0],true);
+ assert.equal(enl("idDocumento=42&nombre=albaran-123456.pdf")[0],false,"segundo enlace");
 });
 
 test("otras escrituras nunca", ()=>{
