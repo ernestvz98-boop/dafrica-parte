@@ -108,3 +108,11 @@ test("guardia: una petición cancelada hacia STEL recibe un 204 local (STEL no l
  await G.cancelar(ruta("https://www.google.com/x"));
  assert.deepEqual(hechos,[["fulfill",204],["abort"]]);
 });
+
+test("guardia: lecturas de STEL con mayúscula inicial pasan; escrituras con mayúscula no", ()=>{
+ const G=require("../robot-stel/guardia.js");
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/FrontController?operacion=ListarClientesPredictivo&q=x"),true);
+ assert.equal(G.permitido("POST","https://app.stelorder.com/app/FrontController","lectura","operacion=ListarObjetosCatalogo"),true);
+ assert.equal(G.permitido("GET","https://app.stelorder.com/app/FrontController?operacion=GuardarCliente"),false);
+ assert.equal(G.permitido("POST","https://app.stelorder.com/app/FrontController","lectura","operacion=ListarYGuardar"),false);
+});

@@ -23,6 +23,7 @@
 const fs=require("fs"),path=require("path"),{execFileSync}=require("child_process");
 const {permitido,cancelar,rutaSinDatos,operacion}=require("./guardia.js");
 const E=require("./escritura.js");
+const C=require("../albaranes/cola-stel.js");
 const COLA=process.env.ROBOT_COLA_URL||"https://sbocfjxamjmwabmqbeyw.supabase.co/functions/v1/robot-cola";
 const STEL="https://app.stelorder.com/app/";
 const TERCEROS=/(^|\.)(google\.com|gstatic\.com|googleapis\.com|gvt1\.com|stripe\.com|google-analytics\.com|googletagmanager\.com|doubleclick\.net|hotjar\.com|facebook\.net|intercom\.io|intercomcdn\.com)$/i;
@@ -143,6 +144,60 @@ async function buscarEnLista(p,q){
  return m?Number(m[1]):null;
 }
 
+// Lista del catálogo con 500 filas por página: las filas {id, referencia, descripcion} de una búsqueda
+// (filas null si no caben en una página o no se pudieron leer todas).
+const POR_PAGINA=500;
+async function abrirCatalogo(p){
+ await ir(p,"#main_catalogo");
+ await p.locator("select[name=cat_tabla_length]:visible").first().selectOption(String(POR_PAGINA));await p.waitForTimeout(8000);
+}
+async function filasCatalogo(p,q){
+ const n=await buscarEnLista(p,q);
+ if(n==null||n>POR_PAGINA)return {n,filas:null};
+ const filas=await p.locator("#cat_tabla:visible tbody tr[id]").evaluateAll(trs=>trs.map(tr=>({id:tr.id,
+  referencia:(tr.querySelector("td:nth-child(3)")?.innerText||"").trim(),descripcion:(tr.querySelector("td.tdTextoLargo")?.innerText||"").trim()})));
+ return {n,filas:filas.length===n?filas:null};
+}
+const canon=t=>String(t??"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+
+/*
+ * Artículo «buscar» (la web leyó el catálogo a medias): la referencia exacta en STEL, si es UNA, se usa.
+ * Si no existe, antes de crearlo se buscan en STEL artículos parecidos con la misma regla que la web
+ * (albaranes/cola-stel.js: referencia a un carácter, mismas cifras, descripción contenida); si hay alguno,
+ * o alguna búsqueda no se puede leer entera, se para. Búsquedas: la referencia, sus dos mitades (un
+ * carácter cambiado deja intacta una de ellas), sus cifras y las palabras de la descripción (de una en
+ * una; si salen más de 500, con la siguiente palabra, hasta tres).
+ */
+async function resolverArticulo(p,l){
+ const {referencia:ref,descripcion:desc}=l.articulo.propuesta,r=canon(ref),cifras=r.replace(/\D/g,"");
+ const vistas=new Map();
+ const leer=async q=>{const x=await filasCatalogo(p,q);if(x.filas)for(const f of x.filas)vistas.set(f.id,f);return x;};
+ const exacta=await leer(ref);
+ if(!exacta.filas)return "no se pudo leer la búsqueda de "+ref+" en STEL";
+ const iguales=exacta.filas.filter(f=>canon(f.referencia)===r);
+ if(iguales.length>1)return "la referencia "+ref+" está "+iguales.length+" veces en STEL";
+ if(iguales.length===1){l.articulo={estado:"existente",item_id:iguales[0].id,via:"robot_stel_referencia"};return null;}
+ const consultas=new Set();
+ if(r.length>=4){consultas.add(r.slice(0,Math.ceil(r.length/2)));consultas.add(r.slice(Math.ceil(r.length/2)));}
+ if(cifras.length>=5)consultas.add(cifras);
+ for(const q of consultas)if(!(await leer(q)).filas)return "demasiados artículos de STEL con «"+q+"» para descartar parecidos de "+ref;
+ const pal=[...new Set(C.palabras(desc))];
+ async function porPalabras(desde,conjunto){
+  for(let i=desde;i<pal.length;i++){
+   const s=[...conjunto,pal[i]],x=await leer(s.join(" "));
+   if(x.n===0||x.filas)continue;
+   if(x.n==null||s.length>=3)return "demasiados artículos de STEL con «"+s.join(" ")+"» para descartar parecidos de "+ref;
+   const e=await porPalabras(i+1,s);if(e)return e;
+  }
+  return null;
+ }
+ const e=await porPalabras(0,[]);if(e)return e;
+ const parecidos=C.parecidosParaAlta(ref,desc,[...vistas.values()]);
+ if(parecidos.length)return "el artículo "+ref+" no está en STEL pero se parece a "+parecidos.map(id=>{const f=vistas.get(String(id));return f.referencia+" «"+f.descripcion+"»";}).join("; ");
+ l.articulo={estado:"crear",item_id:null,via:"robot_stel_sin_parecidos",busquedas:vistas.size,propuesta:{referencia:ref,descripcion:desc}};
+ return null;
+}
+
 // Duplicado: el número del proveedor ya en algún albarán de proveedor de STEL (título o Ref. Documento Proveedor).
 async function hayDuplicado(p,numero){
  await ir(p,"#main_gastosycompras","Albaranes de proveedor");
@@ -155,7 +210,7 @@ async function hayDuplicado(p,numero){
  return null;
 }
 
-// Artículo por referencia exacta en el selector del catálogo de una línea: id si hay UNA fila.
+// Artículo por referencia exacta en el selector del catálogo de una línea (ha de haber UNA fila): su id.
 async function elegirArticulo(p,i,ref){
  await p.locator("#lineaDocumentoComercial_producto:visible").nth(i).click({timeout:15000});await p.waitForTimeout(8000);
  await p.locator("#modalObjetosCatalogo_dialog input.buscadorIndividual:visible").first().fill(ref);await p.keyboard.press("Enter");await p.waitForTimeout(7000);
@@ -163,8 +218,10 @@ async function elegirArticulo(p,i,ref){
  const html=await p.locator("#modalObjetosCatalogo_dialog tbody").first().evaluate(e=>e.innerHTML);
  const exactas=(html.match(new RegExp(">"+ref.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"<","g"))||[]).length;
  if((await filas.count())!==1||exactas!==1)throw Error("el selector no da una única fila para "+ref);
- if(process.env.DETALLE)console.error("DIAG-FILA-ARTICULO",JSON.stringify(await filas.first().evaluate(e=>e.outerHTML.replace(/>[^<]{2,}</g,">…<").slice(0,2500))));
+ // La fila lleva el id del artículo de STEL (el que irá en la línea).
+ const id=await filas.first().getAttribute("id");
  await p.locator('#modalObjetosCatalogo_dialog tbody tr td.tdBold').first().click({timeout:15000});await p.waitForTimeout(6000);
+ return id;
 }
 
 async function crearArticulo(p,ref,nombre){
@@ -184,21 +241,39 @@ const botonGuardar=p=>p.locator("div.toolbar button:visible").filter({hasText:/^
 async function rellenarAlbaran(p,plan,{captura}){
  await ir(p,"#main_gastosycompras","Albaranes de proveedor");
  await p.locator("button.opcionMenuCrear:visible").first().click({timeout:15000});await p.waitForTimeout(12000);
- // Proveedor: la única sugerencia con el nombre exacto de la cuenta de STEL.
- const nombre=plan.proveedor.nombre_stel;
+ // Proveedor: la única sugerencia con el nombre de la cuenta de STEL (o el leído, si STEL no lo dio) y,
+ // elegida, ha de ser la cuenta de la orden (id de cliente del formulario).
+ const nombre=plan.proveedor.nombre_stel||plan.proveedor.nombre_leido;
+ if(!nombre)throw Error("orden sin nombre de proveedor");
+ // Sugerencias de cuentas existentes cuyo nombre empieza igual que el de la orden (sin signos: «ACME
+ // SUMINISTROS» vale para «ACME SUMINISTROS, S.L.»); nunca la de «Nuevo proveedor» (crearía uno).
+ const sugerencias=async()=>{
+  const t=await p.locator("td.nombrePredictivo:visible").evaluateAll(tds=>tds.map(td=>({texto:td.innerText,fila:(td.closest("tr")||td).innerText})));
+  const n=canon(nombre);
+  return t.map((x,i)=>({...x,i})).filter(x=>!/nuevo\s+proveedor/i.test(x.fila)&&x.texto.split("\n").map(canon).some(c=>c.length>=6&&(n.startsWith(c)||c.startsWith(n)))).map(x=>x.i);
+ };
  let ok=false;
+ const campoProv=p.locator("#nombreClienteALBARANDEPROVEEDOR:visible");
  for(let i=0;i<3&&!ok;i++){
-  await p.locator("#nombreClienteALBARANDEPROVEEDOR:visible").fill("");await p.waitForTimeout(1000);
-  await p.locator("#nombreClienteALBARANDEPROVEEDOR:visible").pressSequentially(nombre.slice(0,14),{delay:60});await p.waitForTimeout(6000);
-  ok=(await p.locator("td.nombrePredictivo:visible").filter({hasText:nombre}).count())===1;
+  // Pulsar, vaciar y escribir con calma (fallo real: se perdía la primera letra); esperar a que STEL busque.
+  // La casilla se convierte en desplegable con buscador al activarla: activarla, esperar y escribir
+  // donde STEL deja el cursor (el buscador o la propia casilla).
+  await campoProv.evaluate(e=>{e.value="";e.focus();});await p.waitForTimeout(1500);
+  await p.keyboard.press("Control+A");await p.keyboard.press("Backspace");
+  await p.keyboard.type(nombre.slice(0,14),{delay:90});
+  for(let t=0;t<15&&!ok;t++){await p.waitForTimeout(1000);ok=(await sugerencias()).length===1;}
  }
  if(!ok)throw Error("la sugerencia del proveedor no es única");
- await p.locator("td.nombrePredictivo:visible").filter({hasText:nombre}).first().click();await p.waitForTimeout(6000);
+ await p.locator("td.nombrePredictivo:visible").nth((await sugerencias())[0]).click();await p.waitForTimeout(6000);
+ const idCliente=await campoProv.evaluate(e=>{for(let a=e.parentElement;a;a=a.parentElement){const c=a.querySelector("#idCliente");if(c)return c.textContent.trim();}return "";});
+ if(idCliente!==String(plan.proveedor.account_id))throw Error("el proveedor elegido no es la cuenta de la orden");
  await p.locator("#fechaALBARANDEPROVEEDOR:visible").fill(plan.fecha);await p.waitForTimeout(800);
  await p.locator("#referenciaDocumentoExtraALBARANDEPROVEEDOR:visible").fill(plan.numero);await p.waitForTimeout(1000);
  for(const [i,l] of plan.lineas.entries()){
   if(i){await p.getByText("Nueva línea",{exact:true}).first().click();await p.waitForTimeout(3000);}
-  await elegirArticulo(p,i,l.referencia_stel||l.referencia);
+  const id=await elegirArticulo(p,i,l.referencia_stel||l.articulo.propuesta?.referencia||l.referencia);
+  if(l.articulo.item_id!=null&&String(l.articulo.item_id)!==String(id))throw Error("el artículo elegido en la línea "+(i+1)+" no es el de la orden");
+  l.articulo.item_id=id;
   const precio=Number.isFinite(l.precio)?l.precio:Number.isFinite(l.precio_pedido)?l.precio_pedido:0;
   if(!Number.isFinite(l.precio)&&!Number.isFinite(l.precio_pedido))
    await p.locator("textarea[name=_descripcionCompleta]:visible").nth(i).fill("PRECIO PENDIENTE (el albarán del proveedor no trae precio)");
@@ -212,6 +287,13 @@ async function rellenarAlbaran(p,plan,{captura}){
  await p.locator('li:visible:text-is("Más información"), a:visible:text-is("Más información")').first().click();await p.waitForTimeout(3000);
  // El desplegable de la obra está oculto (select2): el del formulario abierto es el último; se comprueba en pantalla.
  const sel=p.locator("#selectProyectos").last();
+ // Sin id de STEL en la orden: el proyecto cuyo nombre termina en «(código)», solo si es uno.
+ if(plan.obra.stel_id==null){
+  const cod="("+String(plan.obra.codigo).toUpperCase()+")";
+  const ops=await sel.evaluate((e,c)=>[...e.options].filter(o=>o.text.trim().toUpperCase().endsWith(c)).map(o=>({id:o.value,texto:o.text.trim()})),cod);
+  if(ops.length!==1)throw Error(ops.length?"la obra "+plan.obra.codigo+" está "+ops.length+" veces en los proyectos de STEL":"la obra "+plan.obra.codigo+" no está en los proyectos de STEL");
+  plan.obra.stel_id=ops[0].id;plan.obra.nombre=ops[0].texto.slice(0,-cod.length).trim().slice(0,150)||null;
+ }
  await sel.selectOption(String(plan.obra.stel_id),{force:true});await sel.dispatchEvent("change");await p.waitForTimeout(2000);
  const obraVista=await sel.evaluate(e=>e.options[e.selectedIndex]?.text||"");
  if(!obraVista.toUpperCase().includes(String(plan.obra.codigo).toUpperCase())&&!obraVista.toUpperCase().includes(String(plan.obra.nombre||"").toUpperCase().slice(0,10)))
@@ -236,7 +318,7 @@ async function rellenarAlbaran(p,plan,{captura}){
   await busca.press("Enter");await p.waitForTimeout(2000);
   if(await campoTit.inputValue()===tit)break;
  }
- const comp={proveedor:[await p.locator("#nombreClienteALBARANDEPROVEEDOR:visible").inputValue(),nombre],fecha:[await p.locator("#fechaALBARANDEPROVEEDOR:visible").inputValue(),plan.fecha],
+ const comp={proveedor:[!!(await p.locator("#nombreClienteALBARANDEPROVEEDOR:visible").inputValue()).trim(),true],fecha:[await p.locator("#fechaALBARANDEPROVEEDOR:visible").inputValue(),plan.fecha],
   titulo:[await p.locator("#tituloALBARANDEPROVEEDOR").last().inputValue(),tit],ref_proveedor:[await p.locator("#referenciaDocumentoExtraALBARANDEPROVEEDOR:visible").inputValue(),plan.numero]};
  const mal=Object.entries(comp).filter(([,[v,e]])=>v!==e).map(([k])=>k);
  // STEL añade sola una línea vacía al terminar la última (sin referencia ni nombre de artículo): se
@@ -278,24 +360,37 @@ async function procesar(dir,orden,{real}){
  const plan=JSON.parse(JSON.stringify(orden.plan));
  if(plan.pedido)return {estado:"PARADO",motivo:"Lleva pedido "+plan.pedido.codigo+": las entregas con pedido aún no se crean solas (regla de entregas parciales)"};
  if(plan.lineas.some(l=>E.descuentoLinea(l)==null))return {estado:"PARADO",motivo:"Descuentos de una línea que no caben exactos en la casilla de STEL o que no cuadran con su importe"};
+ if(!plan.obra?.codigo)return {estado:"PARADO",motivo:"Orden sin obra"};
  const fichero=path.join(dir,orden.id+".pdf");
  const adj=path.join(dir,"albaran-"+String(plan.numero).replace(/[^0-9A-Za-z]/g,"")+".pdf");
  fs.copyFileSync(fichero,adj);
- const ids={};
- const autorizador=real?E.crearAutorizador(E.esperado(plan,{ids:Object.fromEntries(plan.lineas.filter(l=>l.articulo?.estado==="crear").map(l=>[l.referencia,"pendiente"])),fichero:path.basename(adj)})):null;
- const {nav,p,registro,captura}=await abrirStel(dir,autorizador);
+ // Autorizador por pasos: nada hasta saber qué artículos se crean; luego solo esas altas; con el albarán
+ // relleno (obra y artículos con su id de STEL), solo ese albarán y su adjunto.
+ const autorizador={actual:null,autorizar:(...a)=>autorizador.actual?autorizador.actual.autorizar(...a):[false,"aún no hay escrituras autorizadas",{}]};
+ const {nav,p,registro,captura}=await abrirStel(dir,real?autorizador:null);
  try{return await pasos();}
  catch(e){await captura("error").catch(()=>{});throw e;}
  finally{await nav.close();}
  async function pasos(){
   const dup=await hayDuplicado(p,plan.numero);
   if(dup)return {estado:"PARADO",motivo:"Posible duplicado: "+dup,registro};
-  // Artículos nuevos: se vuelve a buscar la referencia en STEL; si apareció, se usa ese.
-  for(const l of plan.lineas.filter(l=>l.articulo?.estado==="crear")){
+  // Artículos: los «buscar» se resuelven en STEL (referencia exacta o alta sin parecidos); los «crear» se
+  // vuelven a buscar (si apareció, se para).
+  if(plan.lineas.some(l=>["buscar","crear"].includes(l.articulo?.estado)))await abrirCatalogo(p);
+  const paradas=[];
+  for(const l of plan.lineas){
+   if(l.articulo?.estado==="buscar"){const m=await resolverArticulo(p,l);if(m)paradas.push(m);}
+   else if(l.articulo?.estado==="crear"){
+    const ref=l.articulo.propuesta.referencia,x=await filasCatalogo(p,ref);
+    if(x.n!==0)return {estado:"PARADO",motivo:"El artículo "+ref+" aparece ahora en STEL ("+x.n+"): revisar antes de crear",registro};
+   }else if(l.articulo?.estado!=="existente")return {estado:"PARADO",motivo:"Línea "+l.fila+" sin artículo resuelto",registro};
+  }
+  if(paradas.length)return {estado:"PARADO",motivo:paradas.join(" · "),registro};
+  registro.articulos=plan.lineas.map(l=>({referencia:l.referencia,estado:l.articulo.estado,via:l.articulo.via}));
+  autorizador.actual=E.crearAutorizador(E.soloProductos(plan));
+  const ids={};
+  for(const l of plan.lineas.filter(l=>l.articulo.estado==="crear")){
    const ref=l.articulo.propuesta.referencia;
-   await ir(p,"#main_catalogo");
-   const n=await buscarEnLista(p,ref);
-   if(n!==0)return {estado:"PARADO",motivo:"El artículo "+ref+" aparece ahora en STEL ("+n+"): revisar antes de crear",registro};
    await crearArticulo(p,ref,l.articulo.propuesta.descripcion);
    await captura("articulo-"+ref.replace(/[^0-9A-Za-z]/g,"")+"-antes-de-guardar");
    if(!real){registro.botonGuardarArticulo=await botonGuardar(p).count();continue;}
@@ -306,11 +401,11 @@ async function procesar(dir,orden,{real}){
    if(!id)return {estado:"ERROR",motivo:"No se pudo confirmar el alta del artículo "+ref,registro};
    ids[ref]=id;l.articulo.item_id=id;
   }
-  // Con los ids de los artículos ya creados: autorizador del albarán y del adjunto (sin más altas).
-  if(real){const e=E.esperado(plan,{ids,fichero:path.basename(adj)});e.productos={};Object.assign(autorizador,E.crearAutorizador(e));}
+  autorizador.actual=null;
   // En el ensayo los artículos nuevos no se guardan: el albarán se rellena solo con los existentes.
   if(!real)plan.lineas=plan.lineas.filter(l=>l.articulo?.estado!=="crear");
   await rellenarAlbaran(p,plan,{captura});
+  registro.obra={codigo:plan.obra.codigo,stel_id:plan.obra.stel_id,nombre:plan.obra.nombre};
   if(!real)registro.botonGuardarAlbaran=await botonGuardar(p).count();
   // Ensayo: «Guardar» con la guardia cancelando el envío (no se escribe nada), para ver qué campos manda STEL.
   if(!real&&process.env.ENSAYO_GUARDAR){await botonGuardar(p).first().click({timeout:15000});await p.waitForTimeout(6000);await captura("ensayo-guardar-cancelado");}
@@ -323,19 +418,22 @@ async function procesar(dir,orden,{real}){
     await p.getByText(process.env.ENSAYO_ADJUNTO_EN,{exact:true}).first().click({timeout:15000});await p.waitForTimeout(8000);
     await adjuntar(p,registro,adj);await captura("adjunto-ensayo");
    }
-   return {estado:"ENSAYO",motivo:"Relleno sin guardar",registro};
+   return {estado:"ENSAYO",motivo:"Relleno sin guardar",registro,plan};
   }
+  // Con la obra y los artículos que se ven en pantalla: el albarán exacto y su adjunto (sin más altas).
+  const e=E.esperado(plan,{ids,fichero:path.basename(adj)});e.productos={};
+  autorizador.actual=E.crearAutorizador(e);
   const antes=registro.respuestas.length;
   await botonGuardar(p).first().click({timeout:15000});await p.waitForTimeout(12000);
   const resp=registro.respuestas.slice(antes).find(x=>x.op==="guardarDocumentoComercial");
   const id=resp?.texto.match(/"id"\s*:\s*"?(\d+)/)?.[1];
   if(!id)return {estado:"ERROR",motivo:"No se pudo confirmar el albarán creado",registro};
-  autorizador.idAlbaran(id);
+  autorizador.actual.idAlbaran(id);
   const referencia=await p.locator("#referencia").first().inputValue().catch(()=>"");
   await adjuntar(p,registro,adj);
-  const adjOk=autorizador.gastado.adjunto&&autorizador.gastado.enlace&&(await p.locator("body").innerText()).includes(path.basename(adj));
+  const adjOk=autorizador.actual.gastado.adjunto&&autorizador.actual.gastado.enlace&&(await p.locator("body").innerText()).includes(path.basename(adj));
   await captura("albaran-creado");
-  return {estado:"CREADO",stel_id:Number(id),stel_referencia:referencia||null,adjunto:adjOk,registro};
+  return {estado:"CREADO",stel_id:Number(id),stel_referencia:referencia||null,adjunto:adjOk,registro,plan};
  }
 }
 
@@ -346,7 +444,7 @@ async function principal(){
  if(modo==="ensayo"){
   const orden=JSON.parse(fs.readFileSync(path.join(dir,id+".orden.json"),"utf8"));
   const r=await procesar(dir,orden,{real:false});
-  console.log(JSON.stringify({estado:r.estado,motivo:r.motivo,botones_guardar:{articulo:r.registro?.botonGuardarArticulo,albaran:r.registro?.botonGuardarAlbaran},canceladas:(r.registro?.canceladas||[]).filter(x=>x.op!=="obtenerNuevasNotificacionesPUSH").slice(-4)},null,1));return;
+  console.log(JSON.stringify({estado:r.estado,motivo:r.motivo,articulos:r.registro?.articulos,obra:r.registro?.obra,botones_guardar:{articulo:r.registro?.botonGuardarArticulo,albaran:r.registro?.botonGuardarAlbaran},canceladas:(r.registro?.canceladas||[]).filter(x=>x.op!=="obtenerNuevasNotificacionesPUSH").slice(-4)},null,1));return;
  }
  if(modo==="crear"){
   const aprobados=JSON.parse(fs.readFileSync(path.join(dir,"aprobados.json"),"utf8"));

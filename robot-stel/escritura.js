@@ -52,10 +52,16 @@ function esperado(plan,{ids={},fichero=null}={}){
   if(descuento==null)throw Error("Descuento no representable en STEL: "+l.referencia);
   return {id:String(id),unidades:l.cantidad,precio,descuento};
  });
- const productos={};
- for(const l of plan.lineas)if(l.articulo?.estado==="crear")productos[l.articulo.propuesta.referencia]=l.articulo.propuesta.descripcion;
+ const {productos}=soloProductos(plan);
  return {albaran:{idCliente:String(plan.proveedor.account_id),fecha:plan.fecha,titulo:titulo(plan),referenciaDocumentoExtra:plan.numero,
   stringIdsProyectos:String(plan.obra.stel_id),lineas},productos,adjunto:fichero?{fichero}:null};
+}
+
+// Solo las altas de artículos de la orden (antes de rellenar el albarán, cuando aún no se sabe el id de la obra).
+function soloProductos(plan){
+ const productos={};
+ for(const l of plan.lineas)if(l.articulo?.estado==="crear")productos[l.articulo.propuesta.referencia]=l.articulo.propuesta.descripcion;
+ return {albaran:null,productos,adjunto:null};
 }
 
 // Título del albarán en STEL: «número fecha obra» (como los que escribe la oficina) y el pedido si lo hay.
@@ -85,6 +91,7 @@ function crearAutorizador(esp){
    const A=esp.albaran;let L;try{L=JSON.parse(q.get("lineasDocumentoComercial")||"");}catch{L=null;}
    const diag={id:q.get("id"),tipo:q.get("tipo"),idCliente:q.get("idCliente"),titulo:q.get("titulo"),referenciaDocumentoExtra:q.get("referenciaDocumentoExtra"),
     stringIdsProyectos:q.get("stringIdsProyectos"),idDocumentoComercialPadre:q.get("idDocumentoComercialPadre"),lineas:diagLineas(L)};
+   if(!A)return [false,"la orden aún no autoriza el albarán (primero los artículos)",diag];
    if(gastado.albaran)return [false,"ya creado (reintento o repetido)",diag];
    if(!nuevo(q.get("id")))return [false,"no es un albarán nuevo (modificaría uno existente)",diag];
    if(q.get("tipo")!=="ALBARANDEPROVEEDOR")return [false,"tipo de documento distinto",diag];
@@ -131,4 +138,4 @@ function crearAutorizador(esp){
  return {autorizar,gastado,idAlbaran:id=>{idCreado=id==null?null:String(id);}};
 }
 
-module.exports={esperado,crearAutorizador,titulo,descuentoLinea};
+module.exports={esperado,soloProductos,crearAutorizador,titulo,descuentoLinea};

@@ -15,7 +15,7 @@ function doc(cambios={}){
   ...cambios.resultado};
  return {archivo:"ficticio.pdf",paginas:[1],estado_documento:"AUTO_OK",...cambios,resultado:r};
 }
-const catalogo={articulos_completo:true,proveedores:[{id:9001,nombre:"SUMINISTROS FICTICIOS, S.L."}],
+const catalogo={articulos_completo:true,obras_completo:true,proveedores:[{id:9001,nombre:"SUMINISTROS FICTICIOS, S.L."}],
  obras:[{id:555,codigo:"PRY09999",nombre:"OBRA FICTICIA"}],
  articulos:[{id:777,referencia:"REF-001",descripcion:"TUBO FICTICIO 20MM"},{id:778,referencia:"OTRA-9",descripcion:"CODO FICTICIO"}]};
 
@@ -73,7 +73,7 @@ test("pedido leído y sin validar: REVISAR", ()=>{
  assert.equal(o.estado,"REVISAR");assert.match(o.motivos.join(),/PAP/);
 });
 
-test("artículo nuevo sin parecidos: se propone crearlo; con parecidos o catálogo incompleto: REVISAR", ()=>{
+test("artículo nuevo sin parecidos: se propone crearlo; con parecidos: REVISAR; con catálogo incompleto lo busca el robot", ()=>{
  const nuevo=doc();nuevo.resultado.lineas[0].referencia=ok("ZZ-12345");nuevo.resultado.lineas[0].descripcion=ok("VALVULA FICTICIA ESFERA");
  const o=C.orden(nuevo,catalogo);
  assert.equal(o.estado,"PENDIENTE",o.motivos.join("; "));
@@ -82,7 +82,7 @@ test("artículo nuevo sin parecidos: se propone crearlo; con parecidos o catálo
  const parecido=doc();parecido.resultado.lineas[0].referencia=ok("REF-0001");parecido.resultado.lineas[0].descripcion=ok("TUBO FICTICIO 20MM GRIS");
  const p=C.orden(parecido,catalogo);
  assert.equal(p.estado,"REVISAR");assert.equal(p.plan.lineas[0].articulo.estado,"revisar");
- assert.equal(C.orden(nuevo,{...catalogo,articulos_completo:false}).estado,"REVISAR");
+ assert.equal(C.orden(nuevo,{...catalogo,articulos_completo:false}).plan.lineas[0].articulo.estado,"buscar");
 });
 
 test("ya está en STEL (ABP encontrado por el lector): YA_EXISTE, no se crea otro", ()=>{
@@ -109,4 +109,30 @@ test("alta automática más estricta: una referencia a un carácter o con las mi
  assert.equal(C.orden(d,cifras).estado,"REVISAR");
  assert.equal(con("ZZ-777","TUBO FICTICIO 20MM GRIS CLARO").estado,"REVISAR");
  assert.equal(con("ZZ-12345","VALVULA FICTICIA ESFERA").estado,"PENDIENTE");
+});
+
+test("Fase 2: la falta del ABP escrito no impide el automático si es lo único y la búsqueda en STEL fue completa", ()=>{
+ const d=doc({estado_documento:"REVISAR",resultado:{fiable:true,confianza:0.95,incidencias:["Código manuscrito no detectado: STEL (ABP); comprueba el papel"]}});
+ assert.equal(C.orden(d,catalogo,{busquedaStelCompleta:true}).estado,"PENDIENTE");
+ assert.equal(C.orden(d,catalogo,{busquedaStelCompleta:false}).estado,"REVISAR","sin búsqueda completa");
+ const otra=doc({estado_documento:"REVISAR",resultado:{fiable:true,confianza:0.95,incidencias:["Código manuscrito no detectado: STEL (ABP); comprueba el papel","Confianza del documento 0.75 < 0.9: requiere revisión"]}});
+ assert.equal(C.orden(otra,catalogo,{busquedaStelCompleta:true}).estado,"REVISAR","otra incidencia");
+ const obra=doc({estado_documento:"REVISAR",resultado:{fiable:true,confianza:0.95,incidencias:["Código manuscrito no detectado: obra (PRY), STEL (ABP); comprueba el papel"]}});
+ assert.equal(C.orden(obra,catalogo,{busquedaStelCompleta:true}).estado,"REVISAR","falta también la obra");
+ const baja=doc({estado_documento:"REVISAR",resultado:{fiable:false,confianza:0.75,incidencias:["Código manuscrito no detectado: STEL (ABP); comprueba el papel"]}});
+ assert.equal(C.orden(baja,catalogo,{busquedaStelCompleta:true}).estado,"REVISAR","documento poco fiable");
+});
+
+test("sin la lista de proyectos de STEL: la obra validada va sin id (la elige el robot); con lista completa sin ella, REVISAR", ()=>{
+ const o=C.orden(doc(),{...catalogo,obras:[],obras_completo:false});
+ assert.equal(o.estado,"PENDIENTE");assert.deepEqual(o.plan.obra,{codigo:"PRY09999",stel_id:null,nombre:null});
+ assert.equal(C.orden(doc({resultado:{manuscritos:{obra:ok("PRY01111")}}}),{...catalogo,obras_completo:true}).estado,"REVISAR");
+});
+
+test("catálogo leído a medias: el artículo no encontrado lo busca el robot en STEL", ()=>{
+ const d=doc();d.resultado.lineas[0].referencia=ok("ZZ-12345");d.resultado.lineas[0].descripcion=ok("VALVULA FICTICIA ESFERA");
+ const o=C.orden(d,{...catalogo,articulos_completo:false});
+ assert.equal(o.estado,"PENDIENTE",o.motivos.join("; "));
+ assert.equal(o.plan.lineas[0].articulo.estado,"buscar");
+ assert.equal(o.plan.lineas[0].articulo.item_id,null);
 });

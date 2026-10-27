@@ -70,13 +70,24 @@ function clave(r){
  * doc: {archivo, paginas, estado_documento, resultado} de la lectura.
  * catalogo: {articulos:[{id,referencia,descripcion}], articulos_completo, proveedores:[{id,nombre}],
  *            obras:[{id,codigo,nombre}]} (el de la lectura; sin precios).
+ * opciones.busquedaStelCompleta: la búsqueda de albaranes de compra de STEL de esta lectura terminó
+ *   completa (sin ella, la falta del ABP escrito a mano sigue impidiendo el automático).
  * Devuelve {clave, estado: PENDIENTE|REVISAR|YA_EXISTE, motivos:[…], plan}.
  */
-function orden(doc,catalogo){
+// En la Fase 2 el ABP lo crea el robot: un albarán nuevo nunca lo trae escrito. Si es lo ÚNICO que
+// falta (documento fiable, confianza ≥ 0,9) y la búsqueda del número del proveedor en STEL fue completa
+// y no lo encontró, no impide el automático (el robot vuelve a buscar el número antes de crear).
+const SOLO_FALTA_ABP=/^Código manuscrito no detectado: STEL \(ABP\); comprueba el papel$/;
+function soloFaltaAbp(doc,opciones){
+ const r=doc?.resultado;
+ return doc?.estado_documento==="REVISAR"&&!!opciones?.busquedaStelCompleta&&r?.fiable===true&&(r.confianza??0)>=0.9&&
+  (r.incidencias||[]).length>0&&(r.incidencias||[]).every(i=>SOLO_FALTA_ABP.test(String(i)));
+}
+function orden(doc,catalogo,opciones={}){
  const r=doc?.resultado,motivos=[];
  if(!r)return {clave:null,estado:"REVISAR",motivos:["Documento sin lectura"],plan:null};
  const cat=catalogo||{};
- if(doc.estado_documento!=="AUTO_OK")motivos.push("El lector no lo da por bueno ("+(doc.estado_documento||"sin estado")+")");
+ if(doc.estado_documento!=="AUTO_OK"&&!soloFaltaAbp(doc,opciones))motivos.push("El lector no lo da por bueno ("+(doc.estado_documento||"sin estado")+")");
  // Proveedor: la cuenta de STEL verificada por el lector.
  const p=r.proveedor||{},cuenta=p.account_id??null;
  const provStel=cuenta!=null?(cat.proveedores||[]).find(x=>String(x.id)===String(cuenta)):null;
@@ -90,7 +101,11 @@ function orden(doc,catalogo){
  const ob=r.manuscritos?.obra,codObra=ob?.estado==="OK"?canon(ob.valor):"";
  let obra=null;
  if(!codObra)motivos.push("Obra (PRY) sin validar");
- else{
+ else if(!cat.obras_completo){
+  // Sin la lista de proyectos de STEL en esta lectura: el robot elige en STEL el proyecto cuyo nombre
+  // termina en «(código)», solo si es uno (o se para).
+  obra={codigo:codObra,stel_id:null,nombre:null};
+ }else{
   const cands=(cat.obras||[]).filter(o=>canon(o.codigo)===codObra);
   if(cands.length!==1)motivos.push(cands.length?"Obra "+codObra+" repetida en STEL":"Obra "+codObra+" no encontrada en los proyectos de STEL");
   else obra={codigo:codObra,stel_id:cands[0].id,nombre:String(cands[0].nombre||"").slice(0,150)};
@@ -115,7 +130,11 @@ function orden(doc,catalogo){
    const parecidos=a.estado==="crear"?parecidosParaAlta(ref,desc,cat.articulos):[];
    articulo=a.estado==="crear"&&!parecidos.length?{estado:"crear",item_id:null,via:a.via,propuesta:{referencia:a.propuesta_alta.reference,descripcion:a.propuesta_alta.name}}:
     a.estado==="crear"?{estado:"revisar",item_id:null,via:"anti_duplicados_alta",candidatos:parecidos,motivo:"se parece a "+parecidos.length+" artículo(s) de STEL"}:
-    a.item_id!=null&&a.estado!=="revision_articulo"?{estado:"existente",item_id:a.item_id,via:a.via}:{estado:"revisar",item_id:null,via:a.via,motivo:a.motivo};
+    a.item_id!=null&&a.estado!=="revision_articulo"?{estado:"existente",item_id:a.item_id,via:a.via}:
+    // Catálogo leído a medias: el robot busca la referencia exacta en STEL (una fila) o, si no existe,
+    // artículos parecidos en STEL antes de crearlo (si hay alguno, se para).
+    a.via==="catalogo_incompleto"&&ref&&desc?{estado:"buscar",item_id:null,via:"robot_stel",propuesta:{referencia:ref,descripcion:desc}}:
+    {estado:"revisar",item_id:null,via:a.via,motivo:a.motivo};
   }
   if(articulo.estado==="revisar")motivos.push("Línea "+(i+1)+": artículo dudoso en STEL ("+(articulo.motivo||articulo.via)+")");
   return {fila:i+1,pagina:l.pagina??null,referencia:ref,descripcion:desc,cantidad:Number.isFinite(cant)?cant:null,unidad:texto(l.unidad)||null,
@@ -132,5 +151,5 @@ function orden(doc,catalogo){
  return {clave:clave(r),estado,motivos,plan};
 }
 
-return {VERSION,orden,clave,fechaStel};
+return {VERSION,orden,clave,fechaStel,soloFaltaAbp,parecidosParaAlta,palabras};
 });

@@ -317,7 +317,7 @@ function montar(root){
   const ordenes=[];
   for(const d of r.documentos){
    if(!d.resultado)continue;
-   const o=lib.colaStel.orden(d,catalogo);
+   const o=lib.colaStel.orden(d,catalogo,{busquedaStelCompleta:!!r.motores?.stel_compras?.completo});
    if(!o.clave||!o.plan){info.sin_clave++;d.cola_stel={estado:"SIN_ENVIAR",motivos:o.motivos};continue;}
    ordenes.push({d,o});
   }

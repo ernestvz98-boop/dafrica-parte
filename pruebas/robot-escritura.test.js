@@ -107,3 +107,14 @@ test("el descuento de la línea ha de ser el de la orden", ()=>{
  assert.equal(a.autorizar("guardarDocumentoComercial",linea({}))[0],false,"sin casilla y con descuento");
  assert.equal(a.autorizar("guardarDocumentoComercial",linea({porcentajeDescuento:"64,00",precioDescuento:"0.7488"}))[0],true);
 });
+
+test("por pasos: primero solo las altas de artículos (ningún albarán todavía)", ()=>{
+ const a=E.crearAutorizador(E.soloProductos(plan));
+ assert.equal(a.autorizar("guardarDocumentoComercial",albaran())[0],false);
+ assert.equal(a.autorizar("guardarProducto",q({idProducto:"",idSerie:"-2",referencia:"ZZ-1",nombre:"VALVULA FICTICIA"}))[0],true);
+ assert.equal(a.autorizar("adjunto",null,{multipart:true,cuerpoTexto:'filename="albaran-123456.pdf"'})[0],false);
+});
+
+test("obra sin id de STEL: no se autoriza ningún albarán hasta conocerlo", ()=>{
+ assert.throws(()=>E.esperado({...plan,obra:{codigo:"PRY09999",stel_id:null,nombre:null}},{ids:{"ZZ-1":888}}),/incompleta/);
+});

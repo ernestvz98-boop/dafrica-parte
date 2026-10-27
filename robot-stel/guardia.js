@@ -46,6 +46,8 @@ function soloPlantilla(cuerpo){
  const claves=[...p.keys()];
  return claves.length===1&&claves[0]==="id"&&/^[A-Za-z0-9_\/.-]{1,120}\.html$/.test(p.get("id"))&&!p.get("id").includes("..");
 }
+// La web de STEL escribe algunas lecturas con mayúscula inicial («ListarClientesPredictivo»).
+const esLectura=op=>VERBO_LECTURA.test(String(op).charAt(0).toLowerCase()+String(op).slice(1))&&!AUTENTICACION.test(op);
 function operacion(cuerpo){try{return new URLSearchParams(String(cuerpo||"")).get("operacion")||"";}catch{return "";}}
 function permitido(metodo,url,fase="lectura",cuerpo=""){
  const m=String(metodo||"").toUpperCase();
@@ -58,7 +60,7 @@ function permitido(metodo,url,fase="lectura",cuerpo=""){
   const opUrl=[...u.searchParams.entries()].filter(([k])=>/^operaci[oó]n$|^op$|^accion$|^action$/i.test(k)).map(([,v])=>v);
   // Canal de operaciones o servlet de ficheros por GET: solo con una operación de lectura explícita.
   if((CANAL.test(u.pathname)||/Servlet$|\.do$/i.test(u.pathname))&&(!opUrl.length||ESCRITURA.test(u.pathname)))return false;
-  return opUrl.every(op=>!ESCRITURA.test(op)&&(OPERACIONES_LECTURA.has(op)||(VERBO_LECTURA.test(op)&&!AUTENTICACION.test(op))||(fase==="entrada"&&(OPERACIONES_ENTRADA.has(op)||AUTENTICACION.test(op)))));
+  return opUrl.every(op=>!ESCRITURA.test(op)&&(OPERACIONES_LECTURA.has(op)||esLectura(op)||(fase==="entrada"&&(OPERACIONES_ENTRADA.has(op)||AUTENTICACION.test(op)))));
  }
  if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&PLANTILLA.test(u.pathname))return soloPlantilla(cuerpo);
  if(m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&CANAL.test(u.pathname)){
@@ -66,7 +68,7 @@ function permitido(metodo,url,fase="lectura",cuerpo=""){
   const op=operacion(cuerpo)||u.searchParams.get("operacion")||"";
   if(!op||ESCRITURA.test(op))return false;
   // Entrada con código de verificación por correo (doble factor): solo operaciones de autenticación.
-  return OPERACIONES_LECTURA.has(op)||(VERBO_LECTURA.test(op)&&!AUTENTICACION.test(op))||(fase==="entrada"&&(OPERACIONES_ENTRADA.has(op)||AUTENTICACION.test(op)));
+  return OPERACIONES_LECTURA.has(op)||esLectura(op)||(fase==="entrada"&&(OPERACIONES_ENTRADA.has(op)||AUTENTICACION.test(op)));
  }
  if(fase==="entrada"&&m==="POST"&&u.protocol==="https:"&&esStel(u.hostname)&&ENTRADA.test(u.pathname))return true;
  return false;
