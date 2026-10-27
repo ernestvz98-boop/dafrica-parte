@@ -448,6 +448,8 @@ async function principal(){
  }
  if(modo==="crear"){
   const aprobados=JSON.parse(fs.readFileSync(path.join(dir,"aprobados.json"),"utf8"));
+  // Antes de tomar ningún albarán de la cola: la sesión de STEL ha de seguir abierta (si no, nada cambia).
+  {const {nav}=await abrirStel(dir,null);await nav.close();}
   for(const [cid,dec] of Object.entries(aprobados)){
    const orden=JSON.parse(fs.readFileSync(path.join(dir,cid+".orden.json"),"utf8"));
    const {tomado}=await cola({accion:"empezar",id:cid});
@@ -462,5 +464,5 @@ async function principal(){
   }
  }
 }
-if(require.main===module)principal().catch(e=>{console.error("Robot detenido:",String(e?.message||e).slice(0,process.env.DETALLE?3000:300));process.exit(1);});
+if(require.main===module)principal().then(()=>process.exit(0),e=>{console.error("Robot detenido:",String(e?.message||e).slice(0,process.env.DETALLE?3000:300));process.exit(1);});
 module.exports={preparar,procesar,abrirStel,ir,buscarEnLista};
