@@ -277,7 +277,11 @@ async function rellenarAlbaran(p,plan,{captura}){
   const precio=Number.isFinite(l.precio)?l.precio:Number.isFinite(l.precio_pedido)?l.precio_pedido:0;
   if(!Number.isFinite(l.precio)&&!Number.isFinite(l.precio_pedido))
    await p.locator("textarea[name=_descripcionCompleta]:visible").nth(i).fill("PRECIO PENDIENTE (el albarán del proveedor no trae precio)");
-  await p.locator("input[name=_precioBaseTarifa]:visible").nth(i).fill(precio.toFixed(2).replace(".",","));await p.keyboard.press("Tab");await p.waitForTimeout(800);
+  // El precio con todos sus decimales (fallo real: un precio como 2,345 se escribía redondeado a 2,35); se comprueba lo que queda.
+  const casillaPrecio=p.locator("input[name=_precioBaseTarifa]:visible").nth(i);
+  await casillaPrecio.fill(String(precio).replace(".",","));await p.keyboard.press("Tab");await p.waitForTimeout(800);
+  const visto=Number(String(await casillaPrecio.inputValue()).trim().replace(/\./g,"").replace(",","."));
+  if(!(Math.abs(visto-precio)<0.00005))throw Error("el precio de la línea "+(i+1)+" no queda exacto en STEL");
   await p.locator("input[name=_unidades]:visible").nth(i).fill(String(l.cantidad).replace(".",","));await p.keyboard.press("Tab");await p.waitForTimeout(800);
   const dto=E.descuentoLinea(l);
   if(dto==null)throw Error("descuento no representable en la línea "+(i+1));
@@ -427,7 +431,10 @@ async function procesar(dir,orden,{real}){
   await botonGuardar(p).first().click({timeout:15000});await p.waitForTimeout(12000);
   const resp=registro.respuestas.slice(antes).find(x=>x.op==="guardarDocumentoComercial");
   const id=resp?.texto.match(/"id"\s*:\s*"?(\d+)/)?.[1];
-  if(!id)return {estado:"ERROR",motivo:"No se pudo confirmar el albarán creado",registro};
+  if(!id){
+   const neg=registro.escrituras.find(x=>x.op==="guardarDocumentoComercial"&&!x.permitida);
+   return neg?{estado:"PARADO",motivo:"La guardia canceló el albarán (no se ha creado): "+neg.motivo,registro}:{estado:"ERROR",motivo:"No se pudo confirmar el albarán creado",registro};
+  }
   autorizador.actual.idAlbaran(id);
   const referencia=await p.locator("#referencia").first().inputValue().catch(()=>"");
   await adjuntar(p,registro,adj);
@@ -461,6 +468,8 @@ async function principal(){
     escrituras:(r.registro?.escrituras||[]).map(x=>({op:x.op,permitida:x.permitida,motivo:x.motivo})),canceladas:(r.registro?.canceladas||[]).length};
    await cola({accion:"terminar",id:cid,estado:r.estado,resultado,stel_id:r.stel_id,stel_referencia:r.stel_referencia});
    console.log(cid+": "+r.estado+(r.motivo?" · "+r.motivo:"")+(r.stel_referencia?" · "+r.stel_referencia:""));
+   // Ante un error (estado dudoso en STEL) no se sigue con los demás: primero se revisa.
+   if(r.estado==="ERROR"){console.log("Lote detenido tras un error: revisar antes de seguir");break;}
   }
  }
 }
