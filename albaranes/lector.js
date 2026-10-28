@@ -99,6 +99,39 @@ const textoError=e=>e?.message||(typeof e==="string"?e:(()=>{try{return JSON.str
  * opciones: {registro, hoy, tamLote (páginas por bloque de progreso), alProgresar(info),
  *            cancelado() → true para detener, vision (motor de manuscritos, opcional)}
  */
+/*
+ * Coherencia del lote (evidencia permitida: «coherencia del lote»). Proveedores con números correlativos en
+ * el tiempo: un número aceptado que va contra el orden de las fechas de la MAYORÍA de sus otros albaranes del
+ * lote (menor que uno de fecha anterior o mayor que uno de fecha posterior, más allá de la tolerancia de su
+ * perfil) es una lectura dudosa. Prueba
+ * real 2026-10-28: la primera cifra del número mal leída (cien mil menos), aceptada con tres lecturas OCR iguales. Solo marca para
+ * revisión; nunca cambia el número.
+ */
+function numerosFueraDeSecuencia(documentos,registro){
+ const perfiles=new Map((registro?.proveedores||[]).filter(p=>p.numeros_correlativos).map(p=>[p.id,p]));
+ const n=v=>Number(String(v||"").replace(/\D/g,""));
+ const datos=documentos.filter(d=>{const r=d.resultado;return r&&perfiles.has(r.proveedor?.id)&&r.numero?.estado==="OK"&&r.fecha?.estado==="OK"&&n(r.numero.valor)>0;})
+  .map(d=>({d,prov:d.resultado.proveedor.id,num:n(d.resultado.numero.valor),fecha:String(d.resultado.fecha.valor)}));
+ // Se quita cada vez el albarán con más cruces (el que rompe el orden de más albaranes); si los que quedan
+ // con cruces se cruzan solo entre sí uno a uno, todos van a revisión (no se sabe cuál está mal).
+ const tol=prov=>Number(perfiles.get(prov)?.numeros_correlativos?.tolerancia)||0;
+ const choca=(x,y)=>x.prov===y.prov&&x.fecha!==y.fecha&&((y.fecha<x.fecha&&y.num-x.num>tol(x.prov))||(y.fecha>x.fecha&&x.num-y.num>tol(x.prov)));
+ const fuera=[];let activos=datos.slice();
+ for(;;){
+  const cruces=activos.map(x=>({x,n:activos.filter(y=>y!==x&&choca(x,y)).length}));
+  const max=Math.max(0,...cruces.map(c=>c.n));
+  if(!max)break;
+  const peores=cruces.filter(c=>c.n===max).map(c=>c.x);
+  for(const x of max===1?cruces.filter(c=>c.n>0).map(c=>c.x):peores){
+   const de=datos.filter(y=>y.prov===x.prov&&y.fecha!==x.fecha).length;
+   x.d._secuencia="se cruza con "+activos.filter(y=>y!==x&&choca(x,y)).length+" de "+de+" albaranes de otras fechas";fuera.push(x.d);
+  }
+  if(max===1)break;
+  activos=activos.filter(x=>!peores.includes(x));
+ }
+ return fuera;
+}
+
 async function leerPdf(fuente,opciones={}){
  const {alProgresar=null,cancelado=()=>false,tamLote=5}=opciones;
  const total=fuente.numPaginas;
@@ -166,6 +199,14 @@ async function leerPdf(fuente,opciones={}){
  // Anotaciones manuscritas: la coherencia del lote se aplica con todos los albaranes leídos.
  const conObra=documentos.filter(d=>d.resultado?.manuscritos);
  if(conObra.length)M("manuscritos").coherenciaLote(conObra.map(d=>d.resultado.manuscritos),{catalogoObras:opciones.catalogoObras||null});
+ // Números correlativos de un proveedor (perfil numeros_correlativos): fuera del orden de las fechas del lote.
+ for(const d of numerosFueraDeSecuencia(documentos,opciones.registro)){
+  const r=d.resultado;
+  r.numero={...r.numero,estado:"REVISAR",motivos:[...(r.numero.motivos||[]),"Número fuera de la secuencia del proveedor en este lote ("+d._secuencia+"): comprueba el papel"]};
+  delete d._secuencia;
+  if(r._ctx)M("extraer").finalizar(r);
+  d.estado_documento=estadoDocumento(r);
+ }
  // Cada página del PDF está en exactamente un documento (o queda sin procesar si se canceló).
  const vistas=documentos.flatMap(d=>d.paginas);
  const resumen={
@@ -183,5 +224,5 @@ async function leerPdf(fuente,opciones={}){
  return {documentos,errores,resumen};
 }
 
-return {leerPdf,agruparPaginas,firmaPagina,continua,estadoDocumento};
+return {leerPdf,agruparPaginas,firmaPagina,continua,estadoDocumento,_numerosFueraDeSecuencia:numerosFueraDeSecuencia};
 });

@@ -375,6 +375,16 @@ async function segundaFase(principal,paginas,lecturas,opciones){
    if(r.conflicto){l[campo]={...c,motivos:[...(c.motivos||[]),"Relecturas fiables distintas: "+r.conflicto.join(" | ")]};continue;}
    // Una referencia no cambia de número de palabras (la relectura no debe arrastrar la celda vecina).
    if(campo==="referencia"&&r.valor.split(/\s+/).length!==String(c.literal).split(/\s+/).length)continue;
+   // Una descripción releída no gana cifras de importe ni «NETO» (prueba real 2026-10-28: la relectura
+   // arrastró cantidad, precio y «NETO» de las columnas de cantidad, precio y descuento).
+   if(campo==="descripcion"){
+    const antes=new Set(String(c.literal).split(/\s+/));
+    const nuevas=r.valor.split(/\s+/).filter(t=>!antes.has(t));
+    if(nuevas.some(t=>/^\d{1,3}(\.\d{3})*,\d{2,4}$|^NETO$/i.test(t))){
+     const m="La relectura de la descripción arrastra cifras de otras columnas («"+r.valor+"»): no se confirma";
+     l[campo]={...c,estado:"REVISAR",motivos:[...(c.motivos||[]),m]};l.motivos=[...(l.motivos||[]),m];l.estado="REVISAR";continue;
+    }
+   }
    const corregido=N.canon(r.valor)!==N.canon(c.literal);
    l[campo]={...c,literal:r.valor,valor:r.valor,
     notas:[...(c.notas||[]),...(corregido?["Corregido por relectura dirigida (lectura inicial «"+c.literal+"»)"]:[])],

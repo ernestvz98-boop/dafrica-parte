@@ -24,6 +24,7 @@ const fs=require("fs"),path=require("path"),{execFileSync}=require("child_proces
 const {permitido,cancelar,rutaSinDatos,operacion}=require("./guardia.js");
 const E=require("./escritura.js");
 const C=require("../albaranes/cola-stel.js");
+const AP=require("../albaranes/archivo-pdf.js");
 const COLA=process.env.ROBOT_COLA_URL||"https://sbocfjxamjmwabmqbeyw.supabase.co/functions/v1/robot-cola";
 const STEL="https://app.stelorder.com/app/";
 const TERCEROS=/(^|\.)(google\.com|gstatic\.com|googleapis\.com|gvt1\.com|stripe\.com|google-analytics\.com|googletagmanager\.com|doubleclick\.net|hotjar\.com|facebook\.net|intercom\.io|intercomcdn\.com)$/i;
@@ -43,28 +44,46 @@ async function cola(cuerpo){
 }
 
 // ---------- preparar ----------
+/*
+ * PDF del albarán, comprobado antes de usarlo (2026-10-28): la huella ha de ser la registrada en la cola.
+ *  - PDF individual (plan.pdf.individual): ha de tener exactamente las páginas del albarán; se usa tal cual.
+ *  - Filas antiguas (el PDF completo del lote): se separan solo las páginas del albarán.
+ * Si algo no cuadra, ese albarán no se prepara (y se dice por qué); los demás sí.
+ */
+async function pdfDelAlbaran(p,dir){
+ const PDFLib=require("pdf-lib");
+ const todo=path.join(dir,(p.pdf_sha256||p.id)+".pdf");
+ if(!fs.existsSync(todo)){const {pdf}=await cola({accion:"pdf",id:p.id});fs.writeFileSync(todo,Buffer.from(pdf,"base64"));}
+ const bytes=new Uint8Array(fs.readFileSync(todo));
+ const paginas=(p.plan.paginas||[]).map(Number);
+ if(!paginas.length)throw Error("Albarán sin páginas");
+ if(p.plan.pdf?.individual){
+  if(p.plan.pdf.sha256!==p.pdf_sha256)throw Error("El PDF de la fila no es el individual del plan");
+  const c=await AP.comprobar(PDFLib,bytes,{sha256:p.pdf_sha256,paginas:paginas.length});
+  if(!c.ok)throw Error("PDF individual no válido: "+c.motivo);
+  return bytes;
+ }
+ if(p.pdf_sha256){const c=await AP.comprobar(PDFLib,bytes,{sha256:p.pdf_sha256});if(!c.ok)throw Error("PDF del lote no válido: "+c.motivo);}
+ return AP.separar(PDFLib,bytes,paginas);
+}
 async function preparar(dir){
- const {PDFDocument}=require("pdf-lib");
  fs.mkdirSync(dir,{recursive:true});
  const {pendientes}=await cola({accion:"pendientes"});
- const resumen=[];
+ const resumen=[],descartados=[];
  for(const p of pendientes){
   const base=path.join(dir,p.id);
-  const todo=path.join(dir,(p.pdf_sha256||p.id)+".pdf");
-  if(!fs.existsSync(todo)){const {pdf}=await cola({accion:"pdf",id:p.id});fs.writeFileSync(todo,Buffer.from(pdf,"base64"));}
-  // Solo las páginas de este albarán.
-  const origen=await PDFDocument.load(fs.readFileSync(todo)),solo=await PDFDocument.create();
-  const pags=(p.plan.paginas||[]).map(n=>n-1).filter(n=>n>=0&&n<origen.getPageCount());
-  if(!pags.length)throw Error("Albarán sin páginas: "+p.id);
-  for(const pg of await solo.copyPages(origen,pags))solo.addPage(pg);
-  fs.writeFileSync(base+".pdf",await solo.save());
+  let solo;
+  try{solo=await pdfDelAlbaran(p,dir);}
+  catch(e){descartados.push({id:p.id,numero:p.plan?.numero||null,motivo:String(e?.message||e).slice(0,200)});continue;}
+  fs.writeFileSync(base+".pdf",solo);
   execFileSync("pdftoppm",["-r","110","-png",base+".pdf",base+"-pag"]);
   fs.writeFileSync(base+".orden.json",JSON.stringify(p,null,1));
   resumen.push({id:p.id,numero:p.plan.numero,fecha:p.plan.fecha,proveedor:p.plan.proveedor.nombre_stel,obra:p.plan.obra?.codigo,pedido:p.plan.pedido?.codigo||null,lineas:p.plan.lineas.length,
    imagenes:fs.readdirSync(dir).filter(f=>f.startsWith(p.id+"-pag")).map(f=>path.join(dir,f))});
  }
  fs.writeFileSync(path.join(dir,"preparados.json"),JSON.stringify(resumen,null,1));
- console.log(pendientes.length+" pendientes preparados en "+dir);
+ if(descartados.length)fs.writeFileSync(path.join(dir,"no-preparados.json"),JSON.stringify(descartados,null,1));
+ console.log(resumen.length+" pendientes preparados en "+dir+(descartados.length?" · "+descartados.length+" NO preparados (no-preparados.json)":""));
  return resumen;
 }
 
@@ -199,6 +218,19 @@ async function resolverArticulo(p,l){
 }
 
 // Duplicado: el número del proveedor ya en algún albarán de proveedor de STEL (título o Ref. Documento Proveedor).
+// Tras una interrupción (fila PROCESANDO): ¿aparece ya en STEL el número del proveedor? EXISTE, NO_EXISTE o
+// DESCONOCIDO (STEL no respondió: nunca cuenta como «no existe»).
+async function estadoEnStel(p,numero){
+ await ir(p,"#main_gastosycompras","Albaranes de proveedor");
+ let total=0;
+ for(const q of new Set([numero,numero.replace(/[.\s]/g,"")])){
+  const n=await buscarEnLista(p,q);
+  if(n==null)return {estado:"DESCONOCIDO"};
+  total=Math.max(total,n);
+ }
+ await p.locator("input.buscadorListado:visible").first().fill("");
+ return total>0?{estado:"EXISTE",resultados:total}:{estado:"NO_EXISTE"};
+}
 async function hayDuplicado(p,numero){
  await ir(p,"#main_gastosycompras","Albaranes de proveedor");
  for(const q of new Set([numero,numero.replace(/[.\s]/g,"")])){
@@ -363,6 +395,7 @@ async function adjuntar(p,registro,fichero){
 // ---------- ensayo y creación ----------
 async function procesar(dir,orden,{real}){
  const plan=JSON.parse(JSON.stringify(orden.plan));
+ if(plan.tipo==="ABONO")return {estado:"PARADO",motivo:"Abono o rectificativo: no se crea automáticamente en STEL"};
  if(plan.pedido)return {estado:"PARADO",motivo:"Lleva pedido "+plan.pedido.codigo+": las entregas con pedido aún no se crean solas (regla de entregas parciales)"};
  if(plan.lineas.some(l=>E.descuentoLinea(l)==null))return {estado:"PARADO",motivo:"Descuentos de una línea que no caben exactos en la casilla de STEL o que no cuadran con su importe"};
  if(!plan.obra?.codigo)return {estado:"PARADO",motivo:"Orden sin obra"};
@@ -377,6 +410,9 @@ async function procesar(dir,orden,{real}){
  catch(e){await captura("error").catch(()=>{});e.registro=registro;throw e;}
  finally{await nav.close();}
  async function pasos(){
+  // El adjunto ha de ser el PDF del albarán: exactamente sus páginas (nunca el lote completo).
+  {const c=await AP.comprobar(require("pdf-lib"),new Uint8Array(fs.readFileSync(adj)),{paginas:(plan.paginas||[]).length});
+   if(!c.ok)return {estado:"PARADO",motivo:"PDF del albarán no válido: "+c.motivo,registro};}
   const dup=await hayDuplicado(p,plan.numero);
   if(dup)return {estado:"PARADO",motivo:"Posible duplicado: "+dup,registro};
   // Artículos: los «buscar» se resuelven en STEL (referencia exacta o alta sin parecidos); los «crear» se
@@ -466,14 +502,15 @@ async function principal(){
   {const {nav}=await abrirStel(dir,null);await nav.close();}
   for(const [cid,dec] of Object.entries(aprobados)){
    const orden=JSON.parse(fs.readFileSync(path.join(dir,cid+".orden.json"),"utf8"));
-   const {tomado}=await cola({accion:"empezar",id:cid});
+   // La autorización de una persona en la aplicación (stel_autorizaciones) se consume aquí, una vez.
+   const {tomado}=await cola({accion:"empezar",id:cid,operacion_id:orden.autorizacion?.operacion_id});
    if(!tomado){console.log(cid+": ya no está pendiente");continue;}
    let r;
    try{r=dec.aprobado?await procesar(dir,orden,{real:true}):{estado:"PARADO",motivo:"Revisión: "+dec.motivo};}
    catch(e){r={estado:"ERROR",motivo:String(e?.message||e).slice(0,300),registro:e?.registro};}
    const resultado={motivo:r.motivo||null,adjunto:r.adjunto??null,revisado_por:"Claude (comparación con el PDF)",
     escrituras:(r.registro?.escrituras||[]).map(x=>({op:x.op,permitida:x.permitida,motivo:x.motivo})),canceladas:(r.registro?.canceladas||[]).length};
-   await cola({accion:"terminar",id:cid,estado:r.estado,resultado,stel_id:r.stel_id,stel_referencia:r.stel_referencia});
+   await cola({accion:"terminar",id:cid,estado:r.estado,resultado,stel_id:r.stel_id,stel_referencia:r.stel_referencia,operacion_id:orden.autorizacion?.operacion_id});
    console.log(cid+": "+r.estado+(r.motivo?" · "+r.motivo:"")+(r.stel_referencia?" · "+r.stel_referencia:""));
    // Ante un error (estado dudoso en STEL) no se sigue con los demás: primero se revisa.
    if(r.estado==="ERROR"){console.log("Lote detenido tras un error: revisar antes de seguir");break;}
@@ -481,4 +518,4 @@ async function principal(){
  }
 }
 if(require.main===module)principal().then(()=>process.exit(0),e=>{console.error("Robot detenido:",String(e?.message||e).slice(0,process.env.DETALLE?3000:300));process.exit(1);});
-module.exports={preparar,procesar,abrirStel,ir,buscarEnLista};
+module.exports={preparar,procesar,abrirStel,ir,buscarEnLista,pdfDelAlbaran,estadoEnStel};

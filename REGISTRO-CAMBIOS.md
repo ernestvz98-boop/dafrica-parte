@@ -3,6 +3,51 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-28 · Prueba real de 40 páginas: ningún documento sin fila, PDF individual, lector y robot
+
+**Producción:** sin cambios (rama de desarrollo; `main`, funciones Edge y base de datos sin tocar). Las
+filas de la cola de esa prueba siguen como estaban. La migración de revisión y autorización
+(`supabase/propuestas/20261028_revision_autorizacion_robot.sql`) y la nueva función `robot-cola` están
+SIN APLICAR ni desplegar: necesitan la autorización expresa del usuario.
+
+1. **Reproducido** con el PDF real (corpus privado, 40 páginas; resultado esperado transcrito del papel,
+   pendiente de confirmación por una persona) y la cola real leída en solo lectura: 32 filas de 40.
+2. **Páginas sin fila (8):** el envío descartaba en silencio los documentos sin proveedor de STEL,
+   número o fecha («no enviado» solo en pantalla) y los de error de lectura. Ahora todos llegan a la
+   cola: los no identificados en REVISAR con clave provisional (huella de su PDF individual) y sus
+   motivos; cada documento dice si se guardó o el error de guardado.
+3. **PDF:** las 32 filas apuntaban al PDF completo del lote. Ahora cada albarán lleva su PDF individual
+   (`albaranes/archivo-pdf.js`, pdf-lib 1.17.1 servido por la web) con el vínculo a su original (huella y
+   páginas) y el original se guarda como respaldo. El robot comprueba huella y número de páginas antes de
+   usarlo y antes de adjuntarlo (nunca el lote completo).
+4. **Lector** (cada fallo con prueba en `pruebas/lote-40.test.js`, datos ficticios):
+   - número impreso con coma leído truncado: se aceptan las mismas cifras con el separador del formato;
+   - número sin el formato del proveedor aceptado tras combinar lecturas: el formato se exige al final;
+   - número con la primera cifra mal leída aceptado (AUTO_OK) con tres lecturas OCR iguales: coherencia
+     del lote para proveedores con números correlativos (perfil `numeros_correlativos`), solo marca;
+   - totales sin respaldo en albaranes sin precios y «Total líneas» mal leído como total: en revisión y
+     nunca pasan a la orden de STEL; cuota de IVA que no es base × %: en revisión;
+   - «NETO» de la columna del descuento pegado a la descripción; relectura de una descripción que arrastra
+     cifras de otras columnas: no se confirma;
+   - importes con 4 decimales: el cuadre exige esos decimales;
+   - abono o rectificativo solo por su título o sello (no por «devolución» en las condiciones); en la cola
+     un abono nunca queda PENDIENTE y el robot lo para.
+5. **Importador de obras:** acepta también códigos PRYMP tal cual (la tabla `lector_obras` necesita la
+   migración propuesta para guardarlos).
+6. **Error 403 del catálogo:** los registros de Supabase muestran HTTP 200 de la función
+   `compras-catalogo-lectura` (sesión y permisos correctos): el 403 lo devolvió STEL dentro de la consulta
+   (límite de consultas), no las credenciales. La lectura sigue sin catálogo completo (nada automático
+   que dependa de él) y la orden anota `comprobaciones_pendientes`. En la primera lectura del día la
+   visión de manuscritos falló con «model_not_found».
+7. **Robot y cola (propuesta, sin desplegar):** autorización de una persona por operación (huella del
+   plan y del PDF, una sola vez), PROCESANDO interrumpido nunca se repite (se consulta STEL), registro de
+   cada cambio en `stel_sync_log`; pruebas en `pruebas/robot-cola.test.js` y en Postgres local
+   (`supabase/tests/ejecutar-local.sh`: REVISION_AUTORIZACION OK).
+
+**Verificación:** `npm test` 363/363; corpus (`node pruebas/evaluar.js --incluir-sin-revisar`, también
+`--sin-registro-privado` y `--motor=tesseractjs`): mismas cifras que antes (818, 811 y 813 de 927 campos),
+0 fallos críticos, 44/44 estados; lote de 40 páginas: 0 AUTO_OK con error (antes 2), 40/40 filas.
+
 ## 2026-10-28 · Fase 2: primera ejecución real en STEL (3 albaranes del primer PDF real)
 
 **Producción:** STEL (escrituras autorizadas una a una por `robot-stel/escritura.js`): 3 albaranes de

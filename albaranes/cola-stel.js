@@ -13,6 +13,12 @@
  *  - Artículo que no existe en STEL: se crea solo si el catálogo está completo y no hay ninguno
  *    parecido (articulos.js, comprobación anti-duplicados); si hay candidatos, REVISAR.
  *  - Si el lector encontró ya el albarán en STEL (ABP), no se crea otro: YA_EXISTE.
+ *
+ * Prueba real del 2026-10-28 (40 páginas): ningún documento puede desaparecer de la cola. Un albarán sin
+ * proveedor de STEL, número o fecha también se guarda, en REVISAR, con una clave provisional
+ * (`claveProvisional`, por la huella de su PDF individual) y el motivo; un abono o rectificativo nunca
+ * queda PENDIENTE (el robot no los crea); y lo que no se pudo comprobar (catálogo o búsqueda de STEL sin
+ * respuesta) queda anotado en `comprobaciones_pendientes` para repetir solo esa comprobación.
  */
 (function(root,factory){
  const api=factory(root);
@@ -83,11 +89,34 @@ function soloFaltaAbp(doc,opciones){
  return doc?.estado_documento==="REVISAR"&&!!opciones?.busquedaStelCompleta&&r?.fiable===true&&(r.confianza??0)>=0.9&&
   (r.incidencias||[]).length>0&&(r.incidencias||[]).every(i=>SOLO_FALTA_ABP.test(String(i)));
 }
+// Clave de un documento que no se pudo identificar (sin cuenta de STEL, número o fecha): la huella de su
+// PDF individual. Nunca coincide con la de un albarán identificado; el robot no toma nada en REVISAR.
+const claveProvisional=sha=>/^[0-9a-f]{64}$/.test(String(sha||""))?"SIN_IDENTIFICAR|"+sha:null;
+
+// Lo que no se pudo comprobar en esta lectura (para repetir solo esa comprobación más tarde).
+function comprobacionesPendientes(opciones){
+ const p=[];
+ if(opciones?.catalogoIncompleto)p.push("catalogo_stel");
+ if(opciones?.busquedaStelIncompleta)p.push("albaranes_stel");
+ if(opciones?.visionFallida)p.push("vision_manuscritos");
+ return p;
+}
+
+// Plan mínimo de un documento sin lectura (error de la página): se guarda igual, en REVISAR.
+function planSinLectura(doc){
+ return {version:VERSION,archivo:doc?.archivo||null,paginas:Array.isArray(doc?.paginas)?doc.paginas.slice():[],tipo:null,
+  proveedor:{account_id:null,nombre_stel:null,nombre_leido:null},numero:null,fecha:null,obra:null,pedido:null,ya_en_stel:null,lineas:[],total:null,
+  aviso_precio:null,error_lectura:String(doc?.error||"Documento sin lectura").slice(0,300)};
+}
+
 function orden(doc,catalogo,opciones={}){
  const r=doc?.resultado,motivos=[];
- if(!r)return {clave:null,estado:"REVISAR",motivos:["Documento sin lectura"],plan:null};
+ if(!r)return {clave:null,estado:"REVISAR",motivos:["Documento sin lectura"+(doc?.error?": "+String(doc.error).slice(0,160):"")],plan:planSinLectura(doc)};
  const cat=catalogo||{};
  if(doc.estado_documento!=="AUTO_OK"&&!soloFaltaAbp(doc,opciones))motivos.push("El lector no lo da por bueno ("+(doc.estado_documento||"sin estado")+")");
+ // Abono o rectificativo (impreso o con cantidades negativas): nunca automático.
+ const tipo=r.tipo_documento?.valor==="ABONO"?"ABONO":"ALBARAN";
+ if(tipo==="ABONO")motivos.push("Abono o rectificativo: no se crea automáticamente en STEL ("+(r.tipo_documento?.evidencia||"cantidades negativas")+")");
  // Proveedor: la cuenta de STEL verificada por el lector.
  const p=r.proveedor||{},cuenta=p.account_id??null;
  const provStel=cuenta!=null?(cat.proveedores||[]).find(x=>String(x.id)===String(cuenta)):null;
@@ -144,12 +173,16 @@ function orden(doc,catalogo,opciones={}){
  if(!lineas.length)motivos.push("Sin líneas de artículo");
  const plan={version:VERSION,archivo:doc.archivo||null,paginas:Array.isArray(doc.paginas)?doc.paginas.slice():[],
   proveedor:{account_id:cuenta,nombre_stel:provStel?String(provStel.nombre||""):null,nombre_leido:p.nombre||null},
-  numero,fecha,obra,pedido,ya_en_stel:abp?{referencia:String(abp.referencia||abp.fullReference||""),id:abp.id??null}:null,
-  lineas,total:Number.isFinite(r.totales?.total?.valor)?r.totales.total.valor:null,
-  aviso_precio:!pedido&&lineas.some(l=>l.precio_pendiente)?"PRECIO PENDIENTE":null};
+  tipo,numero,fecha,obra,pedido,ya_en_stel:abp?{referencia:String(abp.referencia||abp.fullReference||""),id:abp.id??null}:null,
+  // Solo un total aceptado por el lector (nunca uno en revisión: prueba real 2026-10-28).
+  lineas,total:Number.isFinite(r.totales?.total?.valor)&&["OK","VERIFICADO"].includes(r.totales.total.estado)?r.totales.total.valor:null,
+  aviso_precio:!pedido&&lineas.some(l=>l.precio_pendiente)?"PRECIO PENDIENTE":null,
+  comprobaciones_pendientes:comprobacionesPendientes(opciones)};
+  // Solo informativo: las reglas de arriba ya dejan en REVISAR lo que dependa de esas comprobaciones
+  // (y el robot vuelve a buscar en STEL antes de crear).
  const estado=abp?"YA_EXISTE":motivos.length?"REVISAR":"PENDIENTE";
  return {clave:clave(r),estado,motivos,plan};
 }
 
-return {VERSION,orden,clave,fechaStel,soloFaltaAbp,parecidosParaAlta,palabras};
+return {VERSION,orden,clave,claveProvisional,planSinLectura,fechaStel,soloFaltaAbp,parecidosParaAlta,palabras};
 });

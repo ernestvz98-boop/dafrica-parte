@@ -310,48 +310,90 @@ function montar(root){
   }catch(e){estado.textContent="No se ha podido leer: "+(e?.message||e);}
   finally{leer.disabled=false;cancelar.disabled=true;barra.style.display="none";}
  };
- // Cola de STEL: la orden de cada albarán (albaranes/cola-stel.js) y su PDF, una vez por fichero y
- // por su huella SHA-256, en el almacén privado. La base de datos nunca pisa uno ya procesado.
+ // Cola de STEL: la orden de cada albarán (albaranes/cola-stel.js) y su PDF en el almacén privado, por su
+ // huella SHA-256. La base de datos nunca pisa uno ya procesado.
+ // Prueba real del 2026-10-28 (40 páginas, 8 sin fila en la cola y 32 con el mismo PDF): ahora TODO
+ // documento leído llega a la cola (los no identificados, en REVISAR con clave provisional y su motivo),
+ // cada albarán lleva su PDF individual (solo sus páginas) y el PDF original del lote se guarda como
+ // respaldo. Lo que no se guarda queda anotado documento a documento (nunca en silencio).
  async function enviarColaStel(r,catalogo,pdfDeDoc){
-  const lib=window.DafricaAlbaranes,info=r.cola_stel={enviados:0,pendientes:0,revisar:0,ya_existe:0,sin_cambios:0,sin_clave:0};
+  const lib=window.DafricaAlbaranes,info=r.cola_stel={enviados:0,pendientes:0,revisar:0,ya_existe:0,sin_cambios:0,sin_clave:0,provisionales:0,
+   duplicados:0,errores_guardado:0,errores_lectura:0,pdf_individuales:0,originales:0};
+  const PDFLib=await cargarScript("albaranes/vendor/pdf-lib.min.js?v="+VERSION_LECTOR,"PDFLib").catch(()=>null);
+  const A=lib.archivoPdf,m=r.motores||{};
+  const opciones={busquedaStelCompleta:!!m.stel_compras?.completo,catalogoIncompleto:!catalogo||!catalogo.articulos_completo,
+   busquedaStelIncompleta:!!m.stel_compras?.consultado&&!m.stel_compras?.completo,visionFallida:!!m.vision?.fallos};
+  const huellas=new Map(),subidos=new Map();
+  const huellaDe=async b=>{if(!huellas.has(b))huellas.set(b,await A.huella(b));return huellas.get(b);};
+  const subir=async(bytes,h)=>{
+   if(!subidos.has(h)){
+    const resp=await authFetch(SUPABASE_URL+"/storage/v1/object/albaranes-stel/"+h+".pdf",{method:"POST",headers:{"Content-Type":"application/pdf","x-upsert":"false"},body:bytes});
+    // El mismo PDF ya subido en otra lectura: vale el que hay.
+    const ya=!resp.ok&&/duplicate|already exists/i.test(await resp.text().catch(()=>""));
+    subidos.set(h,resp.ok||ya);
+   }
+   return subidos.get(h);
+  };
   const ordenes=[];
   for(const d of r.documentos){
-   if(!d.resultado)continue;
-   const o=lib.colaStel.orden(d,catalogo,{busquedaStelCompleta:!!r.motores?.stel_compras?.completo});
-   if(!o.clave||!o.plan){info.sin_clave++;d.cola_stel={estado:"SIN_ENVIAR",motivos:o.motivos};continue;}
-   ordenes.push({d,o});
+   const o=lib.colaStel.orden(d,catalogo,opciones);
+   if(!d.resultado)info.errores_lectura++;
+   const bytes=pdfDeDoc.get(d);
+   let individual=null,errPdf=null,original=null;
+   if(bytes){
+    try{
+     original={sha256:await huellaDe(bytes),nombre:d.archivo||null};
+     if(!PDFLib)throw Error("pdf-lib no disponible");
+     const b=await A.separar(PDFLib,bytes,d.paginas);
+     individual={bytes:b,sha256:await A.huella(b)};
+    }catch(e){errPdf=String(e?.message||e).slice(0,160);}
+   }else errPdf="PDF original no disponible";
+   if(!o.clave){
+    o.clave=lib.colaStel.claveProvisional(individual?.sha256);
+    if(o.clave){info.provisionales++;o.estado="REVISAR";o.motivos.unshift("Documento sin identificar en STEL (proveedor, número o fecha): guardado para revisión");}
+   }
+   if(!o.clave){info.sin_clave++;d.cola_stel={estado:"SIN_ENVIAR",guardado:false,motivos:[...o.motivos,"Sin PDF individual: "+(errPdf||"desconocido")]};continue;}
+   ordenes.push({d,o,individual,original,errPdf});
   }
   // Dos albaranes de la lectura con el mismo proveedor, número y fecha: ninguno automático.
   const veces=new Map();for(const {o} of ordenes)veces.set(o.clave,(veces.get(o.clave)||0)+1);
-  for(const {o} of ordenes)if(veces.get(o.clave)>1&&o.estado==="PENDIENTE"){o.estado="REVISAR";o.motivos.push("Mismo proveedor, número y fecha que otro albarán de la lectura");}
-  const huellas=new Map(),subidos=new Map(),filas=[];
-  for(const {d,o} of ordenes){
-   const bytes=pdfDeDoc.get(d);let sha=null;
-   if(bytes){
-    if(!huellas.has(bytes))huellas.set(bytes,[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(b=>b.toString(16).padStart(2,"0")).join(""));
-    const h=huellas.get(bytes);
-    if(!subidos.has(h)){
-     const resp=await authFetch(SUPABASE_URL+"/storage/v1/object/albaranes-stel/"+h+".pdf",{method:"POST",headers:{"Content-Type":"application/pdf","x-upsert":"false"},body:bytes});
-     // El mismo PDF ya subido en otra lectura: vale el que hay.
-     const ya=!resp.ok&&/duplicate|already exists/i.test(await resp.text().catch(()=>""));
-     subidos.set(h,resp.ok||ya);
+  for(const {o} of ordenes)if(veces.get(o.clave)>1){info.duplicados++;if(o.estado==="PENDIENTE")o.estado="REVISAR";o.motivos.push("Mismo proveedor, número y fecha que otro albarán de la lectura");}
+  const filas=[];
+  for(const x of ordenes){
+   const {d,o,individual,original}=x;let sha=null,errPdf=x.errPdf;
+   try{
+    if(original&&await subir(pdfDeDoc.get(d),original.sha256))info.originales=subidos.size;
+    if(individual){
+     if(await subir(individual.bytes,individual.sha256)){sha=individual.sha256;info.pdf_individuales++;}
+     else errPdf="No se pudo guardar el PDF individual";
     }
-    sha=subidos.get(h)?h:null;
-   }
-   if(!sha&&o.estado==="PENDIENTE"){o.estado="REVISAR";o.motivos.push("No se pudo guardar el PDF");}
+   }catch(e){errPdf=String(e?.message||e).slice(0,160);}
+   if(sha&&o.plan)o.plan.pdf=A.referencia({sha256:sha,paginasOriginales:d.paginas,original:{...original,total_paginas:r.archivos.find(a=>a.nombre===d.archivo)?.paginas??null}});
+   if(!sha){if(o.estado==="PENDIENTE")o.estado="REVISAR";o.motivos.push("Sin PDF individual guardado ("+(errPdf||"error")+")");}
    filas.push({clave:o.clave,estado:o.estado,motivos:o.motivos,plan:o.plan,pdf_ruta:sha?sha+".pdf":null,pdf_sha256:sha});
-   d.cola_stel={estado:o.estado,motivos:o.motivos};
+   d.cola_stel={estado:o.estado,motivos:o.motivos,clave:o.clave,pdf_sha256:sha,guardado:null};
   }
   for(let i=0;i<filas.length;i+=50){
-   const res=await sb("/rest/v1/rpc/stel_cola_enviar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({p_filas:filas.slice(i,i+50)})});
+   const parte=filas.slice(i,i+50);
+   let res;
+   try{res=await sb("/rest/v1/rpc/stel_cola_enviar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({p_filas:parte})});}
+   catch(e){
+    // Error de guardado: cada documento del bloque lo dice (no «no detectado» ni «duplicado»).
+    for(const f of parte){const d=ordenes.find(z=>z.o.clave===f.clave)?.d;if(d){info.errores_guardado++;d.cola_stel={...d.cola_stel,guardado:false,error:"Error de guardado: "+String(e?.message||e).slice(0,160)};}}
+    continue;
+   }
    for(const x of res||[]){
     info.enviados++;
     if(x.accion==="sin_cambios")info.sin_cambios++;
     else if(x.estado==="PENDIENTE")info.pendientes++;else if(x.estado==="REVISAR")info.revisar++;else if(x.estado==="YA_EXISTE")info.ya_existe++;
-    const d=ordenes.find(z=>z.o.clave===x.clave)?.d;
-    if(d&&x.accion==="sin_cambios")d.cola_stel={estado:x.estado,motivos:["Ya enviado antes ("+x.estado+"); no se cambia"]};
+    for(const z of ordenes.filter(z=>z.o.clave===x.clave)){
+     z.d.cola_stel={...z.d.cola_stel,guardado:true,accion:x.accion};
+     if(x.accion==="sin_cambios")z.d.cola_stel={...z.d.cola_stel,estado:x.estado,motivos:["Ya enviado antes ("+x.estado+"); no se cambia"]};
+    }
    }
   }
+  // Ningún documento sin respuesta de la base de datos queda como guardado.
+  for(const {d} of ordenes)if(d.cola_stel&&d.cola_stel.guardado===null){info.errores_guardado++;d.cola_stel.guardado=false;d.cola_stel.error="Error de guardado: la base de datos no confirmó este documento";}
  }
  function pintar(r){
   const n=e=>r.documentos.filter(d=>d.estado_documento===e).length;
@@ -370,7 +412,12 @@ function montar(root){
    esc(n("REVISAR"))+'</b> REVISAR · <b>'+esc(n("ERROR_DOCUMENTO"))+'</b> ERROR_DOCUMENTO</p>'+segunda+
    (r.cola_stel?'<p>Cola de STEL: '+(r.cola_stel.error?'<b class="error">no se pudo enviar</b> ('+esc(r.cola_stel.error)+')':
     '<b>'+esc(r.cola_stel.pendientes)+'</b> pendientes de crear · <b>'+esc(r.cola_stel.revisar)+'</b> en revisión · '+esc(r.cola_stel.ya_existe)+' ya en STEL'+
-    (r.cola_stel.sin_cambios?' · '+esc(r.cola_stel.sin_cambios)+' ya enviados antes (sin cambios)':'')+(r.cola_stel.sin_clave?' · '+esc(r.cola_stel.sin_clave)+' sin proveedor, número o fecha (no enviados)':''))+'</p>':'')+
+    (r.cola_stel.sin_cambios?' · '+esc(r.cola_stel.sin_cambios)+' ya enviados antes (sin cambios)':'')+(r.cola_stel.provisionales?' · '+esc(r.cola_stel.provisionales)+' sin identificar (guardados en revisión)':'')+
+    (r.cola_stel.errores_lectura?' · '+esc(r.cola_stel.errores_lectura)+' con error de lectura (guardados en revisión)':'')+
+    (r.cola_stel.duplicados?' · '+esc(r.cola_stel.duplicados)+' repetidos en la lectura':'')+
+    (r.cola_stel.errores_guardado?' · <b class="error">'+esc(r.cola_stel.errores_guardado)+' sin guardar (error de guardado)</b>':'')+
+    (r.cola_stel.sin_clave?' · <b class="error">'+esc(r.cola_stel.sin_clave)+' no enviados (sin PDF individual)</b>':'')+
+    ' · PDF individuales: '+esc(r.cola_stel.pdf_individuales)+' · originales del lote: '+esc(r.cola_stel.originales))+'</p>':'')+
    (r.documentos.length?'<p><button type="button" class="btn secondary" id="lalJson">Descargar resultado (JSON)</button> '+
     '<button type="button" class="btn secondary" id="lalCsv">Descargar líneas (CSV)</button></p>':'')+
    '<div class="table-wrap" style="overflow:auto;max-height:420px"><table><thead><tr><th>#</th><th>PDF · páginas</th><th>Proveedor</th><th>Número</th><th>Fecha</th><th>Líneas</th><th>Total</th><th>Obra (manuscrito)</th><th>Pedido (manuscrito)</th><th>Estado</th></tr></thead><tbody>'+
@@ -379,7 +426,7 @@ function montar(root){
      esc(x.numero?.valor||"—")+'</td><td>'+esc(x.fecha?.valor||"—")+'</td><td>'+esc((x.lineas||[]).length)+'</td><td>'+esc(x.totales?.total?.literal||"—")+'</td><td>'+
      esc(o?.valor?(o.valor+(o.estado==="OK"?"":" (a revisar)")):"—")+'</td><td>'+
      esc(pe?.valor?(pe.valor+(pe.estado==="OK"?"":" (a revisar)")):pe?.estado==="AMBIGUO"?"dudoso: "+(pe.resolucion?.alternativas||[]).join(" / "):"—")+'</td><td>'+(ETIQ[d.estado_documento]||esc(d.estado_documento))+(d.error?' · '+esc(d.error):'')+
-     (d.cola_stel?'<br><span class="muted" title="'+esc((d.cola_stel.motivos||[]).join(" · "))+'">STEL: '+esc({PENDIENTE:"pendiente de crear",REVISAR:"en revisión",YA_EXISTE:"ya existe",SIN_ENVIAR:"no enviado"}[d.cola_stel.estado]||d.cola_stel.estado)+'</span>':'')+'</td></tr>';}).join("")+
+     (d.cola_stel?'<br><span class="muted" title="'+esc((d.cola_stel.motivos||[]).join(" · "))+'">STEL: '+esc({PENDIENTE:"pendiente de crear",REVISAR:"en revisión",YA_EXISTE:"ya existe",SIN_ENVIAR:"no enviado"}[d.cola_stel.estado]||d.cola_stel.estado)+'</span>'+(d.cola_stel.error?' <b class="error">'+esc(d.cola_stel.error)+'</b>':''):'')+'</td></tr>';}).join("")+
    '</tbody></table></div>';
   $("lalErrores").innerHTML=r.errores.length?'<details open><summary>'+esc(r.errores.length)+' error(es) de lectura</summary>'+
    r.errores.map(e=>'<p class="error">'+esc(e.archivo)+(e.paginas?.length?' · páginas '+esc(e.paginas.join(", ")):'')+': '+esc(e.error)+'</p>').join("")+'</details>':"";

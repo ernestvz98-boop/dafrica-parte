@@ -245,7 +245,9 @@ const RE_NUMERO_GENERICO=/^(N[ºO°]|NUM|NUMERO)(\b|$)/;
 const EXCLUIR_GENERICO=/CLIENTE|PEDIDO|PROVEEDOR|TELEF|TLF|FAX|PAGINA|PAG|OBRA|CIF|NIF|FACTURA|PRESUPUESTO|CUENTA|IBAN|SERIE|LOTE|BULTOS|MATRICULA|REGISTRO|TOMO|FOLIO|HOJA|INSCRIPCION/;
 function leerNumero(lineas){
  const r={literal:"",valor:null,estado:"VACIO",motivos:[],notas:[],caja:null};
- const aceptar=t=>/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i.test(t)&&/\d/.test(t)&&N().fecha(t).estado!=="OK";
+ // Prueba real 2026-10-28: un número impreso con coma («600,111», ficticio) se leía «600». La coma solo se
+ // admite entre cifras; el formato del proveedor decide después (extraerDePaginas).
+ const aceptar=t=>(/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i.test(t)||/^\d{1,3}(,\d{3})+$/.test(t))&&/\d/.test(t)&&N().fecha(t).estado!=="OK";
  let hallados=valoresEtiquetados(lineas,RE_NUMERO,EXCLUIR_NUMERO,aceptar);
  if(!hallados.length){
   hallados=valoresEtiquetados(lineas,RE_NUMERO_GENERICO,EXCLUIR_GENERICO,aceptar);
@@ -257,7 +259,7 @@ function leerNumero(lineas){
   if(!/^\d{2,4}$/.test(h.texto))return h;
   const linea=lineas.find(l=>l.celdas.includes(h.celda)),i=linea?.celdas.indexOf(h.celda);
   const siguiente=linea?.celdas[i+1];
-  if(!siguiente||!/^\/\s*\d{2,10}$/.test(siguiente.texto.trim())||
+  if(!siguiente||!/^(\/\s*\d{2,10}|[.,]\d{3})$/.test(siguiente.texto.trim())||
      siguiente.x0-h.celda.x1>3*h.celda.alto)return h;
   return {...h,texto:h.texto+siguiente.texto.replace(/\s/g,""),
    celda:{...h.celda,x1:siguiente.x1,conf:h.celda.conf==null?siguiente.conf:
@@ -736,10 +738,10 @@ function valorPie(lineas,re,opcionesNumero){
 const ETIQ_TOTALES={
  base:/^(BASE IMPONIBLE|BASE|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES)\b/,
  pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA)\b/,
- cuota:/^(CUOTA ?[IL1]VA|TOTAL ?[IL1]VA|IMPORTE IVA|I V A|IVA)\b/,
+ cuota:/^(CUOTA ?[IL1]VA|TOTAL ?[IL1]VA|IMPORTE ?I ?V ?A|I V A|IVA)\b/,
  total:/^(TOTAL A PAGAR|TOTAL ALBARAN|IMPORTE TOTAL|TOTAL EUR|TOTAL)\b/
 };
-const EXCLUIR_TOTAL=/^TOTAL ?(LINEAS|[IL1]VA|RE|NETO|BRUTO)\b/;
+const EXCLUIR_TOTAL=/^TOTAL ?(L ?[IÍ1L]? ?N ?E ?A ?S|[IL1] ?[IÍ1L]? ?N ?E ?A ?S|[IL1]VA|RE|NETO|BRUTO)\b/;
 function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={}){
  const out=[];
  lineas.forEach((linea,li)=>{let saltar=-1;linea.celdas.forEach((celda0,ci)=>{
@@ -754,7 +756,8 @@ function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={})
    }
   }
   const k=clave(celda.texto);const m=k.match(re);
-  if(!m||(excluir&&excluir.test(k)))return;
+  // La exclusión mira también la palabra siguiente («Total» «Iíneas:» del OCR no es el total).
+  if(!m||(excluir&&(excluir.test(k)||(sig&&excluir.test(clave(celda0.texto+" "+sig.texto))))))return;
   saltar=ci+usadas;
   const resto=celda.texto.slice(m[0].length).replace(/^[\s:€]+/,"").trim();
   const textos=[resto,...linea.celdas.slice(ci+1+usadas,ci+4+usadas).map(c=>c.texto)];
@@ -887,7 +890,8 @@ function cuadre(f,precioPor){
   return {estado:"INCOMPLETO",detalle:"Falta un valor válido de cantidad, precio, descuento o importe"};
  const factor=f.descuento.estado==="OK"?f.descuento.factor:1;
  const decImporte=f.importe.decimales||2;
- const tol=Math.max(0.011,1.1*10**-decImporte);
+ // Con 3 o 4 decimales impresos la tolerancia es la de esos decimales (0,011 aceptaba un importe con la última cifra mal leída).
+ const tol=decImporte>2?1.1*10**-decImporte:0.011;
  const cumple=por=>{
   const bruto=f.cantidad.valor*f.precio.valor/por;
   const q=f.cantidad.valor,p=f.precio.valor/por;
@@ -991,6 +995,13 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   cruda.partida=true;
  }
  if(c.descuento2)f.notas.push("Dos columnas de descuento aplicadas en cascada");
+ // «NETO» (sin descuento) de la columna del descuento leído al final de la descripción (prueba real
+ // 2026-10-28): no es parte de la descripción; el cuadre de la línea decide.
+ if(f.descuento.estado==="VACIO"&&!f.descuento.literal&&/\sNETO$/.test(f.descripcion.literal||"")&&(c.precio||c.importe)){
+  f.descripcion={...f.descripcion,literal:f.descripcion.literal.replace(/\s+NETO$/,""),valor:f.descripcion.literal.replace(/\s+NETO$/,""),
+   notas:[...(f.descripcion.notas||[]),"«NETO» de la columna del descuento separado de la descripción"]};
+  f.descuento={...campoDescuento({texto:"NETO"},opcionesNumero),caja:null,conf_ocr:null,notas:["«NETO» impreso: precio neto, sin descuento"]};
+ }
  if(cruda.continuaciones.length){
   f.descripcion.literal=[f.descripcion.literal,...cruda.continuaciones].filter(Boolean).join(" ");
   f.descripcion.valor=f.descripcion.literal||null;f.descripcion.estado=f.descripcion.literal?"OK":"VACIO";
@@ -1212,6 +1223,7 @@ function extraerDePaginas(paginas,opciones={}){
  if(perfil?.formato_numero&&salida.numero.estado==="OK"&&!new RegExp(perfil.formato_numero).test(salida.numero.valor)){
   salida.numero={...salida.numero,estado:"REVISAR",motivos:[...salida.numero.motivos,"No tiene el formato de número habitual del proveedor"]};
  }
+ separadorDelNumero(salida.numero,perfil);
  const sinEtiqueta=f=>f.motivos.some(m=>/sin etiqueta/i.test(m));
  if((salida.fecha.estado==="VACIO"||sinEtiqueta(salida.fecha))&&primera.t){
   const f=leerFecha(primera.p.lineas,opcionesFecha);
@@ -1284,8 +1296,11 @@ function extraerDePaginas(paginas,opciones={}){
  salida.tablas=tablas.map(x=>x.t?{pagina:x.p.numero,y_cabecera:x.p.lineas[x.t.indiceCabecera].y-x.p.lineas[x.t.indiceCabecera].alto,
   y_fin:x.t.pie.length?x.t.pie[0].y:(x.p.lineas.at(-1)?.y??x.p.alto),ancho:x.p.ancho,alto:x.p.alto}:{pagina:x.p.numero,y_cabecera:null});
  // Tipo de documento impreso: «ABONO» o «DEVOLUCIÓN» (sello o título) frente a albarán.
- const textoDoc=clave(paginas.flatMap(p=>p.lineas.map(l=>l.texto)).join(" "));
- const tipoImpreso=/\bABONO\b/.test(textoDoc)?"ABONO":/\bDEVOLUCION\b/.test(textoDoc)?"DEVOLUCION":null;
+ // Solo como título o sello (renglón corto: «*ABONO*», «ALBARÁN RECTIFICATIVO»), nunca dentro de una frase
+ // de las condiciones («No se admitirá su devolución»: prueba real 2026-10-28).
+ const renglones=paginas.flatMap(p=>p.lineas.map(l=>clave(l.texto))).filter(t=>t.split(/\s+/).filter(Boolean).length<=4);
+ const titulo=re=>renglones.some(t=>re.test(t));
+ const tipoImpreso=titulo(/\bABONO\b/)?"ABONO":titulo(/\bRECTIFICATIV[OA]\b/)?"RECTIFICATIVO":titulo(/\bDEVOLUCION\b/)?"DEVOLUCION":null;
  Object.defineProperty(salida,"_ctx",{enumerable:false,writable:true,value:{
   perfil,totalLineas,base,tipoImpreso,hayTabla:tablas.some(x=>x.t),columnas:primera.t?.cabecera||[],opcionesNumero,precioPor,
   // Cifras impresas en el pie (para completar totales cuya etiqueta no se ha leído).
@@ -1336,9 +1351,39 @@ function completarTotales(salida,ctx){
  }
 }
 
+/*
+ * «600,111» (ficticio) con el formato del proveedor «ddd.ddd»: las mismas cifras con su separador impreso. Se acepta
+ * el número con el separador del formato (las cifras no cambian) y queda anotado. Cualquier otra
+ * diferencia no se corrige.
+ */
+function separadorDelNumero(numero,perfil){
+ if(!perfil?.formato_numero||!numero||numero.estado!=="REVISAR"||!/,/.test(String(numero.valor||"")))return;
+ const re=new RegExp(perfil.formato_numero),v=String(numero.valor).replace(/,/g,".");
+ if(!perfil.formato_numero.includes("\\.")||!re.test(v))return;
+ numero.valor=v;numero.estado="OK";
+ numero.motivos=numero.motivos.filter(m=>!/formato de número habitual/.test(m));
+ numero.notas=[...(numero.notas||[]),"Impreso con coma («"+numero.literal+"»): mismas cifras con el separador del formato del proveedor"];
+ numero.resolucion={metodo:"formato_proveedor",evidencias:["Formato "+perfil.formato_numero,"Mismas cifras impresas: «"+numero.literal+"»"]};
+}
+
 /* Validaciones de documento, confianza y estado. Se puede repetir tras combinar lecturas. */
 function finalizar(salida){
  const ctx=salida._ctx,incidencias=[...ctx.incidenciasBase];
+ // Formato de número del proveedor, también tras combinar lecturas OCR (prueba real 2026-10-28: «0.01»,
+ // la casilla del descuento junto al título «ALBARÁN» llegó a número aceptado desde otra lectura).
+ const perfilNum=ctx.perfil;
+ if(perfilNum?.formato_numero&&salida.numero?.estado==="OK"&&!new RegExp(perfilNum.formato_numero).test(salida.numero.valor)){
+  const n={...salida.numero,estado:"REVISAR",motivos:[...(salida.numero.motivos||[])]};
+  separadorDelNumero(n,perfilNum);
+  if(n.estado!=="OK")n.motivos.push("No tiene el formato de número habitual del proveedor");
+  salida.numero=n;
+ }
+ // Albarán sin ningún precio: un total impreso sin base ni IVA que lo cuadren no es fiable (prueba real
+ // 2026-10-28: totales sin respaldo en albaranes sin precios). Nunca se acepta un importe así.
+ const sinPrecios=salida.lineas.length>0&&salida.lineas.every(l=>l.precio?.valor==null&&l.importe?.valor==null);
+ if(sinPrecios&&salida.totales?.total&&salida.totales.total.valor!=null&&salida.totales.validacion?.estado!=="OK"){
+  salida.totales.total={...salida.totales.total,estado:"REVISAR",motivos:[...(salida.totales.total.motivos||[]),"Albarán sin precios: total sin base ni IVA que lo respalden"]};
+ }
  // Tipo: impreso («ABONO») o deducido de importes y cantidades negativos (devolución).
  const negativos=salida.lineas.length>0&&salida.lineas.every(l=>l.cantidad.valor<0||l.importe.valor<0);
  salida.tipo_documento=ctx.tipoImpreso?{valor:"ABONO",evidencia:"Impreso «"+ctx.tipoImpreso+"» en el documento"}:
@@ -1375,6 +1420,13 @@ function finalizar(salida){
    t.total={...t.total,estado:"REVISAR",motivos:[...(t.total.motivos||[]),"No coincide con la suma de líneas a ningún tipo de IVA (¿líneas sin leer u otros cargos?)"]};
    v("total_con_lineas","FALLO","Suma de líneas "+suma+" sin tipo de IVA que dé el total «"+t.total.literal+"»");
   }
+ }
+ // Cuota de IVA que no es base × % (prueba real 2026-10-28: el «21» de la columna «I.V.A.» leído como
+ // cuota en lugar del importe de «Importe I.V.A.»): nunca se acepta.
+ const ac=x=>["OK","VERIFICADO"].includes(x?.estado)&&x.valor!=null;
+ if(t&&ac(t.base_imponible)&&ac(t.iva_porcentaje)&&ac(t.cuota_iva)&&Math.abs(redondear(t.base_imponible.valor*t.iva_porcentaje.valor/100)-t.cuota_iva.valor)>0.021){
+  t.cuota_iva={...t.cuota_iva,estado:"REVISAR",motivos:[...(t.cuota_iva.motivos||[]),"No es base × IVA ("+t.base_imponible.literal+" × "+t.iva_porcentaje.literal+" %)"]};
+  v("cuota_iva","FALLO","Cuota «"+t.cuota_iva.literal+"» ≠ base × IVA");
  }
  if(ctx.dudosas.length)v("fin_de_tabla","FALLO","Posibles artículos después del final detectado de la tabla: "+ctx.dudosas.map(t=>"«"+t+"»").join("; "));
  for(const x of salida.validaciones_extra||[])salida.validaciones.push(x);

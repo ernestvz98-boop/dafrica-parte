@@ -136,3 +136,25 @@ test("catálogo leído a medias: el artículo no encontrado lo busca el robot en
  assert.equal(o.plan.lineas[0].articulo.estado,"buscar");
  assert.equal(o.plan.lineas[0].articulo.item_id,null);
 });
+
+// Prueba real del 2026-10-28 (lote de 40 páginas): ningún documento desaparece de la cola.
+test("documento sin proveedor de STEL o sin lectura: sin clave, pero con plan y motivos (se guarda en revisión con clave provisional)", ()=>{
+ const sinCuenta=C.orden(doc({resultado:{proveedor:{nombre:"PROVEEDOR NO REGISTRADO",estado:"REVISAR",account_id:null}}}),catalogo);
+ assert.equal(sinCuenta.clave,null);assert.ok(sinCuenta.plan);assert.match(sinCuenta.motivos.join(),/Proveedor sin cuenta/);
+ const sinLectura=C.orden({archivo:"f.pdf",paginas:[7],resultado:null,estado_documento:"ERROR_DOCUMENTO",error:"Página ilegible"},catalogo);
+ assert.equal(sinLectura.estado,"REVISAR");assert.deepEqual(sinLectura.plan.paginas,[7]);assert.match(sinLectura.motivos[0],/Página ilegible/);
+ assert.equal(C.claveProvisional("a".repeat(64)),"SIN_IDENTIFICAR|"+"a".repeat(64));
+ assert.equal(C.claveProvisional("no-es-huella"),null);
+});
+
+test("abono o rectificativo (impreso o con cantidades negativas): nunca PENDIENTE y el plan lo dice", ()=>{
+ const o=C.orden(doc({resultado:{tipo_documento:{valor:"ABONO",evidencia:"Impreso «ABONO» en el documento"}}}),catalogo);
+ assert.equal(o.estado,"REVISAR");assert.equal(o.plan.tipo,"ABONO");assert.match(o.motivos.join(),/Abono o rectificativo/);
+ assert.equal(C.orden(doc(),catalogo).plan.tipo,"ALBARAN");
+});
+
+test("comprobaciones de STEL que no se pudieron hacer quedan anotadas para repetir solo esas", ()=>{
+ const o=C.orden(doc(),catalogo,{catalogoIncompleto:true,busquedaStelIncompleta:true});
+ assert.deepEqual(o.plan.comprobaciones_pendientes,["catalogo_stel","albaranes_stel"]);
+ assert.deepEqual(C.orden(doc(),catalogo).plan.comprobaciones_pendientes,[]);
+});

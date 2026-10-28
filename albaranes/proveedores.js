@@ -32,6 +32,10 @@ const REGISTRO={
  proveedores:[
   {id:"SALTOKI",nombre:"SALTOKI PONFERRADA, S.L.",nifs:[],huellas_nif:["9cb616254545790202aef285a434d1c5e3c171eea3234b641006a2dedd99375b"],formato_numeros:"es",formato_confirmado:true,
    formato_numero:"^\\d{3}\\.\\d{3}$",formato_referencia:"^\\d{10}$",
+   // Números correlativos en el tiempo (albaranes reales de 2026: unos 300 al día, con cruces de hasta
+   // ~150 entre fechas por sus distintos puestos): un número que rompe el orden de las fechas del lote en
+   // más de 2.000 es una lectura dudosa (p. ej. la primera cifra mal leída).
+   numeros_correlativos:{tolerancia:2000},
    // «PRENSAR Ø54X2»: el OCR lee el símbolo de diámetro como M, Y, W o «Y9».
    glifos_ocr:[["(\\bPRENSAR )(?:[MYWH]{1,2}9?)(?=\\d{2}X\\d)","$1Ø"]]},
   {id:"RODAVI",nombre:"RODAVI SUMINISTROS, S.L.",nifs:[],huellas_nif:["50518a3a925c0a7a9e8ec9587574b3e58c0ed7bd7a2c2d7805c1421100d1165c"],formato_numeros:"es",formato_confirmado:true,
