@@ -27,27 +27,6 @@ async function renderHistorial(){
   setContent(`<div class="section-head"><div><h2>Auditoría</h2><p>Últimos 100 eventos.</p></div></div><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Entidad</th></tr></thead><tbody>${html}</tbody></table></div>`);
 }
 
-async function renderAdministracion(){
-  setTopbar("Administración","Usuarios, permisos y configuración");
-  const permList = [...state.permissions].sort().map(p=>'<span class="badge">'+esc(p)+'</span>').join(" ");
-  setContent(`
-    <div class="module-note sensitive-note">Este apartado es administrativo. No se muestran credenciales ni secretos del sistema.</div>
-    <div class="grid two">
-      <div class="card"><h3>Usuario actual</h3><div class="detail-grid">
-        <div class="kv"><b>Nombre</b><span>${esc(state.profile?.full_name || "—")}</span></div>
-        <div class="kv"><b>Email</b><span>${esc(state.user?.email || "—")}</span></div>
-        <div class="kv"><b>Rol</b><span>${esc(state.roles.map(r=>r.nombre||r.codigo).join(", ") || "—")}</span></div>
-      </div></div>
-      <div class="card"><h3>Seguridad activa</h3><div class="list">
-        <div class="list-item"><b>Login obligatorio</b><div class="meta">Sin sesión no se consulta ningún dato.</div></div>
-        <div class="list-item"><b>RLS de Supabase</b><div class="meta">Los permisos se verifican también en base de datos.</div></div>
-        <div class="list-item"><b>Storage privado</b><div class="meta">Documentos y costes no usan URLs públicas permanentes.</div></div>
-      </div></div>
-    </div>
-    <div class="card"><h3>Permisos efectivos</h3><div class="row">${permList || '<span class="muted">Sin permisos.</span>'}</div></div>
-  `);
-}
-
 async function bootstrap(){
   const loginForm = $("loginForm");
   loginForm.addEventListener("submit", async e => {
