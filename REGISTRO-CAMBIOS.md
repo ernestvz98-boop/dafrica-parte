@@ -3,6 +3,15 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-28 · Migración de revisión y autorización APLICADA en producción (autorizada por el usuario)
+
+- Copia previa en el esquema privado `respaldo` (sin acceso de la API): `stel_cola_20261028` (38 filas,
+  idéntica a la original), `stel_sync_log_20261028`, `robot_llaves_20261028`, `funciones_20261028`
+  (definición anterior de `stel_cola_enviar`) y `restricciones_20261028` (regla anterior de `lector_obras`).
+- Aplicada por el usuario en el editor SQL: `supabase/propuestas/20261028_revision_autorizacion_robot.sql`.
+  Comprobado: tablas y funciones nuevas, RLS activo, sin TRUNCATE para la API, cola intacta (38 filas).
+- Sin desplegar todavía: la función `robot-cola` nueva (el robot sigue con el procedimiento anterior).
+
 ## 2026-10-28 · PDF individual para las filas anteriores de la cola (propuesta, sin aplicar)
 
 - Fallo real (primera prueba de la aplicación 0.3.0): las 38 filas de `stel_cola` son anteriores al PDF
