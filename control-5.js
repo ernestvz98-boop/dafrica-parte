@@ -1,5 +1,5 @@
 "use strict";
-// Inventario operativo de EPIs y localización; gestión individual de trabajadores retirada de la web.
+// Inventario operativo de EPIs y localización.
 async function renderEpis(){
   setTopbar("EPIs","Inventario y entregas");
   loading("Cargando EPIs…");
