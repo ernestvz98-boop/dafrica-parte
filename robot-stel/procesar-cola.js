@@ -438,7 +438,12 @@ async function procesar(dir,orden,{real}){
   }
   autorizador.actual.idAlbaran(id);
   // La referencia del albarán (la del formulario visible: la ficha de un artículo creado antes también tiene «#referencia»).
-  const referencia=await p.locator("#referencia:visible").first().inputValue().catch(()=>"");
+  // Serie («ABP26») + número: la referencia completa (p. ej. ABP260001), como la muestra STEL en sus listas.
+  const referencia=await p.locator("#referencia:visible").first().evaluate(e=>{
+   let a=e.parentElement;while(a&&!a.querySelector("select"))a=a.parentElement;
+   const sel=a?.querySelector("select"),serie=sel?.options[sel.selectedIndex]?.text?.trim()||"";
+   return /^[A-Z]{2,5}\d{2}$/.test(serie)?serie+e.value.trim():e.value.trim();
+  }).catch(()=>"");
   await adjuntar(p,registro,adj);
   const adjOk=autorizador.actual.gastado.adjunto&&autorizador.actual.gastado.enlace&&(await p.locator("body").innerText()).includes(path.basename(adj));
   await captura("albaran-creado");

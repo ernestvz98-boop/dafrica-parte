@@ -3,6 +3,35 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-28 · Fase 2: primera ejecución real en STEL (3 albaranes del primer PDF real)
+
+**Producción:** STEL (escrituras autorizadas una a una por `robot-stel/escritura.js`): 3 albaranes de
+proveedor nuevos con su PDF adjunto y 5 artículos nuevos (serie MANUAL). Supabase: las 3 filas de
+`stel_cola` (órdenes corregidas con las confirmaciones del usuario, CREADO). Web: sin cambios.
+
+1. **Revisión previa:** Claude comparó cada PDF con su orden; el usuario confirmó una referencia, una
+   descripción y la obra; con dos artículos con parecidos en STEL, el usuario decidió crearlos nuevos.
+2. **Incidente del ensayo del 2026-10-27 (corregido antes):** una escritura cancelada se coló por el
+   reenvío automático de STEL y creó un albarán de prueba (pendiente de borrar con permiso expreso del
+   usuario). Guardia endurecida (respuesta local 204, sin service workers, página en blanco al cerrar).
+3. **Fallos reales de la primera ejecución, ninguno dejó datos mal en STEL:**
+   - precio de 3 decimales escrito redondeado a 2: el autorizador canceló el guardado del albarán (no se
+     creó); ahora el precio va exacto y se comprueba en pantalla;
+   - sesión de STEL caducada: el robot la comprueba antes de tomar albaranes de la cola;
+   - dos artículos nuevos en un albarán: tras guardar el primero STEL se queda en su ficha; ahora vuelve
+     a la lista de productos;
+   - la referencia guardada en la cola era la del artículo o solo el número: ahora serie + número;
+   - tras un ERROR el robot detiene el lote (antes seguía con el siguiente).
+4. **Reglas nuevas de la cola (`albaranes/cola-stel.js`):** la falta del ABP escrito no impide el
+   automático si es lo único y la búsqueda en STEL fue completa; sin lista de proyectos, la obra validada
+   va sin id y el robot elige el proyecto «(PRYxxxxx)» si es uno; con el catálogo leído a medias, el
+   artículo queda «buscar» y el robot lo resuelve en STEL (referencia exacta o alta sin parecidos, con la
+   misma regla que la web y búsquedas leídas enteras).
+
+**Verificación:** los 3 albaranes abiertos en STEL en solo lectura: proveedor, fecha, título, Ref.
+Documento Proveedor, líneas (artículo, unidades, precio, descuento), totales iguales al papel, obra
+correcta y PDF adjunto. `npm test` completo en verde.
+
 ## 2026-10-26 · Fase 2: de la lectura a STEL (aprobada por el usuario)
 
 **Decisiones del usuario:** el lector queda aprobado para escribir en STEL; automático solo si está
