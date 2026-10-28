@@ -28,6 +28,12 @@ proveedor nuevos con su PDF adjunto y 5 artículos nuevos (serie MANUAL). Supaba
    artículo queda «buscar» y el robot lo resuelve en STEL (referencia exacta o alta sin parecidos, con la
    misma regla que la web y búsquedas leídas enteras).
 
+5. **Albarán de prueba del incidente del 2026-10-27 borrado** con permiso expreso del usuario
+   (2026-10-28), tras guardar su copia (datos y capturas, fuera del repositorio):
+   `crearAutorizadorBorrado` en `robot-stel/escritura.js` permite UNA vez el borrado de ese único id
+   (desde la ficha STEL envía «Documento actual» en vez de la referencia; el id es lo que se comprueba).
+   Los dos primeros intentos los canceló la protección; no se borró nada más.
+
 **Verificación:** los 3 albaranes abiertos en STEL en solo lectura: proveedor, fecha, título, Ref.
 Documento Proveedor, líneas (artículo, unidades, precio, descuento), totales iguales al papel, obra
 correcta y PDF adjunto. `npm test` completo en verde.

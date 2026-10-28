@@ -118,3 +118,18 @@ test("por pasos: primero solo las altas de artículos (ningún albarán todavía
 test("obra sin id de STEL: no se autoriza ningún albarán hasta conocerlo", ()=>{
  assert.throws(()=>E.esperado({...plan,obra:{codigo:"PRY09999",stel_id:null,nombre:null}},{ids:{"ZZ-1":888}}),/incompleta/);
 });
+
+test("borrado con permiso expreso: solo ese documento, uno, una vez", ()=>{
+ const a=E.crearAutorizadorBorrado({id:"5001",referencia:"ABP000001"});
+ const b=x=>q({idsDocumentosComerciales:x});
+ assert.equal(a.autorizar("guardarDocumentoComercial",albaran())[0],false,"otra escritura");
+ assert.equal(a.autorizar("eliminarDocumentosComerciales",b([{id:"5002",textoNoBorrado:"ABP000002"}]))[0],false,"otro documento");
+ assert.equal(a.autorizar("eliminarDocumentosComerciales",b([{id:"5001",textoNoBorrado:"ABP000001"},{id:"5002"}]))[0],false,"varios");
+ assert.equal(a.autorizar("eliminarDocumentosComerciales",b([{id:"5001",textoNoBorrado:"ABP000009"}]))[0],false,"otra referencia");
+ assert.equal(a.autorizar("eliminarDocumentosComerciales",b([{id:"5002",textoNoBorrado:"Documento actual"}]))[0],false,"desde la ficha, otro id");
+ assert.equal(a.autorizar("eliminarDocumentosComerciales",b([{id:"5001",textoNoBorrado:"Documento actual"}]))[0],true,"desde la ficha, ese id");
+ assert.equal(a.autorizar("eliminarDocumentosComerciales",b([{id:"5001",textoNoBorrado:"ABP000001"}]))[0],false,"segunda vez");
+ const c=E.crearAutorizadorBorrado({id:"5001",referencia:"ABP000001"});
+ assert.equal(c.autorizar("eliminarDocumentosComerciales",b([{id:"5001",textoNoBorrado:"ABP-000001"}]))[0],true,"misma referencia con otro formato");
+ assert.throws(()=>E.crearAutorizadorBorrado({id:"x",referencia:"ABP000001"}));
+});

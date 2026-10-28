@@ -88,7 +88,7 @@ async function abrirStel(dir,autorizador){
    if(deStel&&autorizador){
     let res=null;
     if(multipart&&registro.adjuntoAbierto)res=autorizador.autorizar("adjunto",null,{multipart,cuerpoTexto:(r.postDataBuffer()||Buffer.alloc(0)).toString("latin1")});
-    else if(["guardarProducto","guardarDocumentoComercial"].includes(op))res=autorizador.autorizar(op,new URLSearchParams(cuerpo));
+    else if(["guardarProducto","guardarDocumentoComercial",...(autorizador.operaciones||[])].includes(op))res=autorizador.autorizar(op,new URLSearchParams(cuerpo));
     else if(registro.adjuntoAbierto)res=autorizador.autorizar("enlazarAdjunto",null,{operacion:op,cuerpoTexto:decodeURIComponent(cuerpo.replace(/\+/g," "))});
     if(res){
      const campos=res[0]||multipart?undefined:[...new URLSearchParams(cuerpo).keys()].slice(0,40);

@@ -138,4 +138,30 @@ function crearAutorizador(esp){
  return {autorizar,gastado,idAlbaran:id=>{idCreado=id==null?null:String(id);}};
 }
 
-module.exports={esperado,soloProductos,crearAutorizador,titulo,descuentoLinea};
+/*
+ * Borrado de UN documento concreto con permiso expreso del usuario (p. ej. el albarán de prueba que dejó el
+ * incidente del ensayo del 2026-10-27; autorizado por el usuario el 2026-10-28). Solo la operación de
+ * borrar de STEL con ese único id, una vez; cualquier otra escritura, otro id o varios a la vez se cancela.
+ * Antes de usarlo se guarda una copia del documento (datos y capturas) fuera del repositorio.
+ */
+function crearAutorizadorBorrado({id,referencia}){
+ if(!/^\d+$/.test(String(id||""))||!referencia)throw Error("Borrado sin id o sin referencia");
+ let hecho=false;
+ function autorizar(op,q){
+  const diag={operacion:op};
+  if(op!=="eliminarDocumentosComerciales")return [false,"operación de escritura no autorizada",diag];
+  if(hecho)return [false,"ya borrado (reintento o repetido)",diag];
+  let L;try{L=JSON.parse(q?.get("idsDocumentosComerciales")||"");}catch{L=null;}
+  if(!Array.isArray(L)||L.length!==1)return [false,"ha de ser exactamente un documento",diag];
+  if(String(L[0]?.id)!==String(id))return [false,"otro documento",diag];
+  // STEL escribe la referencia a su manera (con o sin espacios o guiones): se comparan solo letras y cifras.
+  const ref=x=>String(x??"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  diag.texto=String(L[0]?.textoNoBorrado??"").slice(0,40);
+  // Desde la ficha del documento STEL envía «Documento actual» en vez de la referencia; el id manda.
+  if(L[0]?.textoNoBorrado!=null&&String(L[0].textoNoBorrado)!=="Documento actual"&&ref(L[0].textoNoBorrado)!==ref(referencia))return [false,"otra referencia",diag];
+  hecho=true;return [true,"ok",diag];
+ }
+ return {autorizar,operaciones:["eliminarDocumentosComerciales"],get hecho(){return hecho;}};
+}
+
+module.exports={esperado,soloProductos,crearAutorizador,crearAutorizadorBorrado,titulo,descuentoLinea};
