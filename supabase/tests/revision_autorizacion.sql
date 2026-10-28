@@ -34,7 +34,11 @@ insert into public.stel_cola (id, clave, estado, motivos, plan, pdf_ruta, pdf_sh
    'pdf',jsonb_build_object('individual',true,'sha256',repeat('a',64),'paginas',1)), repeat('a',64)||'.pdf', repeat('a',64)),
  ('00000000-0000-0000-0000-000000000002','SIN_IDENTIFICAR|'||repeat('b',64),'REVISAR','[]',
   jsonb_build_object('tipo','ABONO','numero',null,'lineas','[]'::jsonb,'paginas','[22]'::jsonb,'pdf',jsonb_build_object('individual',true,'sha256',repeat('b',64))), repeat('b',64)||'.pdf', repeat('b',64)),
- ('00000000-0000-0000-0000-000000000003','9001|999|2026-10-01','CREADO','[]','{"lineas":[]}', null, null);
+ ('00000000-0000-0000-0000-000000000003','9001|999|2026-10-01','CREADO','[]','{"lineas":[]}', null, null),
+ -- Fila anterior al 2026-10-28: PDF del lote entero (40 páginas); el albarán es la página 6.
+ ('00000000-0000-0000-0000-000000000004','9001|600222|2026-10-01','REVISAR','[]',
+  jsonb_build_object('numero','600.222','archivo','lote.pdf','paginas','[6]'::jsonb,'lineas','[]'::jsonb), repeat('9',64)||'.pdf', repeat('9',64));
+insert into storage.objects (bucket_id, name) values ('albaranes-stel', repeat('7',64)||'.pdf');
 
 set role authenticated;
 -- Sin sesión verificada / sin permiso: nada.
@@ -82,6 +86,19 @@ select * from public.stel_revision_guardar('00000000-0000-0000-0000-000000000002
 select pg_temp.rechazada('00000000-0000-0000-0000-000000000002',repeat('1',64),'sin identificar.*Abono.*Obra');
 -- Un albarán ya creado no se revisa.
 select pg_temp.espera_error($$select public.stel_revision_guardar('00000000-0000-0000-0000-000000000003','{"lineas":[]}','[]',repeat('1',64),now(),true,null)$$,'estado CREADO');
+-- PDF individual de una fila anterior: solo desde su lote, con sus páginas y ya subido al almacén.
+select pg_temp.espera_error($$select public.stel_pdf_individual('00000000-0000-0000-0000-000000000004',repeat('7',64),1,repeat('8',64),(select actualizado_en from public.stel_cola where id='00000000-0000-0000-0000-000000000004'))$$,'no es el lote');
+select pg_temp.espera_error($$select public.stel_pdf_individual('00000000-0000-0000-0000-000000000004',repeat('7',64),40,repeat('9',64),(select actualizado_en from public.stel_cola where id='00000000-0000-0000-0000-000000000004'))$$,'1 página');
+select pg_temp.espera_error($$select public.stel_pdf_individual('00000000-0000-0000-0000-000000000004',repeat('6',64),1,repeat('9',64),(select actualizado_en from public.stel_cola where id='00000000-0000-0000-0000-000000000004'))$$,'no está en el almacén');
+select pg_temp.espera_error($$select public.stel_pdf_individual('00000000-0000-0000-0000-000000000004',repeat('7',64),1,repeat('9',64),'2000-01-01')$$,'ha cambiado');
+select public.stel_pdf_individual('00000000-0000-0000-0000-000000000004',repeat('7',64),1,repeat('9',64),(select actualizado_en from public.stel_cola where id='00000000-0000-0000-0000-000000000004')) > now() - interval '1 minute';
+do $$ begin
+  if (select pdf_ruta from public.stel_cola where id='00000000-0000-0000-0000-000000000004')<>repeat('7',64)||'.pdf'
+     or (select plan->'pdf'->>'sha256' from public.stel_cola where id='00000000-0000-0000-0000-000000000004')<>repeat('7',64)
+     or (select plan->'pdf'->'original'->>'sha256' from public.stel_cola where id='00000000-0000-0000-0000-000000000004')<>repeat('9',64)
+     or (select plan->>'numero' from public.stel_cola where id='00000000-0000-0000-0000-000000000004')<>'600.222' then raise exception 'PDF individual mal enlazado'; end if;
+end $$;
+select pg_temp.espera_error($$select public.stel_pdf_individual('00000000-0000-0000-0000-000000000004',repeat('5',64),1,repeat('7',64),(select actualizado_en from public.stel_cola where id='00000000-0000-0000-0000-000000000004'))$$,'ya tiene su PDF individual');
 -- Llave del robot: solo huella, máximo 12 h, máximo 3 vigentes.
 select pg_temp.espera_error($$select public.robot_llave_registrar(repeat('d',64),24)$$,'Llave no válida');
 select public.robot_llave_registrar(repeat('d',64),12) > now();
@@ -90,6 +107,7 @@ do $$ begin
   if (select count(*) from public.stel_sync_log where tipo_sync='AUTORIZACION' and estado='RECHAZADA')<3 then raise exception 'Faltan rechazos en el registro'; end if;
   if (select count(*) from public.stel_sync_log where tipo_sync='AUTORIZACION' and estado='CONCEDIDA' and usuario='11111111-1111-1111-1111-111111111111')<>1 then raise exception 'Falta la autorización en el registro'; end if;
   if (select count(*) from public.stel_sync_log where tipo_sync='REVISION' and cola_id='00000000-0000-0000-0000-000000000001')<>3 then raise exception 'Faltan revisiones en el registro'; end if;
+  if (select count(*) from public.stel_sync_log where tipo_sync='PDF_INDIVIDUAL' and cola_id='00000000-0000-0000-0000-000000000004')<>1 then raise exception 'Falta el PDF individual en el registro'; end if;
   if (select count(*) from public.stel_revisiones)<>4 then raise exception 'Revisiones: %', (select count(*) from public.stel_revisiones); end if;
 end $$;
 -- Obras PRYMP en la lista del lector; un código mal formado sigue rechazado.

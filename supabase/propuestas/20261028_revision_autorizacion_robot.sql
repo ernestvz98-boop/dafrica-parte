@@ -9,14 +9,15 @@
 --     del plan y del PDF autorizados, controles). Una vigente por albarán; el robot la consume una vez.
 --  3. stel_sync_log: columnas cola_id y usuario (nulas en lo existente) para el historial por albarán.
 --  4. stel_cola_enviar: una relectura ya no pisa un albarán revisado o autorizado.
---  5. Funciones: stel_revision_guardar, stel_autorizar, stel_autorizacion_anular, robot_llave_registrar.
+--  5. Funciones: stel_revision_guardar, stel_autorizar, stel_autorizacion_anular, robot_llave_registrar y
+--     stel_pdf_individual (PDF individual de las filas anteriores, que guardaban el lote entero).
 --  6. Permisos: sin TRUNCATE/REFERENCES/TRIGGER para anon y authenticated en las tablas de la cola.
 --  7. lector_obras admite también códigos PRYMP (importador de obras; petición del usuario).
 -- La verificación en dos pasos se mantiene: tiene_permiso() no concede nada a una sesión sin código.
 -- Prueba: supabase/tests/revision_autorizacion.sql (Postgres local con auth y permisos simulados).
 -- Deshacer: drop function public.stel_revision_guardar(uuid,jsonb,jsonb,text,timestamptz,boolean,text),
 --   public.stel_autorizar(uuid,text,timestamptz,jsonb), public.stel_autorizacion_anular(uuid,text),
---   public.robot_llave_registrar(text,integer); drop table public.stel_autorizaciones, public.stel_revisiones;
+--   public.robot_llave_registrar(text,integer), public.stel_pdf_individual(uuid,text,integer,text,timestamptz); drop table public.stel_autorizaciones, public.stel_revisiones;
 --   alter table public.stel_sync_log drop column cola_id, drop column usuario; y volver a crear
 --   stel_cola_enviar desde supabase/migraciones/20261026_stel_cola.sql.
 
@@ -250,6 +251,47 @@ begin
 end;
 $$;
 
+-- 5e. PDF individual para las filas anteriores al 2026-10-28 (que guardaban el PDF del lote entero).
+-- La aplicación separa en el ordenador las páginas del albarán, sube ese PDF al almacén (permiso de subida
+-- ya existente) y lo enlaza aquí. Exige: fila sin PDF individual, el lote que tiene guardado, el mismo número
+-- de páginas que el albarán y el fichero ya subido. El robot vuelve a comprobar huella y páginas antes de
+-- crear, y la persona ve el PDF individual antes de confirmar. Anula la autorización vigente (si la hubiera).
+create or replace function public.stel_pdf_individual(p_cola_id uuid, p_sha256 text, p_paginas integer, p_original_sha256 text,
+  p_actualizado_en timestamptz)
+returns timestamptz language plpgsql security definer set search_path to '' as $$
+declare c public.stel_cola%rowtype; nuevo_plan jsonb; hecho timestamptz;
+begin
+  if not public.tiene_permiso('costes.editar') then raise exception 'Permiso costes.editar requerido' using errcode = '42501'; end if;
+  if p_sha256 !~ '^[0-9a-f]{64}$' or p_original_sha256 !~ '^[0-9a-f]{64}$' or p_sha256 = p_original_sha256 then raise exception 'PDF no válido'; end if;
+  select * into c from public.stel_cola s where s.id = p_cola_id for update;
+  if c.id is null then raise exception 'Albarán no encontrado en la cola'; end if;
+  if c.estado not in ('PENDIENTE','REVISAR','PARADO') then raise exception 'Un albarán en estado % no se cambia aquí', c.estado; end if;
+  if date_trunc('milliseconds', c.actualizado_en) <> date_trunc('milliseconds', p_actualizado_en) then
+    raise exception 'El albarán ha cambiado desde que lo abriste; vuelve a abrirlo' using errcode = '40001';
+  end if;
+  if coalesce((c.plan->'pdf'->>'individual')::boolean, false) then raise exception 'Este albarán ya tiene su PDF individual'; end if;
+  if c.pdf_sha256 is distinct from p_original_sha256 or c.pdf_ruta is distinct from c.pdf_sha256 || '.pdf' then
+    raise exception 'El PDF de origen no es el lote guardado en esta fila';
+  end if;
+  if jsonb_typeof(c.plan->'paginas') <> 'array' or p_paginas <> jsonb_array_length(c.plan->'paginas') or p_paginas < 1 then
+    raise exception 'El PDF individual ha de tener las % página(s) del albarán', jsonb_array_length(c.plan->'paginas');
+  end if;
+  if not exists (select 1 from storage.objects o where o.bucket_id = 'albaranes-stel' and o.name = p_sha256 || '.pdf') then
+    raise exception 'El PDF individual no está en el almacén';
+  end if;
+  nuevo_plan := jsonb_set(c.plan, '{pdf}', jsonb_build_object('individual', true, 'sha256', p_sha256, 'paginas', p_paginas,
+    'original', jsonb_build_object('sha256', p_original_sha256, 'nombre', c.plan->>'archivo', 'paginas', c.plan->'paginas', 'total_paginas', null),
+    'separado_despues', true));
+  update public.stel_autorizaciones a set estado = 'ANULADA', anulada_por = auth.uid(), anulada_en = now(),
+    motivo_anulacion = 'PDF individual separado después' where a.cola_id = c.id and a.estado = 'VIGENTE';
+  update public.stel_cola s set plan = nuevo_plan, pdf_ruta = p_sha256 || '.pdf', pdf_sha256 = p_sha256, actualizado_en = now()
+  where s.id = c.id returning s.actualizado_en into hecho;
+  perform public.stel_registrar('PDF_INDIVIDUAL', 'SEPARADO', c.id,
+    jsonb_build_object('pdf_sha256', p_sha256, 'lote_sha256', p_original_sha256, 'paginas', c.plan->'paginas'));
+  return hecho;
+end;
+$$;
+
 revoke all on function public.stel_revision_guardar(uuid,jsonb,jsonb,text,timestamptz,boolean,text) from public, anon;
 revoke all on function public.stel_autorizar(uuid,text,timestamptz,jsonb) from public, anon;
 revoke all on function public.stel_autorizacion_anular(uuid,text) from public, anon;
@@ -258,5 +300,7 @@ grant execute on function public.stel_revision_guardar(uuid,jsonb,jsonb,text,tim
 grant execute on function public.stel_autorizar(uuid,text,timestamptz,jsonb) to authenticated;
 grant execute on function public.stel_autorizacion_anular(uuid,text) to authenticated;
 grant execute on function public.robot_llave_registrar(text,integer) to authenticated;
+revoke all on function public.stel_pdf_individual(uuid,text,integer,text,timestamptz) from public, anon;
+grant execute on function public.stel_pdf_individual(uuid,text,integer,text,timestamptz) to authenticated;
 
 commit;

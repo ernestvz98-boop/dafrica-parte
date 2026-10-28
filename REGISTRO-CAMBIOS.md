@@ -3,6 +3,15 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-10-28 · PDF individual para las filas anteriores de la cola (propuesta, sin aplicar)
+
+- Fallo real (primera prueba de la aplicación 0.3.0): las 38 filas de `stel_cola` son anteriores al PDF
+  individual y guardan el lote entero; ninguna se podría autorizar. Nueva función `stel_pdf_individual` en
+  `supabase/propuestas/20261028_revision_autorizacion_robot.sql`: enlaza el PDF que la aplicación separa del
+  lote (exige la fila sin PDF individual, el lote que tiene guardado, sus páginas y el fichero ya subido).
+- Prueba: `supabase/tests/revision_autorizacion.sql` (Postgres local) → `REVISION_AUTORIZACION OK`. Sin
+  aplicar en producción.
+
 ## 2026-10-28 · Prueba real de 40 páginas: ningún documento sin fila, PDF individual, lector y robot
 
 **Producción:** sin cambios (rama de desarrollo; `main`, funciones Edge y base de datos sin tocar). Las
