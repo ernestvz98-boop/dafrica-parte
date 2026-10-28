@@ -8,7 +8,6 @@ async function renderHome(){
     ["Partes","partes_diarios","partes.ver","partes"],
     ["Obras","obras","obras.ver","obras"],
     ["Vehículos","vehiculos","vehiculos.ver","vehiculos"],
-    ["Trabajadores","workers","trabajadores.ver","trabajadores"],
     ["EPIs","epis","epis.ver","epis"],
     ["Costes","coste_documentos","costes.ver","costes"]
   ].filter(x => has(x[2]));
