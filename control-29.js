@@ -323,7 +323,7 @@ function montar(root){
   const A=lib.archivoPdf,m=r.motores||{};
   const opciones={busquedaStelCompleta:!!m.stel_compras?.completo,catalogoIncompleto:!catalogo||!catalogo.articulos_completo,
    busquedaStelIncompleta:!!m.stel_compras?.consultado&&!m.stel_compras?.completo,visionFallida:!!m.vision?.fallos};
-  const huellas=new Map(),subidos=new Map();
+  const huellas=new Map(),subidos=new Map(),originales=new Set();
   const huellaDe=async b=>{if(!huellas.has(b))huellas.set(b,await A.huella(b));return huellas.get(b);};
   const subir=async(bytes,h)=>{
    if(!subidos.has(h)){
@@ -362,7 +362,7 @@ function montar(root){
   for(const x of ordenes){
    const {d,o,individual,original}=x;let sha=null,errPdf=x.errPdf;
    try{
-    if(original&&await subir(pdfDeDoc.get(d),original.sha256))info.originales=subidos.size;
+    if(original&&await subir(pdfDeDoc.get(d),original.sha256)){originales.add(original.sha256);info.originales=originales.size;}
     if(individual){
      if(await subir(individual.bytes,individual.sha256)){sha=individual.sha256;info.pdf_individuales++;}
      else errPdf="No se pudo guardar el PDF individual";
