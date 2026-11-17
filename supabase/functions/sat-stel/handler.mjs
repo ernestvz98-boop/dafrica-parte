@@ -1,5 +1,6 @@
 /*
- * DAFRICA SAT · única puerta entre la aplicación de partes y STEL Order (2026-11-16, PROPUESTA: sin desplegar).
+ * DAFRICA SAT · única puerta entre la aplicación de partes y STEL Order (2026-11-16; desplegada el 2026-11-17 con
+ * autorización del usuario, verify_jwt activado).
  * La clave de STEL (`STEL_API_KEY`) solo existe aquí, en el servidor. Rutas y campos tomados de la
  * especificación OpenAPI oficial (https://app.stelorder.com/app/api/openapi.json); ver docs/sat-diseno.md.
  *

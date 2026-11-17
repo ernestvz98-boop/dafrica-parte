@@ -3,7 +3,20 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
-## 2026-11-16 · DAFRICA SAT: partes de técnicos con firma y facturación en STEL (NO desplegado)
+## 2026-11-17 · DAFRICA SAT EN PRODUCCIÓN (autorizado por el usuario: «tienes permiso total»)
+
+- Copia previa en `respaldo`: `permisos_20261117_sat`, `roles_20261117_sat`, `rol_permisos_20261117_sat`,
+  `storage_buckets_20261117_sat`. Migraciones `sat_partes_1`, `sat_partes_2` y `sat_partes_3_search_path` (contenido de
+  `supabase/propuestas/20261116_sat_partes.sql`). Comprobado: 16 tablas con RLS y sin permisos para la web, 0 funciones
+  ejecutables sin sesión, las de STEL solo para la clave de servicio, almacén `sat-archivos` privado con 2 políticas.
+- Función Edge `sat-stel` versión 1 (verify_jwt activado): sin sesión responde 401.
+- Nuevo: materiales desde la FOTO del albarán o ticket del proveedor (petición del usuario), leída en el teléfono con el
+  lector de albaranes (`motor-navegador.js`: solo se añade `paginaDesdeLienzo` y la ruta de tesseract configurable; la
+  lectura no cambia). Medido con 4 albaranes reales del lote del 17 (en local, nada subido): 3 de Saltoki con todas las
+  referencias y cantidades bien (16 líneas); otro proveedor con una referencia mal leída MARCADA para comparar; Bierzo
+  Recicla sin líneas (formato no reconocido: se escriben a mano). Ninguna lectura errónea entra sin aviso.
+
+## 2026-11-16 · DAFRICA SAT: partes de técnicos con firma y facturación en STEL
 
 - Nuevo: aplicación `sat/` (web instalable, funciona sin conexión), propuesta
   `supabase/propuestas/20261116_sat_partes.sql` (solo objetos `sat_*`, permisos `sat.*`, roles `TECNICO_SAT` y

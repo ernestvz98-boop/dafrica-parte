@@ -366,7 +366,7 @@ $$;
 
 -- Ruta del almacén: «<id del parte>/<fichero>». Solo el técnico del parte (mientras lo puede cambiar) o
 -- administración pueden subir; ver: el técnico del parte o administración.
-create or replace function public.sat_parte_de_ruta(p_ruta text) returns uuid language sql immutable as $$
+create or replace function public.sat_parte_de_ruta(p_ruta text) returns uuid language sql immutable set search_path = public as $$
   select case when split_part(p_ruta, '/', 1) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
     then split_part(p_ruta, '/', 1)::uuid end
 $$;

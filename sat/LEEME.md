@@ -26,6 +26,11 @@ Diseño y capacidades de STEL comprobadas: [`docs/sat-diseno.md`](../docs/sat-di
      confirmar. Fotos: **Hacer foto** o **Desde la galería**, con momento (antes/durante/después) y comentario.
    - *Trabajo*: comprobaciones con resultado, avería, trabajos, materiales (cantidad, unidad, referencia y,
      si lo sabes, el artículo de STEL), tiempos de trabajo y desplazamiento, estado final y pendientes.
+     **📷 Foto del albarán o ticket del proveedor**: la foto se adjunta al parte y al albarán de trabajo de STEL, y el
+     lector de albaranes (en el propio teléfono, sin enviar la foto a nadie) propone sus líneas como materiales:
+     referencia, descripción y cantidad; si la referencia está una sola vez en STEL, el artículo se elige solo. Lo leído
+     con dudas sale en ámbar para compararlo con el papel. La primera vez descarga el lector (unos 9 MB) y tarda alrededor
+     de un minuto por foto. Con proveedores que el lector no reconoce no salen líneas: se escriben a mano.
    - *Revisar y firmar*: el parte completo y el texto del alcance. **Firma del técnico** y **firma del
      responsable** (nombre y cargo) o **«No está o no quiere firmar…»** con el motivo. Con las dos, **Generar
      PDF y enviar**. El PDF se puede enseñar o compartir al momento.
@@ -75,17 +80,16 @@ Queda registrado quién crea, cambia, firma, revisa, aprueba, factura y entrega 
 
 ---
 
-## 3. Puesta en marcha (producción · cada paso necesita tu autorización)
+## 3. Puesta en marcha
 
-1. **Base de datos**: copia de seguridad y aplicar `supabase/propuestas/20261116_sat_partes.sql`
-   (crea solo objetos `sat_*`, tres permisos, dos roles y el almacén `sat-archivos`; no toca nada existente).
-2. **Función Edge `sat-stel`**: desplegar `supabase/functions/sat-stel/` con `verify_jwt` activado. Usa los
-   secretos ya existentes `STEL_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y `SUPABASE_ANON_KEY`.
-3. **Primera prueba con STEL real** (con tu visto bueno): en Ajustes, «Actualizar catálogo desde STEL» (solo
-   lectura); elegir los servicios de mano de obra y desplazamiento; un parte de prueba de principio a fin con un
-   cliente de prueba de STEL, para confirmar lo que la documentación no garantiza (ver §5).
-4. **Web**: publicar `sat/` y el cambio de `control-1.js` (menú «Servicio técnico») en `main`.
-5. Asignar los roles a las personas.
+1. ✅ **Base de datos** (2026-11-17): aplicada con copia previa (ver `REGISTRO-CAMBIOS.md`).
+2. ✅ **Función Edge `sat-stel`** (2026-11-17): desplegada con `verify_jwt`. Usa los secretos existentes
+   `STEL_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y `SUPABASE_ANON_KEY`.
+3. ✅ **Web**: `sat/` y el menú «Servicio técnico» publicados en `main`.
+4. **Tú**: asignar los roles (`TECNICO_SAT`, `FACTURACION_SAT`) en DAFRICA Control → Administración.
+5. **Tú, la primera vez**: Oficina → Ajustes → «Actualizar catálogo desde STEL» (solo lectura) y elegir los servicios
+   de mano de obra y desplazamiento. Después, un primer parte real con un cliente de prueba confirma lo que la
+   documentación de STEL no garantiza (ver §5).
 
 ---
 
