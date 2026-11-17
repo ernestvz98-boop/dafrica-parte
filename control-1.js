@@ -30,6 +30,7 @@ const modules = [
   {id:"maquinaria", label:"Maquinaria", icon:"⚙", permission:"maquinaria.ver"},
   {id:"mantenimiento", label:"Mantenimientos", icon:"🛠", permission:"mantenimiento.ver"},
   {id:"partes", label:"Partes", icon:"📝", any:["partes.ver","partes.crear","partes.editar"]},
+  {id:"sat", label:"Servicio técnico", icon:"🔧", any:["sat.tecnico","sat.administrar","sat.facturar"]},
   {id:"obras", label:"Obras", icon:"🏗", permission:"obras.ver"},
   {id:"vehiculos", label:"Vehículos", icon:"🚚", permission:"vehiculos.ver"},
   {id:"epis", label:"EPIs", icon:"🦺", permission:"epis.ver"},
@@ -422,6 +423,7 @@ async function renderModule(){
     case "maquinaria": return renderMachines();
     case "mantenimiento": return renderMaintenance();
     case "partes": return renderPartes();
+    case "sat": return renderSat();
     case "obras": return renderObras();
     case "vehiculos": return renderVehiculos();
     case "kilometraje": return renderVehiculos();
@@ -433,6 +435,13 @@ async function renderModule(){
     case "historial": return renderHistorial();
     default: return renderHome();
   }
+}
+
+// Servicio técnico: aplicación móvil propia (sat/) con la misma sesión. Desde «?mod=sat» (vuelta del inicio de sesión) se abre sola.
+function renderSat(){
+  setContent('<div class="card"><h2>Servicio técnico</h2><p>Avisos, partes con dictado, fotos y firmas, revisión y facturas con STEL.</p>' +
+    '<a class="btn" href="./sat/">Abrir la aplicación de partes</a></div>');
+  if(new URLSearchParams(location.search).get("mod") === "sat") location.assign("./sat/");
 }
 
 async function countRows(table, permission){

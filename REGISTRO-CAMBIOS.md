@@ -3,6 +3,32 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-17 · DAFRICA SAT EN PRODUCCIÓN (autorizado por el usuario: «tienes permiso total»)
+
+- Copia previa en `respaldo`: `permisos_20261117_sat`, `roles_20261117_sat`, `rol_permisos_20261117_sat`,
+  `storage_buckets_20261117_sat`. Migraciones `sat_partes_1`, `sat_partes_2` y `sat_partes_3_search_path` (contenido de
+  `supabase/propuestas/20261116_sat_partes.sql`). Comprobado: 16 tablas con RLS y sin permisos para la web, 0 funciones
+  ejecutables sin sesión, las de STEL solo para la clave de servicio, almacén `sat-archivos` privado con 2 políticas.
+- Función Edge `sat-stel` versión 1 (verify_jwt activado): sin sesión responde 401.
+- Nuevo: materiales desde la FOTO del albarán o ticket del proveedor (petición del usuario), leída en el teléfono con el
+  lector de albaranes (`motor-navegador.js`: solo se añade `paginaDesdeLienzo` y la ruta de tesseract configurable; la
+  lectura no cambia). Medido con 4 albaranes reales del lote del 17 (en local, nada subido): 3 de Saltoki con todas las
+  referencias y cantidades bien (16 líneas); otro proveedor con una referencia mal leída MARCADA para comparar; Bierzo
+  Recicla sin líneas (formato no reconocido: se escriben a mano). Ninguna lectura errónea entra sin aviso.
+
+## 2026-11-16 · DAFRICA SAT: partes de técnicos con firma y facturación en STEL
+
+- Nuevo: aplicación `sat/` (web instalable, funciona sin conexión), propuesta
+  `supabase/propuestas/20261116_sat_partes.sql` (solo objetos `sat_*`, permisos `sat.*`, roles `TECNICO_SAT` y
+  `FACTURACION_SAT`, almacén privado `sat-archivos`), función Edge `supabase/functions/sat-stel/` y entrada
+  «Servicio técnico» en el menú (`control-1.js`). Diseño y capacidades de STEL verificadas en la especificación
+  oficial: `docs/sat-diseno.md`; uso y mantenimiento: `sat/LEEME.md`.
+- Verificado en local: `npm test` 375/375 (incluye `pruebas/sat-*.test.mjs` con emulador de Supabase en PGlite,
+  la función real y un STEL falso), `supabase/tests/sat_partes.sql` correcto, y recorrido completo en el
+  navegador (técnico sin conexión y recarga, dictado, foto, firmas, corrección tras firmar, ausencia del
+  responsable, oficina, aprobación, factura, bandeja y entrega).
+- Producción: nada aplicado ni desplegado. Falta autorización para la migración, la función y publicar la web.
+
 ## 2026-10-26 · Fase 2: de la lectura a STEL (aprobada por el usuario)
 
 **Decisiones del usuario:** el lector queda aprobado para escribir en STEL; automático solo si está
