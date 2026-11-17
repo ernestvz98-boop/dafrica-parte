@@ -3,11 +3,14 @@
   "private": true,
   "description": "Pruebas automatizadas del lector determinista de albaranes de DAFRICA Control",
   "scripts": {
-    "test": "node --test \"pruebas/*.test.js\"",
+    "test": "node --test \"pruebas/*.test.js\" \"pruebas/*.test.mjs\"",
+    "test:sat": "node --test \"pruebas/sat-*.test.mjs\" && node supabase/tests/ejecutar-local.mjs supabase/tests/sat_simulado.sql supabase/propuestas/20261116_sat_partes.sql supabase/tests/sat_partes.sql",
+    "sat:emulador": "node pruebas/sat/emulador.mjs --puerto 8787 --demo",
     "evaluar": "node pruebas/evaluar.js",
     "plantilla": "node pruebas/generar-plantilla.js"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.8",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "4.10.38",
     "tesseract.js": "5.1.1"

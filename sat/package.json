@@ -1,0 +1,6 @@
+{
+  "name": "dafrica-sat",
+  "private": true,
+  "description": "DAFRICA SAT: módulos ES de la aplicación de partes (sin compilación)",
+  "type": "module"
+}

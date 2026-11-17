@@ -1,0 +1,12 @@
+{
+  "name": "DAFRICA SAT · partes de trabajo",
+  "short_name": "DAFRICA SAT",
+  "start_url": "./#/avisos",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "es",
+  "icons": [{"src": "../dafrica-logo.png.png", "sizes": "any", "type": "image/png", "purpose": "any"}]
+}

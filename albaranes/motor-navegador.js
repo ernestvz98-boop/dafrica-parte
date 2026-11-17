@@ -9,7 +9,8 @@
  */
 (function(root){
 const DPI=300;
-const BASE=(()=>{try{return new URL("vendor/tesseract/",document.baseURI).href;}catch(e){return "vendor/tesseract/";}})();
+// Otra página de la web (p. ej. sat/) puede indicar dónde está vendor/tesseract antes de cargar este fichero.
+const BASE=root.DAFRICA_TESSERACT_BASE||(()=>{try{return new URL("vendor/tesseract/",document.baseURI).href;}catch(e){return "vendor/tesseract/";}})();
 let trabajador=null;
 
 async function worker(){
@@ -181,6 +182,17 @@ async function paginasEscaneadas(pdfjs,bytes,{alProgresar=null}={}){
  return {paginas,liberar:()=>fuente.cerrar()};
 }
 
+/*
+ * Página OCR a partir de un lienzo ya preparado (foto de un albarán, a unos 300 ppp): la misma interfaz que las
+ * páginas de un PDF escaneado, para albaranes/escaneado.js. Usada por la aplicación de partes (sat/).
+ */
+function paginaDesdeLienzo(lienzo,{alProgresar=null}={}){
+ const lienzos=new Map([[1,lienzo]]);
+ let pagina=null;
+ pagina=paginaOcr(1,lienzos,1,0,alProgresar,{n:0},()=>pagina);
+ return pagina;
+}
+
 root.DafricaAlbaranes=root.DafricaAlbaranes||{};
-root.DafricaAlbaranes.motorNavegador={abrirFuente,paginasEscaneadas,cerrar,DPI};
+root.DafricaAlbaranes.motorNavegador={abrirFuente,paginasEscaneadas,paginaDesdeLienzo,cerrar,DPI};
 })(typeof globalThis!=="undefined"?globalThis:this);

@@ -3,6 +3,19 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-16 · DAFRICA SAT: partes de técnicos con firma y facturación en STEL (NO desplegado)
+
+- Nuevo: aplicación `sat/` (web instalable, funciona sin conexión), propuesta
+  `supabase/propuestas/20261116_sat_partes.sql` (solo objetos `sat_*`, permisos `sat.*`, roles `TECNICO_SAT` y
+  `FACTURACION_SAT`, almacén privado `sat-archivos`), función Edge `supabase/functions/sat-stel/` y entrada
+  «Servicio técnico» en el menú (`control-1.js`). Diseño y capacidades de STEL verificadas en la especificación
+  oficial: `docs/sat-diseno.md`; uso y mantenimiento: `sat/LEEME.md`.
+- Verificado en local: `npm test` 375/375 (incluye `pruebas/sat-*.test.mjs` con emulador de Supabase en PGlite,
+  la función real y un STEL falso), `supabase/tests/sat_partes.sql` correcto, y recorrido completo en el
+  navegador (técnico sin conexión y recarga, dictado, foto, firmas, corrección tras firmar, ausencia del
+  responsable, oficina, aprobación, factura, bandeja y entrega).
+- Producción: nada aplicado ni desplegado. Falta autorización para la migración, la función y publicar la web.
+
 ## 2026-10-28 · Migración de revisión y autorización APLICADA en producción (autorizada por el usuario)
 
 - Copia previa en el esquema privado `respaldo` (sin acceso de la API): `stel_cola_20261028` (38 filas,
