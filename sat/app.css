@@ -120,3 +120,14 @@ input:focus, select:focus, textarea:focus { outline: 3px solid color-mix(in srgb
 .visible-escritorio { display: none; }
 @media (min-width: 760px) { .visible-escritorio { display: initial; } body { padding-bottom: 80px; } }
 .oculto { display: none !important; }
+
+/* Parte rápido (2026-11-18) */
+.boton.grande { min-height: 68px; font-size: 1.2rem; }
+.centro { text-align: center; }
+.texto-dictado { white-space: pre-wrap; background: var(--fondo); border: 1px solid var(--linea); border-radius: 10px; padding: 10px; margin: 8px 0; }
+.mini-foto { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; margin-right: 10px; flex: 0 0 84px; }
+.opciones.horas { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+ul.materiales { margin: 6px 0; padding-left: 18px; }
+ul.materiales li { margin: 4px 0; }
+details summary { cursor: pointer; color: var(--azul-2); min-height: 40px; display: flex; align-items: center; }
+.enlace-label { color: var(--azul-2); text-decoration: underline; cursor: pointer; font-weight: 400; display: inline-block; min-height: 40px; line-height: 40px; }

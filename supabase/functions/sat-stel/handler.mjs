@@ -79,14 +79,15 @@ export function lineasAlbaran(contenido, revision, ajustes) {
     const id = servicio("stel_servicio_mano_obra_id");
     if (!id) faltan.push("servicio de mano de obra de STEL (Ajustes)");
     else lineas.push({"line-type": "ITEM", "item-id": id, "units": horas(contenido.tiempo_trabajo_min),
-      "item-description": `Mano de obra: ${horas(contenido.tiempo_trabajo_min)} h`});
+      "item-description": `Mano de obra: ${String(horas(contenido.tiempo_trabajo_min)).replace(".", ",")} h`});
   }
   if (Number(contenido.desplazamiento_min) > 0 || Number(contenido.desplazamiento_km) > 0) {
+    // En horas (usuario, 2026-11-18: «el desplazamiento y el tiempo de mano de obra en horas»); solo km: 1 desplazamiento.
     const id = servicio("stel_servicio_desplazamiento_id");
-    const partes = [Number(contenido.desplazamiento_min) > 0 ? `${contenido.desplazamiento_min} min` : "",
-      Number(contenido.desplazamiento_km) > 0 ? `${contenido.desplazamiento_km} km` : ""].filter(Boolean).join(", ");
+    const h = Number(contenido.desplazamiento_min) > 0 ? horas(contenido.desplazamiento_min) : null;
+    const partes = [h ? `${String(h).replace(".", ",")} h` : "", Number(contenido.desplazamiento_km) > 0 ? `${contenido.desplazamiento_km} km` : ""].filter(Boolean).join(", ");
     if (!id) faltan.push("servicio de desplazamiento de STEL (Ajustes)");
-    else lineas.push({"line-type": "ITEM", "item-id": id, "units": 1, "item-description": `Desplazamiento (${partes})`});
+    else lineas.push({"line-type": "ITEM", "item-id": id, "units": h || 1, "item-description": `Desplazamiento: ${partes}`});
   }
   if (!lineas.length && !faltan.length) faltan.push("al menos un material, tiempo de trabajo o desplazamiento");
   return {lineas, faltan};

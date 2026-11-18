@@ -70,6 +70,18 @@ export function canonico(v) {
 }
 export function iguales(a, b) { return canonico(normalizar(a)) === canonico(normalizar(b)); }
 
+/** Minutos → «1,5 h» (el técnico y la oficina trabajan en horas; usuario, 2026-11-18). */
+export function horasTexto(min) {
+  const n = Number(min);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return `${String(Math.round(n / 60 * 100) / 100).replace(".", ",")} h`;
+}
+/** «1,5» / «1.5» / «1 h» → minutos (null si no es un número de horas válido). */
+export function minutosDeHoras(texto) {
+  const v = Number(String(texto ?? "").replace(",", ".").replace(/\s*h(oras?)?\s*$/i, "").trim());
+  return Number.isFinite(v) && v >= 0 && v <= 24 ? Math.round(v * 60) : null;
+}
+
 export function minutosEntre(inicio, fin) {
   const m = (h) => { const x = /^(\d{2}):(\d{2})$/.exec(h || ""); return x ? Number(x[1]) * 60 + Number(x[2]) : null; };
   const a = m(inicio), b = m(fin);
@@ -77,11 +89,29 @@ export function minutosEntre(inicio, fin) {
   return b >= a ? b - a : b + 1440 - a;
 }
 
-/** Lo que falta o es dudoso antes de presentar el parte a la firma. */
+/**
+ * Lo que falta o es dudoso antes de presentar el parte a la firma.
+ * Parte rápido (`modo: "RAPIDO"`, usuario 2026-11-18): el técnico solo graba, hace fotos y firma; lo leído con dudas
+ * (materiales del albarán del proveedor o dictados) no impide firmar: va marcado «a confirmar por la oficina» en el
+ * parte y en el PDF, y lo revisa la oficina. Lo que nunca se inventa: cantidades no dichas ni leídas no entran.
+ */
 export function problemasParaFirmar(c) {
   const p = [];
-  if (!c.tipo_visita) p.push("Indica el tipo de visita (diagnóstico, reparación finalizada o pendiente).");
+  const rapido = c.modo === "RAPIDO";
+  if (!c.tipo_visita) p.push(rapido ? "Indica si queda terminado o pendiente." : "Indica el tipo de visita (diagnóstico, reparación finalizada o pendiente).");
   if (c.tipo_visita === "PENDIENTE" && !c.pendiente_de) p.push("Indica de qué queda pendiente (presupuesto, repuestos o segunda visita).");
+  if (rapido) {
+    if (!c.cliente?.nombre) p.push("Falta el cliente.");
+    if (!c.direccion?.texto) p.push("Falta la dirección de la intervención.");
+    if (!c.fecha || !c.hora_inicio || !c.hora_fin) p.push("Faltan la fecha o las horas.");
+    if (!c.averia && !c.trabajos) p.push("Graba el audio contando lo que has hecho (o escríbelo).");
+    if (!(Number(c.tiempo_trabajo_min) > 0)) p.push("Indica las horas de trabajo.");
+    if (c.desplazamiento_min === null || c.desplazamiento_min === undefined) p.push("Indica las horas de desplazamiento (o «sin desplazamiento»).");
+    (c.materiales || []).forEach((m) => {
+      if (!m.descripcion || !(Number(m.cantidad) > 0)) p.push(`Material «${m.descripcion || "?"}»: sin descripción o cantidad.`);
+    });
+    return p;
+  }
   if (!c.cliente?.nombre) p.push("Falta el cliente.");
   if (!c.direccion?.texto) p.push("Falta la dirección de la intervención.");
   if (!c.fecha || !c.hora_inicio || !c.hora_fin) p.push("Faltan la fecha, la hora de inicio o la de finalización.");
@@ -95,6 +125,36 @@ export function problemasParaFirmar(c) {
   });
   if (c.tipo_visita === "PENDIENTE" && !c.pendientes) p.push("Describe los trabajos pendientes.");
   return p;
+}
+
+/**
+ * Contenido del parte rápido a partir de lo que hizo el técnico: el texto de sus audios ordenado (sin inventar: cada frase
+ * entera en su sección; lo que no encaja va a «Trabajos realizados», nunca se pierde), los materiales con cantidad dicha o
+ * leída en el albarán del proveedor (lo dudoso marcado), y las horas.
+ * @param {object} c contenido actual (se devuelve uno nuevo)
+ * @param {{textos:string[], organizar:(t:string)=>object, materialesAlbaran:object[], horaFin:string, nuevoId:()=>string}} d
+ */
+export function contenidoRapido(c, {textos, organizar, materialesAlbaran = [], horaFin, nuevoId: id = nuevoId}) {
+  const texto = (textos || []).map((t) => String(t || "").trim()).filter(Boolean).join("\n");
+  const r = texto ? organizar(texto) : {averia: [], comprobaciones: [], trabajos: [], materiales: [], pendientes: [], otros: []};
+  const unir = (xs) => xs.filter(Boolean).join("\n");
+  const n = structuredClone(c);
+  n.modo = "RAPIDO";
+  n.averia = unir(r.averia);
+  n.comprobaciones = [];
+  n.trabajos = unir([...r.comprobaciones.map((x) => x.texto), ...r.trabajos, ...r.otros]);
+  n.pendientes = unir(r.pendientes);
+  if (r.pendientes.length && !n.tipo_visita) n.tipo_visita = "PENDIENTE";
+  // Id estable (el mismo dictado da el mismo parte: preparar dos veces no invalida firmas ni descoloca la revisión).
+  const dictados = r.materiales.filter((m) => Number(m.cantidad) > 0).map((m, i) => ({id: `dictado-${i + 1}`, descripcion: m.descripcion, referencia: m.referencia || "",
+    cantidad: m.cantidad, unidad: m.unidad, stel_item_id: null, dudas: m.dudas || [], dicho: m.dicho, origen: "DICTADO"}));
+  const leidos = materialesAlbaran.filter((m) => Number(m.cantidad) > 0 && m.descripcion).map((m) => ({id: m.id || id(), descripcion: m.descripcion,
+    referencia: m.referencia || "", cantidad: m.cantidad, unidad: m.unidad || "ud", stel_item_id: m.stel_item_id ?? null, dudas: m.dudas || [],
+    ...(m.dicho ? {dicho: m.dicho} : {}), origen: m.origen || "ALBARAN_PROVEEDOR"}));
+  n.materiales = [...leidos, ...dictados];
+  if (horaFin) n.hora_fin = horaFin; // hora a la que se presenta a la firma
+  // Horas de trabajo y de desplazamiento: las que elige el técnico (no se calculan solas).
+  return n;
 }
 
 /** Texto plano del contenido para la pantalla de firma y el PDF (sin importes). */

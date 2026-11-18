@@ -2,7 +2,7 @@
 // Necesita conexión (no guarda nada en el teléfono).
 import {rpc, funcion, urlFirmada, subirArchivo, SinConexion} from "./lib/api.js";
 import {sha256} from "./lib/almacen.js";
-import {nuevoId, resumenTipo, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
+import {nuevoId, resumenTipo, horasTexto, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
 import {proponerLineas, totales, totalLinea, euros, lineasIncompletas} from "./lib/economia.js";
 import {esc, $, $$, avisar, dialogo, confirmar, pedirTexto, elegir, fechaHora, fechaCorta, chipEstado} from "./lib/ui.js";
 
@@ -71,7 +71,7 @@ async function detalle(raiz, id) {
       ${[["Cliente", c.cliente?.nombre], ["Dirección", c.direccion?.texto], ["Contacto", [c.contacto?.nombre, c.contacto?.telefono].filter(Boolean).join(" · ")],
         ["Instalación / equipo", [c.equipo?.nombre, c.equipo?.numero_serie].filter(Boolean).join(" · ")], ["Motivo", c.motivo], ["Prioridad", PRIORIDADES[c.prioridad]],
         ["Tipo de visita", resumenTipo(c)], ["Fecha y horas", `${fechaCorta(c.fecha)} · ${c.hora_inicio || "?"}–${c.hora_fin || "?"}`],
-        ["Tiempo de trabajo", c.tiempo_trabajo_min ? c.tiempo_trabajo_min + " min" : ""], ["Desplazamiento", [c.desplazamiento_min ? c.desplazamiento_min + " min" : "", c.desplazamiento_km ? c.desplazamiento_km + " km" : ""].filter(Boolean).join(" · ")],
+        ["Horas de trabajo", horasTexto(c.tiempo_trabajo_min)], ["Desplazamiento", c.desplazamiento_min === 0 ? "Sin desplazamiento" : [horasTexto(c.desplazamiento_min), c.desplazamiento_km ? c.desplazamiento_km + " km" : ""].filter(Boolean).join(" · ")],
         ["Avería", c.averia], ["Trabajos", c.trabajos], ["Estado final", c.estado_final], ["Pendiente", c.pendientes]]
         .filter(([, v]) => v).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}
       ${(c.comprobaciones || []).length ? `<dt>Comprobaciones</dt><dd>${c.comprobaciones.map((x) => `• ${esc(x.texto)} — <b>${esc(RESULTADOS[x.resultado] || "?")}</b>`).join("<br>")}</dd>` : ""}

@@ -4,7 +4,7 @@
   "description": "Pruebas automatizadas del lector determinista de albaranes de DAFRICA Control",
   "scripts": {
     "test": "node --test \"pruebas/*.test.js\" \"pruebas/*.test.mjs\"",
-    "test:sat": "node --test \"pruebas/sat-*.test.mjs\" && node supabase/tests/ejecutar-local.mjs supabase/tests/sat_simulado.sql supabase/propuestas/20261116_sat_partes.sql supabase/propuestas/20261118_sat_precio_hora.sql supabase/tests/sat_partes.sql",
+    "test:sat": "node --test \"pruebas/sat-*.test.mjs\" && node supabase/tests/ejecutar-local.mjs supabase/tests/sat_simulado.sql supabase/propuestas/20261116_sat_partes.sql supabase/propuestas/20261118_sat_precio_hora.sql supabase/propuestas/20261118_sat_parte_rapido.sql supabase/tests/sat_partes.sql",
     "sat:emulador": "node pruebas/sat/emulador.mjs --puerto 8787 --demo",
     "evaluar": "node pruebas/evaluar.js",
     "plantilla": "node pruebas/generar-plantilla.js"
