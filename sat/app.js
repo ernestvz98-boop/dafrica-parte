@@ -529,8 +529,10 @@ const HORAS_TRABAJO = [0.5, 1, 1.5, 2, 3, 4, 6, 8];
 const HORAS_DESPLAZAMIENTO = [0, 0.5, 1, 1.5, 2];
 
 async function guardarFotoParte(pid, file, momento, comentario = "") {
-  const lado = momento === "MATERIAL" ? 2200 : 1600;
-  const blob = await comprimirFoto(file, lado, momento === "MATERIAL" ? 0.85 : 0.8);
+  // El albarán del proveedor se guarda con más resolución (3200 px, antes 2200) para poder volver a leerlo en la oficina
+  // y medir el lector con fotos reales (2026-11-18: con 2200 px la letra pequeña de la tabla no se distinguía bien).
+  const lado = momento === "MATERIAL" ? 3200 : 1600;
+  const blob = await comprimirFoto(file, lado, momento === "MATERIAL" ? 0.88 : 0.8);
   const fid = nuevoId();
   await archivos.put({id: fid, parte_id: pid, tipo: "FOTO", momento, ruta: `${pid}/${momento === "MATERIAL" ? "albaran-proveedor" : "foto"}-${fid}.jpg`, blob, mime: "image/jpeg",
     sha256: await sha256(blob), creado: new Date().toISOString(), subido: false, registrado: false});
@@ -799,7 +801,7 @@ async function pasoTrabajo(p, raiz, editable) {
     const caja = $("#propuestaAlbaran");
     try {
       // 1. La foto queda adjunta (al parte, a su PDF y al albarán de trabajo de STEL).
-      const blob = await comprimirFoto(file, 2200, 0.85);
+      const blob = await comprimirFoto(file, 3200, 0.88);
       const fid = nuevoId();
       await archivos.put({id: fid, parte_id: p.id, tipo: "FOTO", momento: "MATERIAL", ruta: `${p.id}/albaran-proveedor-${fid}.jpg`, blob, mime: "image/jpeg",
         sha256: await sha256(blob), creado: new Date().toISOString(), subido: false, registrado: false});

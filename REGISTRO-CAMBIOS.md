@@ -3,6 +3,17 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-18 · DAFRICA SAT 0.3.3: versiones mezcladas tras publicar y foto del albarán con más resolución
+
+- Tras publicar, la oficina daba «does not provide an export named horasTexto»: GitHub Pages deja cada fichero hasta 10 min
+  en la caché del navegador y se mezclaban ficheros nuevos y viejos. El service worker pide ahora con `cache: no-cache`
+  (pregunta siempre si hay versión nueva; si no la hay, 304 sin descarga).
+- Foto del albarán del proveedor guardada a 3200 px (antes 2200) para volver a leerla y medir el lector.
+- Lectura de la foto del albarán Saltoki del primer parte real: torcida y en perspectiva, columnas mezcladas (código dentro
+  de la descripción, filas partidas). Prototipo `sat/lib/enderezar.js` (hoja por umbral, esquinas por rectas de los lados,
+  homografía): cantidades y precios de las 7 líneas bien, pero códigos y descripciones desplazados con la copia de 2200 px.
+  NO integrado: falta medirlo con las fotos originales (regla: 0 lecturas falsas aceptadas).
+
 ## 2026-11-18 · DAFRICA SAT 0.3.2: primer parte real en STEL (incidencia creada) y dictado en impersonal
 
 - Primer parte real (PT-26-00002): transcripción con `sat-transcribir` correcta; incidencia creada en STEL. El albarán de
