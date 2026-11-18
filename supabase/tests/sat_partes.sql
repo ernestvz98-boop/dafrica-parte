@@ -349,4 +349,18 @@ do $$ begin
     raise exception 'El aviso sin asignar debería quedar a nombre de quien hace el parte'; end if;
   if not exists (select 1 from public.sat_auditoria where accion = 'AVISO_COGIDO') then raise exception 'Falta la auditoría de AVISO_COGIDO'; end if;
 end $$;
+-- Elegir el servicio de mano de obra en Ajustes devuelve a la cola el albarán parado SOLO por eso (20261118_sat_servicios_desbloquean.sql).
+update public.sat_stel_operaciones set estado = 'BLOQUEADA', error = 'Falta: servicio de mano de obra de STEL (Ajustes)' where clave = 'wdn:b0000000-0000-4000-8000-000000000002';
+insert into public.sat_stel_operaciones (tipo, clave, parte_id, estado, error)
+values ('ALBARAN_TRABAJO', 'wdn:prueba-otro-motivo', 'b0000000-0000-4000-8000-000000000011', 'BLOQUEADA', 'Falta: artículo de STEL para «Codo»');
+select set_config('prueba.uid', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', false);
+set role authenticated;
+select public.sat_ajuste_guardar('stel_servicio_mano_obra_id', '4242');
+reset role;
+do $$ begin
+  if (select estado from public.sat_stel_operaciones where clave = 'wdn:b0000000-0000-4000-8000-000000000002') <> 'PENDIENTE' then
+    raise exception 'El albarán parado por el servicio debería volver a la cola'; end if;
+  if (select estado from public.sat_stel_operaciones where clave = 'wdn:prueba-otro-motivo') <> 'BLOQUEADA' then
+    raise exception 'Un albarán parado por otro motivo no debe tocarse'; end if;
+end $$;
 select 'SAT: todas las pruebas correctas' as resultado;

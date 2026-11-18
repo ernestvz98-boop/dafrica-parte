@@ -24,6 +24,11 @@ const MEDIDAS = /^(bar(es)?|grados?|º|°|voltios?|v|amperios?|a|vatios?|w|kw|ki
 const INICIO_MATERIAL = /^(material(es)?|material usado|material utilizado|he (usado|utilizado|gastado|empleado)|se han (usado|utilizado|gastado)|gastado|usado)\b\s*:?\s*/i;
 const sinPuntoFinal = (s) => s.replace(/[\s.,;:]+$/, "");
 
+// Trabajos y comprobaciones dichos en impersonal o en tercera persona («se hace un desagüe», «se arregla la fuga»,
+// «se instalan llaves»): caso real del 2026-11-18, todo iba a «Avería» porque la frase decía también «no funciona».
+const SE_TRABAJO = "se (?:ha |han )?(?:hace|hacen|hecho|arregla|arreglan|arreglado|repara|reparan|reparado|cambia|cambian|cambiado|sustituye|sustituyen|sustituido|instala|instalan|instalado|coloca|colocan|colocado|pone|ponen|puesto|monta|montan|montado|ajusta|ajustan|ajustado|limpia|limpian|limpiado|purga|purgan|purgado|rellena|rellenan|rellenado|carga|cargan|cargado|desmonta|desmontan|desmontado|suelda|sueldan|soldado|sella|sellan|sellado|programa|programan|programado|conecta|conectan|conectado|desatasca|desatascan|desatascado|engrasa|engrasan|engrasado|regula|regulan|regulado|resetea|resetean|reseteado|rearma|rearman|rearmado|quita|quitan|quitado|retira|retiran|retirado|sustituyó|repone|reponen|repuesto|sanea|sanean|saneado|aísla|aíslan|aislado|calibra|calibran|calibrado)";
+const SE_COMPROBACION = "se (?:ha |han )?(?:revisa|revisan|revisado|comprueba|comprueban|comprobado|verifica|verifican|verificado|mide|miden|medido|prueba|prueban|probado|inspecciona|inspeccionan|inspeccionado)";
+
 const PATRONES = {
   averia: /\b(no (funciona|arranca|arrancaba|enciende|encend[ií]a|calienta|calentaba|enfr[ií]a|va|iba|tira)|aver[ií]a|averiad[oa]|error|c[oó]digo de error|fuga|pierde|perd[ií]a|gotea|goteaba|ruido|falla|fallaba|fallo|rot[oa]|estropead[oa]|se para|se paraba|salta|saltaba|bloquead[oa]|el cliente (dice|indica|comenta)|problema|s[ií]ntoma|da error)\b/i,
   comprobacion: /\b(he comprobado|comprobad[oa]s?|compruebo|comprobar|he revisado|revisad[oa]s?|reviso|he verificado|verificad[oa]s?|verifico|he medido|medid[oa]s?|mido|medici[oó]n|inspeccionad[oa]|he probado|probad[oa]|pruebo|he mirado|chequead[oa])\b/i,
@@ -31,7 +36,12 @@ const PATRONES = {
   material: INICIO_MATERIAL,
   pendiente: /\b(queda pendiente|pendiente de|pendiente|hay que|habr[aá] que|falta|faltan|faltar[ií]a|pr[oó]xima visita|segunda visita|volver a|volveremos|pedir (el |la |los |las )?(repuesto|pieza)|presupuest(o|ar)|no se ha podido|no he podido)\b/i,
 };
-const PIEZA = /\b(?:he cambiado|he sustituido|he puesto|he instalado|he montado|cambiad[oa]|sustituid[oa]|instalad[oa]|montad[oa])\s+(?:el|la|los|las|un|una|unos|unas)?\s*([a-záéíóúñü0-9][^,;:]{1,60}?)(?=\s+(?:por|y|que|porque|ya que|del|de la|en)\b|[,;:.]|$)/i;
+const FIN_PALABRA = "(?![\\wáéíóúüñ])";
+const RE_SE_TRABAJO = new RegExp(`\\b${SE_TRABAJO}${FIN_PALABRA}`, "i");
+const RE_SE_COMPROBACION = new RegExp(`\\b${SE_COMPROBACION}${FIN_PALABRA}`, "i");
+const esTrabajo = (f) => PATRONES.trabajo.test(f) || RE_SE_TRABAJO.test(f);
+const esComprobacion = (f) => PATRONES.comprobacion.test(f) || RE_SE_COMPROBACION.test(f);
+const PIEZA =/\b(?:he cambiado|he sustituido|he puesto|he instalado|he montado|cambiad[oa]|sustituid[oa]|instalad[oa]|montad[oa])\s+(?:el|la|los|las|un|una|unos|unas)?\s*([a-záéíóúñü0-9][^,;:]{1,60}?)(?=\s+(?:por|y|que|porque|ya que|del|de la|en)\b|[,;:.]|$)/i;
 const REFERENCIA = /\b(?:referencia|ref\.?|c[oó]digo|modelo|n[uú]mero de serie)\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-./]{1,30}(?:\s+[0-9][A-Za-z0-9\-./]{0,20})?)/i;
 const MARCAS_DUDA = /(\[(inaudible|ininteligible|\?)\]|\?\?|\.{3}|…)/i;
 
@@ -111,7 +121,7 @@ export function organizarDictado(texto) {
       else if (VAGOS.test(f)) r.avisos.push(`Cantidad no concreta en: «${f}»`);
     }
     if (!colocada && PATRONES.pendiente.test(f)) { r.pendientes.push(f); colocada = true; }
-    if (!colocada && PATRONES.trabajo.test(f)) {
+    if (!colocada && esTrabajo(f)) {
       r.trabajos.push(f); colocada = true;
       const mats = materialesConCantidad(f);
       if (mats.length) r.materiales.push(...mats);
@@ -126,7 +136,7 @@ export function organizarDictado(texto) {
         }
       }
     }
-    if (!colocada && PATRONES.comprobacion.test(f)) {
+    if (!colocada && esComprobacion(f)) {
       let resultado = null;
       if (/\b(correct[oa]s?|bien|ok|normal(es)?|funciona(ba)? bien|sin (fugas|problemas|anomal[ií]as)|dentro de (lo normal|rango))\b/i.test(f)) resultado = "CORRECTO";
       if (/\b(mal|incorrect[oa]s?|suci[oa]s?|baj[oa]|alt[oa]|rot[oa]|defectuos[oa]|no funciona|averiad[oa]|fuga|pierde|deteriorad[oa]|quemad[oa]|obstruid[oa]|fuera de rango)\b/i.test(f)) resultado = resultado ? null : "INCORRECTO";
