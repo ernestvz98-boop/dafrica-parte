@@ -327,11 +327,26 @@ async function ajustes(raiz) {
   };
   $("#bGuardarAj").onclick = async () => {
     try {
+      let servicios = false;
       for (const el of $$("[data-ajuste]", raiz)) {
         const v = el.dataset.tipo === "num" ? (el.value === "" ? null : Number(el.value)) : el.dataset.tipo === "bool" ? el.checked : el.value;
-        if (JSON.stringify(v) !== JSON.stringify(aj[el.dataset.ajuste] ?? null) && !(el.disabled)) await rpc("sat_ajuste_guardar", {p_clave: el.dataset.ajuste, p_valor: v});
+        if (JSON.stringify(v) !== JSON.stringify(aj[el.dataset.ajuste] ?? null) && !(el.disabled)) {
+          await rpc("sat_ajuste_guardar", {p_clave: el.dataset.ajuste, p_valor: v});
+          if (/^stel_servicio_/.test(el.dataset.ajuste) && v !== null) servicios = true;
+        }
       }
-      avisar("Ajustes guardados."); ajustes(raiz);
+      avisar("Ajustes guardados.");
+      // Los albaranes de trabajo parados por falta de estos servicios vuelven a la cola: se envían ya a STEL.
+      if (servicios) {
+        try {
+          const r = await funcion("sat-stel", {accion: "procesar"});
+          const hechos = (r.operaciones || []).filter((o) => o.tipo === "ALBARAN_TRABAJO" && o.estado === "OK").length;
+          const parados = (r.operaciones || []).filter((o) => o.estado === "BLOQUEADA" || o.estado === "ERROR");
+          if (hechos) avisar(`${hechos} albarán(es) de trabajo creados en STEL.`, {ms: 7000});
+          else if (parados.length) avisar("STEL: " + parados.map((o) => o.error).join(" · "), {error: true, ms: 9000});
+        } catch (er) { avisar("STEL: " + er.message, {error: true}); }
+      }
+      ajustes(raiz);
     } catch (e) { avisar(e.message, {error: true}); }
   };
 }

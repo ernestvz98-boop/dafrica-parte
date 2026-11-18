@@ -3,6 +3,16 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-18 · DAFRICA SAT 0.3.2: primer parte real en STEL (incidencia creada) y dictado en impersonal
+
+- Primer parte real (PT-26-00002): transcripción con `sat-transcribir` correcta; incidencia creada en STEL. El albarán de
+  trabajo quedó parado: en el STEL de DAFRICA no hay servicios de mano de obra ni de desplazamiento (hay que crearlos).
+- Dictado: «se hace», «se arregla», «se instalan», «se ha revisado»… cuentan como trabajos o comprobaciones (antes todo iba a
+  «Avería» porque la frase decía también «no funciona»). Prueba en `pruebas/sat-rapido.test.mjs`.
+- Al guardar en Ajustes el servicio de mano de obra o de desplazamiento, los albaranes de trabajo parados SOLO por eso
+  vuelven a la cola y la app los envía a STEL en el momento (`20261118_sat_servicios_desbloquean.sql`, aplicada como
+  `sat_partes_6_servicios_desbloquean`; copia en `respaldo.funciones_20261118_sat_servicios`).
+
 ## 2026-11-18 · DAFRICA SAT 0.3.1: «Actualizar catálogo» daba «la sesión ha caducado»
 
 - Causa: `sat-stel` llamaba a la base de datos con la clave pública en `apikey` y la de servicio en Authorization; la

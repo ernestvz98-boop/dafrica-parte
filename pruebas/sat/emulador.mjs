@@ -37,7 +37,8 @@ const TIPOS = {".html": "text/html; charset=utf-8", ".js": "text/javascript; cha
 export async function crearEmulador({puerto = 0, demo = false, registro = () => {}} = {}) {
   const db = new PGlite();
   await ejecutarFicheros(db, [path.join(RAIZ, "supabase/tests/sat_simulado.sql"), path.join(RAIZ, "supabase/propuestas/20261116_sat_partes.sql"),
-    path.join(RAIZ, "supabase/propuestas/20261118_sat_precio_hora.sql"), path.join(RAIZ, "supabase/propuestas/20261118_sat_parte_rapido.sql")], {silencioso: true});
+    path.join(RAIZ, "supabase/propuestas/20261118_sat_precio_hora.sql"), path.join(RAIZ, "supabase/propuestas/20261118_sat_parte_rapido.sql"),
+    path.join(RAIZ, "supabase/propuestas/20261118_sat_servicios_desbloquean.sql")], {silencioso: true});
   for (const u of USUARIOS) {
     await db.query("insert into public.perfiles (id, nombre, email) values ($1, $2, $3)", [u.id, u.nombre, u.email]);
     await db.query("insert into public.usuario_roles (usuario_id, rol_id) select $1, id from public.roles where codigo = $2", [u.id, u.rol]);

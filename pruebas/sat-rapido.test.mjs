@@ -88,3 +88,14 @@ test("sat-stel: con la clave de servicio, también en apikey (la puerta de Supab
   assert.equal(r.status, 200, JSON.stringify(d));
   assert.equal(d.ok, true);
 });
+
+test("dictado en impersonal («se hace», «se arregla», «se instalan»): trabajos, no avería; sin inventar materiales", () => {
+  const dicho = "El equipo pierde agua. Se hace un desagüe nuevo y doble, el circuito no funcionaba, se arregla la fuga, se ajustan las presiones y se instalan llaves y manómetros nuevos. Se ha revisado el compresor y está bien.";
+  const r = organizarDictado(dicho);
+  assert.deepEqual(r.averia, ["El equipo pierde agua."]);
+  assert.equal(r.trabajos.length, 1);
+  assert.match(r.trabajos[0], /^Se hace un desagüe/);
+  assert.equal(r.comprobaciones.length, 1);
+  assert.equal(r.comprobaciones[0].resultado, "CORRECTO");
+  assert.deepEqual(r.materiales, [], "«llaves y manómetros» sin cantidad no se convierten en materiales");
+});
