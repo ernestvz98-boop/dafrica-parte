@@ -124,10 +124,12 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
   const parteId = cuerpo?.parte_id ?? null;
   if (parteId !== null && !RE_ID.test(String(parteId))) return responder({error: "parte_id no válido"}, 400);
 
-  // Supabase: como el usuario (para comprobar permisos) o con la clave de servicio.
+  // Supabase: como el usuario (para comprobar permisos) o con la clave de servicio. Con la clave de servicio va también
+  // en `apikey` (como robot-cola): con la clave pública en `apikey` y la de servicio en Authorization, la puerta de
+  // Supabase responde 401 (visto en producción el 2026-11-18 al actualizar el catálogo).
   const rpc = async (fn, args, {usuario = false} = {}) => {
     const r = await fetcher(`${base}/rest/v1/rpc/${fn}`, {method: "POST", signal: AbortSignal.timeout(20000),
-      headers: {apikey: env("SUPABASE_ANON_KEY") || servicio, Authorization: "Bearer " + (usuario ? token : servicio), "Content-Type": "application/json"},
+      headers: {apikey: usuario ? (env("SUPABASE_ANON_KEY") || servicio) : servicio, Authorization: "Bearer " + (usuario ? token : servicio), "Content-Type": "application/json"},
       body: JSON.stringify(args || {})});
     const t = await r.text();
     if (!r.ok) throw Object.assign(new Error(`Supabase ${fn} ${r.status}: ${t.slice(0, 200)}`), {status: r.status});

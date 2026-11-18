@@ -66,3 +66,25 @@ test("horas: texto y lectura; STEL y la revisión en horas", () => {
   const rev = proponerLineas({tiempo_trabajo_min: 90, desplazamiento_min: 30}, [{stel_id: 9, precio: 35}, {stel_id: 8, precio: 25}], ajustes);
   assert.deepEqual(rev.map((l) => [l.cantidad, l.precio]), [[1.5, 50], [0.5, 50]]);
 });
+
+test("sat-stel: con la clave de servicio, también en apikey (la puerta de Supabase daba 401 al actualizar el catálogo)", async () => {
+  const {handler} = await import("../supabase/functions/sat-stel/handler.mjs");
+  const env = (k) => ({SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "srv", SUPABASE_ANON_KEY: "anon", STEL_API_KEY: "stel"})[k];
+  const fetcher = async (url, init) => {
+    const u = String(url), h = init.headers || {};
+    if (u.includes("/rest/v1/rpc/")) {
+      const fn = u.split("/rpc/")[1];
+      if (fn === "sat_puede_procesar") return new Response(h.apikey === "anon" && h.Authorization === "Bearer usuario" ? "true" : "{}", {status: h.apikey === "anon" ? 200 : 401});
+      if (h.apikey !== "srv" || h.Authorization !== "Bearer srv") return new Response(JSON.stringify({message: "Invalid JWT"}), {status: 401});
+      return new Response(fn === "sat_ajuste" ? "250" : "0", {status: 200});
+    }
+    if (u.startsWith("https://app.stelorder.com/")) return new Response("[]", {status: 200});
+    throw new Error("URL inesperada " + u);
+  };
+  const req = new Request("https://x.supabase.co/functions/v1/sat-stel", {method: "POST", headers: {authorization: "Bearer usuario", "content-type": "application/json"},
+    body: JSON.stringify({accion: "catalogo"})});
+  const r = await handler(req, {env, fetcher, dormir: async () => {}});
+  const d = await r.json();
+  assert.equal(r.status, 200, JSON.stringify(d));
+  assert.equal(d.ok, true);
+});
