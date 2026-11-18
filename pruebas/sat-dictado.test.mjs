@@ -90,6 +90,16 @@ test("importes: igual que sat_total() en Supabase (por línea, a céntimos)", ()
     tiempo_trabajo_min: 90}, art, {stel_servicio_mano_obra_id: 9});
   assert.deepEqual(l.map((x) => [x.tipo, x.stel_item_id, x.cantidad, x.precio]), [["MATERIAL", 1, 1, 40], ["MATERIAL", null, 2, null], ["MANO_OBRA", 9, 1.5, 35]]);
   assert.equal(lineasIncompletas(l).length, 1, "el codo sin artículo ni precio queda para completar; nunca se inventa un precio");
+  // Precio fijo por hora de Ajustes (usuario, 2026-11-18: 50 €/h) por encima del precio del servicio de STEL.
+  const art2 = [...art, {stel_id: 8, precio: 30, iva_pct: 21, nombre: "Desplazamiento"}];
+  const aj = {stel_servicio_mano_obra_id: 9, stel_servicio_desplazamiento_id: 8, precio_hora_mano_obra: 50, precio_hora_desplazamiento: 50};
+  const h = proponerLineas({tiempo_trabajo_min: 90, desplazamiento_min: 45, desplazamiento_km: 30}, art2, aj);
+  assert.deepEqual(h.map((x) => [x.tipo, x.stel_item_id, x.cantidad, x.precio]), [["MANO_OBRA", 9, 1.5, 50], ["DESPLAZAMIENTO", 8, 0.75, 50]]);
+  assert.deepEqual(totales(h), {base: 112.5, iva: 23.63, total: 136.13});
+  const soloKm = proponerLineas({desplazamiento_km: 30}, art2, aj);
+  assert.equal(soloKm[0].cantidad, null, "sin minutos de desplazamiento no hay horas: lo completa administración");
+  assert.equal(lineasIncompletas(soloKm).length, 1);
+  assert.equal(proponerLineas({tiempo_trabajo_min: 60}, art2, {...aj, precio_hora_mano_obra: null})[0].precio, 35, "sin ajuste, el precio del servicio de STEL");
 });
 
 test("albarán del proveedor: líneas fiables → materiales; lo dudoso marcado; artículo de STEL solo si es único", () => {

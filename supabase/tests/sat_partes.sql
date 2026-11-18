@@ -302,4 +302,22 @@ do $$ begin
   if (select count(*) from public.sat_auditoria where accion in ('FIRMA_TECNICO', 'FIRMA_CLIENTE', 'PARTE_ENVIADO', 'FACTURA_APROBADA', 'FACTURA_ENTREGADA', 'REVISION_GUARDADA')) < 10 then
     raise exception 'Falta auditoría: %', (select count(*) from public.sat_auditoria); end if;
 end $$;
+-- Precio fijo por hora (20261118_sat_precio_hora.sql): 50 € por defecto; administración lo cambia; un técnico no; nada negativo.
+select set_config('prueba.uid', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', false);
+set role authenticated;
+do $$ declare r jsonb; begin
+  r := public.sat_ajustes_leer();
+  if r->'precio_hora_mano_obra' <> '50'::jsonb or r->'precio_hora_desplazamiento' <> '50'::jsonb then raise exception 'Precio por hora inicial mal: %', r; end if;
+  r := public.sat_ajuste_guardar('precio_hora_desplazamiento', '45.5');
+  if r->'precio_hora_desplazamiento' <> '45.5'::jsonb then raise exception 'Precio por hora no guardado: %', r; end if;
+  perform public.prueba_falla($q$select public.sat_ajuste_guardar('precio_hora_mano_obra', '-1')$q$, 'precio_no_valido');
+  perform public.prueba_falla($q$select public.sat_ajuste_guardar('precio_hora_mano_obra', '"50"')$q$, 'precio_no_valido');
+end $$;
+reset role;
+select set_config('prueba.uid', '11111111-1111-4111-8111-111111111111', false);
+set role authenticated;
+do $$ begin
+  perform public.prueba_falla($q$select public.sat_ajuste_guardar('precio_hora_mano_obra', '10')$q$, 'sin_permiso');
+end $$;
+reset role;
 select 'SAT: todas las pruebas correctas' as resultado;

@@ -3,6 +3,16 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-18 · DAFRICA SAT 0.2.1: mano de obra y desplazamiento a precio fijo por hora (usuario: «fijo de 50 € la hora»)
+
+- Ajustes nuevos `precio_hora_mano_obra` y `precio_hora_desplazamiento` (50 €), editables en Oficina → Ajustes; la
+  revisión económica propone horas = minutos anotados ÷ 60 a ese precio (antes: precio del servicio de STEL y el
+  desplazamiento como 1 unidad). Sin minutos de desplazamiento (solo km), la cantidad queda para administración.
+- Producción: migración `supabase/propuestas/20261118_sat_precio_hora.sql` aplicada como `sat_partes_4_precio_hora`
+  (copia previa en `respaldo.funciones_20261118_sat_precio` y `respaldo.sat_ajustes_20261118`). Función Edge sin cambios
+  (el albarán de trabajo no lleva precios; la factura usa las líneas aprobadas).
+- Verificado: `npm test` 344/344, `npm run test:sat` (9 unitarias, 4 de flujo, SQL con ajustes, permisos y precio negativo).
+
 ## 2026-11-17 · DAFRICA SAT EN PRODUCCIÓN (autorizado por el usuario: «tienes permiso total»)
 
 - Copia previa en `respaldo`: `permisos_20261117_sat`, `roles_20261117_sat`, `rol_permisos_20261117_sat`,

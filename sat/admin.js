@@ -309,6 +309,9 @@ async function ajustes(raiz) {
     <button type="button" class="boton ancho" id="bCatalogo">Actualizar catálogo desde STEL</button></div>
     <div class="tarjeta"><h2>Líneas automáticas</h2><label>Servicio de STEL para la mano de obra (por horas)</label>${selServicio("stel_servicio_mano_obra_id")}
     <label>Servicio de STEL para el desplazamiento</label>${selServicio("stel_servicio_desplazamiento_id")}
+    <div class="fila"><div class="crece"><label>Precio fijo por hora de mano de obra (€)</label><input data-ajuste="precio_hora_mano_obra" data-tipo="num" inputmode="decimal" value="${esc(aj.precio_hora_mano_obra ?? "")}"></div>
+    <div class="crece"><label>Precio fijo por hora de desplazamiento (€)</label><input data-ajuste="precio_hora_desplazamiento" data-tipo="num" inputmode="decimal" value="${esc(aj.precio_hora_desplazamiento ?? "")}"></div></div>
+    <p class="suave peq">La revisión propone las horas que anotó el técnico (minutos ÷ 60) a este precio. Vacío: el precio del servicio de STEL.</p>
     <label>Serie de los albaranes de trabajo (id de STEL, vacío = la predeterminada)</label><input data-ajuste="stel_serie_albaran_trabajo_id" data-tipo="num" value="${esc(aj.stel_serie_albaran_trabajo_id ?? "")}">
     <label>Límite propio de llamadas a STEL al día</label><input data-ajuste="stel_limite_llamadas_dia" data-tipo="num" value="${esc(aj.stel_limite_llamadas_dia ?? 250)}"></div>
     <div class="tarjeta"><h2>Factura</h2><label class="fila" style="font-weight:400"><input type="checkbox" data-ajuste="stel_emitir_factura" data-tipo="bool" style="width:24px;min-height:24px" ${aj.stel_emitir_factura === true ? "checked" : ""} ${puede("sat.facturar") ? "" : "disabled"}>
