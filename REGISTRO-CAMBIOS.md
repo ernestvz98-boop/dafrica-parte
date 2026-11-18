@@ -3,6 +3,13 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-18 · DAFRICA SAT 0.3.1: «Actualizar catálogo» daba «la sesión ha caducado»
+
+- Causa: `sat-stel` llamaba a la base de datos con la clave pública en `apikey` y la de servicio en Authorization; la
+  puerta de Supabase responde 401 («Invalid JWT») y la función devolvía 500. La app traducía «JWT» como sesión caducada.
+- Arreglo: con la clave de servicio, también en `apikey` (como `robot-cola`); `sat-stel` v3 desplegada. La app solo dice
+  «sesión caducada» con un 401; un error 5xx se muestra tal cual. Prueba de regresión en `pruebas/sat-rapido.test.mjs`.
+
 ## 2026-11-18 · DAFRICA SAT 0.3.0: parte rápido, buscador de clientes, transcripción propia y horas (tras el primer parte de prueba)
 
 - Usuario: «el audio no lo transcribió», «es muy largo para un técnico que solo tiene que grabar el audio, subir fotos

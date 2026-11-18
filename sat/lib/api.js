@@ -92,7 +92,9 @@ async function respuesta(r) {
   try { d = t ? JSON.parse(t) : null; } catch { d = {message: t}; }
   if (!r.ok) {
     const msg = d?.message || d?.error || d?.mensaje || `Error ${r.status}`;
-    throw new ErrorApi(traducir(msg), r.status, d?.code || d?.statusCode, msg);
+    // Solo un 401 es una sesión caducada; un error del servidor que menciona «JWT» no lo es (se muestra tal cual).
+    const texto = r.status >= 500 ? `Error del servidor (${r.status}): ${msg}` : traducir(msg);
+    throw new ErrorApi(texto, r.status, d?.code || d?.statusCode, msg);
   }
   return d;
 }
