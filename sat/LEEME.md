@@ -49,8 +49,10 @@ Diseño y capacidades de STEL comprobadas: [`docs/sat-diseno.md`](../docs/sat-di
   transcripción, firmas (válidas e invalidadas), versiones, PDF firmado, estado de STEL y registro completo.
 - **Cliente provisional**: «Vincular a cliente de STEL» (lo normal: no duplica) o «Crear en STEL» (antes busca
   por NIF y por nombre; si hay parecidos, se para y lo decides tú).
-- **Revisión económica**: «Proponer desde el parte» rellena materiales, mano de obra y desplazamiento con los
-  precios del catálogo de STEL. Completa artículo, precio, descuento e IVA. **Guardar revisión**.
+- **Revisión económica**: «Proponer desde el parte» rellena los materiales con los precios del catálogo de STEL, y la
+  mano de obra y el desplazamiento **por horas** (minutos anotados por el técnico ÷ 60) al **precio fijo por hora** de
+  Ajustes (50 € por defecto; vacío = precio del servicio de STEL). Un desplazamiento solo con km queda sin horas para
+  completarlo. Completa artículo, precio, descuento e IVA. **Guardar revisión**.
 - **Decisión**: Facturar (pasa a aprobación), Presupuestar, Pedir información al técnico o No facturable.
 - **STEL**: estado de cada operación, motivo de los bloqueos y «Reintentar». Pestaña **STEL** para todo lo
   pendiente. **Ajustes**: catálogo, servicios de mano de obra y desplazamiento, serie, límite de llamadas,

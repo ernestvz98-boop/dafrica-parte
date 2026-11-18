@@ -1,9 +1,9 @@
 // DAFRICA SAT · la aplicación abre sin conexión. Primero la red (para recibir las versiones nuevas) y, sin red, la copia.
 // Los datos (Supabase) nunca pasan por aquí: los borradores y archivos están en IndexedDB.
 // El lector de albaranes (../albaranes/*.js y ../vendor/tesseract, unos 9 MB) se guarda la primera vez que se usa.
-const CACHE = "dafrica-sat-0.2.0";
+const CACHE = "dafrica-sat-0.2.1";
 const BASE = [
-  "./", "index.html", "app.css?v=0.2.0", "app.js?v=0.2.0", "admin.js", "manifest.webmanifest", "vendor/pdf-lib.min.js",
+  "./", "index.html", "app.css?v=0.2.1", "app.js?v=0.2.1", "admin.js", "manifest.webmanifest", "vendor/pdf-lib.min.js",
   "lib/config.js", "lib/api.js", "lib/almacen.js", "lib/cola.js", "lib/dictado.js", "lib/contenido.js", "lib/economia.js",
   "lib/medios.js", "lib/pdf.js", "lib/ui.js", "lib/lector-foto.js", "lib/materiales-albaran.js", "../dafrica-logo.png.png",
 ];

@@ -22,8 +22,10 @@ export function euros(x) {
 
 /**
  * Propuesta de líneas económicas a partir del parte: materiales (con el artículo y precio de STEL si se eligió),
- * mano de obra y desplazamiento con los servicios configurados. Los precios salen SOLO del catálogo de STEL;
- * si no hay precio, la línea queda sin precio para que administración lo complete.
+ * mano de obra y desplazamiento con los servicios configurados. Mano de obra y desplazamiento: por horas (minutos que
+ * anotó el técnico ÷ 60) al precio fijo por hora de Ajustes (usuario, 2026-11-18: 50 €/h); sin ese ajuste, el del
+ * servicio de STEL. Materiales: precio SOLO del catálogo de STEL. Sin precio o sin horas, la línea queda incompleta para
+ * que administración la complete (nunca se inventa).
  */
 export function proponerLineas(contenido, articulos, ajustes) {
   const porId = new Map((articulos || []).map((a) => [Number(a.stel_id), a]));
@@ -35,15 +37,22 @@ export function proponerLineas(contenido, articulos, ajustes) {
       cantidad: Number(m.cantidad) || null, precio: a?.precio ?? null, descuento_pct: 0, iva_pct: a?.iva_pct ?? 21});
   }
   const servicio = (clave) => porId.get(Number(ajustes?.[clave])) || null;
+  const precioHora = (clave, s) => {
+    const v = ajustes?.[clave];
+    return v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : (s?.precio ?? null);
+  };
+  const horas = (min) => Math.round(Number(min) / 60 * 100) / 100;
   if (Number(contenido.tiempo_trabajo_min) > 0) {
     const s = servicio("stel_servicio_mano_obra_id");
-    lineas.push({tipo: "MANO_OBRA", stel_item_id: s?.stel_id ?? null, descripcion: s?.nombre || "Mano de obra",
-      cantidad: Math.round(Number(contenido.tiempo_trabajo_min) / 60 * 100) / 100, precio: s?.precio ?? null, descuento_pct: 0, iva_pct: s?.iva_pct ?? 21});
+    lineas.push({tipo: "MANO_OBRA", stel_item_id: s?.stel_id ?? null, descripcion: `${s?.nombre || "Mano de obra"} (horas)`,
+      cantidad: horas(contenido.tiempo_trabajo_min), precio: precioHora("precio_hora_mano_obra", s), descuento_pct: 0, iva_pct: s?.iva_pct ?? 21});
   }
   if (Number(contenido.desplazamiento_min) > 0 || Number(contenido.desplazamiento_km) > 0) {
     const s = servicio("stel_servicio_desplazamiento_id");
-    lineas.push({tipo: "DESPLAZAMIENTO", stel_item_id: s?.stel_id ?? null, descripcion: s?.nombre || "Desplazamiento",
-      cantidad: 1, precio: s?.precio ?? null, descuento_pct: 0, iva_pct: s?.iva_pct ?? 21});
+    // Por horas: sin minutos anotados (solo km) no hay horas que cobrar y la cantidad queda para administración.
+    lineas.push({tipo: "DESPLAZAMIENTO", stel_item_id: s?.stel_id ?? null, descripcion: `${s?.nombre || "Desplazamiento"} (horas)`,
+      cantidad: Number(contenido.desplazamiento_min) > 0 ? horas(contenido.desplazamiento_min) : null,
+      precio: precioHora("precio_hora_desplazamiento", s), descuento_pct: 0, iva_pct: s?.iva_pct ?? 21});
   }
   return lineas;
 }
