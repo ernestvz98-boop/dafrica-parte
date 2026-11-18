@@ -13,10 +13,20 @@ Diseño y capacidades de STEL comprobadas: [`docs/sat-diseno.md`](../docs/sat-di
 ### Técnico (móvil)
 1. **Entrar**: con el mismo usuario de DAFRICA Control (la misma sesión y la verificación en dos pasos).
    Instalar en el móvil: abrir `…/sat/` en Chrome o Safari → «Añadir a pantalla de inicio».
-2. **Mis avisos**: los asignados por la oficina, por prioridad. Si te llaman directamente:
-   **＋ Aviso por llamada** (cliente del catálogo o «Cliente nuevo», que queda provisional hasta que la
-   oficina lo vincule con STEL; dirección, contacto, equipo, motivo y prioridad).
-3. **Parte en 4 pasos**
+2. **Parte rápido (por defecto, desde 0.3.0)**: **＋ Nuevo parte** → busca el cliente (nombre, NIF, teléfono o
+   dirección; los clientes de STEL ya están en el teléfono) y tócalo. En UNA pantalla:
+   - **● Grabar audio** contando qué le pasaba, qué has hecho, el material (con cantidades) y lo pendiente. Se
+     transcribe solo (o «adjuntar un audio del teléfono», o «Prefiero escribirlo»).
+   - **Fotos del trabajo** (antes / arreglado) y, si lo hay, **foto del albarán o ticket de compra**: se adjunta y
+     se leen sus materiales solos.
+   - **¿Cómo queda?** (terminado, pendiente de presupuesto/repuestos/otra visita, o solo revisión), **horas de
+     trabajo** y **horas de desplazamiento** con botones (½ h, 1 h…, «Otra…»).
+   - **Firmar ✍️**: el texto del audio se ordena solo (avería, trabajos, pendiente; cada frase entera, sin
+     inventar) y los materiales salen del albarán y de lo dictado CON cantidad. Lo leído con dudas va marcado
+     «a confirmar por la oficina» (no impide firmar). Después, firmas y «Generar PDF y enviar».
+   - «Rellenar a mano (modo detallado)» pasa al parte por pasos de abajo.
+   Los avisos asignados por la oficina también se abren en el parte rápido.
+3. **Parte detallado (4 pasos)**, si se elige «Rellenar a mano» o con «Crear un aviso con todos los datos»
    - *Datos*: tipo de visita (**diagnóstico**, **reparación finalizada** o **pendiente** de presupuesto,
      repuestos o segunda visita), fecha y horas («Ahora»), cliente, dirección, contacto, equipo.
    - *Dictado y fotos*: **● Grabar audio** (uno o varios). Se transcribe al momento si hay cobertura; si
@@ -141,8 +151,10 @@ de STEL ya está en el servidor; nunca va al navegador.
    con `lines` sustituye las líneas al reenviar una corrección.
 4. El contenido real de `pdf-path` y cómo descargarlo (si no, subida manual del PDF).
 5. Si emitir con `issueInvoiceVerifactu` es lo que queréis (Ajustes → «Emitir la factura en STEL»).
-6. Que el servicio de transcripción actual (`/transcribir` de DAFRICA Parte) acepta a los técnicos. Si no,
-   se cambia la URL en Ajustes; mientras tanto, el dictado del teclado del teléfono funciona en cualquier casilla.
+6. Transcripción: desde 0.3.0 la hace la función propia `sat-transcribir` (permiso de la app de partes; misma
+   clave y modelo de OpenAI que DAFRICA Parte, `gpt-4o-mini-transcribe`). El servicio anterior de DAFRICA Parte
+   exigía permisos de «partes» de la aplicación antigua y por eso no transcribía. Sin cobertura, el audio queda
+   guardado y se transcribe al volver; también se puede escribir.
 
 ---
 

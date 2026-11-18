@@ -1,7 +1,7 @@
 // DAFRICA SAT · PDF del parte firmado (pdf-lib, en el propio teléfono: funciona sin conexión).
 // Lleva identificación del parte, datos de la intervención, trabajos, materiales (sin importes), fotos y firmas,
 // el texto del alcance de la firma y la huella SHA-256 del contenido firmado.
-import {resumenTipo, RESULTADOS, MOMENTOS, PRIORIDADES, canonico, normalizar} from "./contenido.js";
+import {resumenTipo, RESULTADOS, MOMENTOS, PRIORIDADES, canonico, normalizar, horasTexto} from "./contenido.js";
 import {sha256} from "./almacen.js";
 
 const A4 = [595.28, 841.89], M = 42, AZUL = [0.04, 0.16, 0.35], GRIS = [0.38, 0.42, 0.48], LINEA = [0.82, 0.85, 0.9];
@@ -85,8 +85,8 @@ export async function generarPdfParte(d) {
   campo("Instalación / equipo", [c.equipo?.nombre, c.equipo?.numero_serie ? `n.º serie ${c.equipo.numero_serie}` : ""].filter(Boolean).join(" · "));
   campo("Tipo de visita", resumenTipo(c));
   campo("Fecha y horas", `${c.fecha ? c.fecha.split("-").reverse().join("/") : ""}  ·  de ${c.hora_inicio || "?"} a ${c.hora_fin || "?"}`);
-  campo("Tiempo de trabajo", c.tiempo_trabajo_min ? `${c.tiempo_trabajo_min} min` : "");
-  campo("Desplazamiento", [c.desplazamiento_min ? `${c.desplazamiento_min} min` : "", c.desplazamiento_km ? `${c.desplazamiento_km} km` : ""].filter(Boolean).join(" · "));
+  campo("Horas de trabajo", horasTexto(c.tiempo_trabajo_min));
+  campo("Desplazamiento", c.desplazamiento_min === 0 ? "Sin desplazamiento" : [horasTexto(c.desplazamiento_min), c.desplazamiento_km ? `${c.desplazamiento_km} km` : ""].filter(Boolean).join(" · "));
   campo("Técnico", d.tecnico);
 
   if ((c.comprobaciones || []).length) {
@@ -112,7 +112,7 @@ export async function generarPdfParte(d) {
     pag.drawText("Unidad", {x: cols[2], y: y - 9, size: 8.5, font: fb, color: color(GRIS)});
     y -= 14;
     for (const m of c.materiales) {
-      const desc = [m.descripcion, m.referencia ? `(ref. ${m.referencia})` : ""].filter(Boolean).join(" ");
+      const desc = [m.descripcion, m.referencia ? `(ref. ${m.referencia})` : "", (m.dudas || []).length ? "[a confirmar por la oficina]" : ""].filter(Boolean).join(" ");
       const ls = lineas(desc, f, 10, cols[1] - cols[0] - 10);
       espacio(13 * ls.length + 2);
       ls.forEach((l, i) => pag.drawText(l, {x: cols[0], y: y - 10 - i * 13, size: 10, font: f}));
@@ -121,6 +121,7 @@ export async function generarPdfParte(d) {
       y -= 13 * ls.length + 3;
     }
     escribir("Sin importes: los precios se presentan por separado.", {tam: 8, col: GRIS});
+    if (c.materiales.some((m) => (m.dudas || []).length)) escribir("«A confirmar»: leído del albarán del proveedor o del dictado con alguna duda; la oficina lo comprueba con la foto adjunta.", {tam: 8, col: GRIS});
   }
   if (c.estado_final) { titulo("Estado final de la instalación"); escribir(c.estado_final); }
   if (c.pendientes) { titulo("Trabajos pendientes"); escribir(c.pendientes); }

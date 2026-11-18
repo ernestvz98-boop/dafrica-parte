@@ -3,6 +3,31 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-18 · DAFRICA SAT 0.3.0: parte rápido, buscador de clientes, transcripción propia y horas (tras el primer parte de prueba)
+
+- Usuario: «el audio no lo transcribió», «es muy largo para un técnico que solo tiene que grabar el audio, subir fotos
+  de los albaranes de compra y foto de lo que arregló», «los clientes ya los tenemos: buscar y seleccionar», «el
+  desplazamiento y el tiempo de mano de obra en horas».
+- Causa del primer parte que no llegó: avisos creados por un usuario de oficina quedaban SIN técnico y el parte se
+  rechazaba («aviso_de_otro_tecnico»): no subieron ni parte, ni audio, ni fotos. Ahora el aviso por llamada queda a
+  nombre de quien lo crea y un aviso sin técnico lo coge quien hace el parte (`20261118_sat_parte_rapido.sql`).
+- Transcripción: el servicio de DAFRICA Parte exige permisos de «partes» de la app antigua. Nueva función Edge
+  `sat-transcribir` (sat.tecnico o sat.administrar; OPENAI_API_KEY ya existente; no guarda nada); el ajuste
+  `transcripcion_url` apunta a ella. Transcribe sola al grabar; los errores se ven en el audio con «Transcribir».
+- Parte rápido (`contenido.modo = "RAPIDO"`, `contenidoRapido`): una pantalla; materiales del albarán del proveedor
+  (lector en el teléfono, en segundo plano) y del dictado con cantidad; lo dudoso «a confirmar por la oficina» sin
+  bloquear la firma; horas de trabajo y desplazamiento elegidas por el técnico en horas (se guardan en minutos).
+- Horas en todas partes: modo detallado, resumen, PDF, oficina y STEL (desplazamiento en horas en el albarán de
+  trabajo; antes 1 unidad). `sat-stel` v2 (v1 en `respaldo-v1-handler.mjs`).
+- Política de seguridad de la página: `style-src` admite estilos en línea (56 sitios de la app los usaban y el
+  navegador los ignoraba: márgenes y tamaños); los scripts siguen solo del propio sitio.
+- Producción (autorizado: «permiso total»): migración `sat_partes_5_parte_rapido` (copia en
+  `respaldo.funciones_20261118_sat_rapido` y `respaldo.sat_ajustes_20261118b`), funciones `sat-transcribir` v1 y
+  `sat-stel` v2 (ambas con verify_jwt; comprobado 401 sin sesión y CORS de la web).
+- Verificado: pruebas nuevas `sat-rapido` (3) y `sat-transcribir` (3), SQL con los tres casos de avisos, flujo
+  completo, `npm test`; recorrido en el emulador como técnico (buscar cliente → audio transcrito → horas → firmar →
+  enviar). Sin probar con STEL real ni con un móvil real.
+
 ## 2026-11-18 · DAFRICA SAT 0.2.1: mano de obra y desplazamiento a precio fijo por hora (usuario: «fijo de 50 € la hora»)
 
 - Ajustes nuevos `precio_hora_mano_obra` y `precio_hora_desplazamiento` (50 €), editables en Oficina → Ajustes; la

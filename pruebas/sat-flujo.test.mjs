@@ -114,7 +114,7 @@ test("SAT: flujo completo de punta a punta con STEL falso", {timeout: 120000}, a
   assert.equal(wdn["account-id"], e.semilla.c1.id);
   assert.equal(wdn["parent-incident-id"], e.stel.datos.incidents[0].id);
   assert.ok(wdn.title.startsWith(enviado.codigo + " "));
-  assert.deepEqual(wdn.lines.map((l) => [l["item-id"], l.units]), [[e.semilla.p1.id, 1], [e.semilla.p2.id, 3], [e.semilla.s1.id, 1.5], [e.semilla.s2.id, 1]]);
+  assert.deepEqual(wdn.lines.map((l) => [l["item-id"], l.units]), [[e.semilla.p1.id, 1], [e.semilla.p2.id, 3], [e.semilla.s1.id, 1.5], [e.semilla.s2.id, 0.33]]); // desplazamiento en horas (20 min)
   assert.deepEqual(e.stel.datos.entityAttachments.map((a) => a.name).sort(),
     [`${enviado.codigo}_foto_despues_${fotoId.slice(0, 8)}.jpg`, `${enviado.codigo}_parte_firmado_v1.pdf`].sort());
   assert.equal(Buffer.from(e.stel.datos.entityAttachments.find((a) => a.name.endsWith(".pdf"))._base64, "base64").toString(), pdf.toString());

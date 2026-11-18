@@ -4,14 +4,14 @@ import {rpc, haySesion, entrar, salir, transcribir, descargar, SinConexion, Erro
 import {kv, partes, archivos, pedirPersistencia, sha256} from "./lib/almacen.js";
 import * as Cola from "./lib/cola.js";
 import {organizarDictado} from "./lib/dictado.js";
-import {contenidoNuevo, normalizar, iguales, problemasParaFirmar, minutosEntre, nuevoId, hoy, ahoraHora, resumenTipo,
-  TIPOS_VISITA, PENDIENTE_DE, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
+import {contenidoNuevo, normalizar, iguales, problemasParaFirmar, minutosEntre, nuevoId, hoy, ahoraHora, resumenTipo, contenidoRapido,
+  horasTexto, minutosDeHoras, TIPOS_VISITA, PENDIENTE_DE, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
 import {PanelFirma, comprimirFoto, grabarAudio, extensionAudio} from "./lib/medios.js";
 import {generarPdfParte, huellaContenido} from "./lib/pdf.js";
 import {esc, $, $$, avisar, dialogo, confirmar, pedirTexto, elegir, fechaHora, fechaCorta, chipEstado, abrirBlob, descargarBlob, compartirBlob} from "./lib/ui.js";
 
 const S = {yo: null, catalogo: {clientes: [], direcciones: [], contactos: [], equipos: [], articulos: [], tecnicos: []}, avisos: [], partesServidor: [],
-  urls: [], grabacion: null, momentoFoto: "ANTES", propuesta: null};
+  urls: [], grabacion: null, momentoFoto: "ANTES", propuesta: null, transcribiendo: new Set(), autoTranscrito: new Set(), leyendo: new Set(), momentoRapido: "DESPUES"};
 const app = $("#app");
 const UNIDADES = ["ud", "m", "cm", "mm", "l", "kg", "g", "rollo", "caja", "bote", "cartucho", "bolsa", "saco", "par", "h"];
 const puede = (p) => Boolean(S.yo?.permisos?.includes(p));
@@ -110,6 +110,13 @@ function pantallaEntrar() {
 
 // ------------------------------------------------------------------ rutas
 async function render() {
+  // Volver a pintar la MISMA pantalla (un toque en una opción) no la sube arriba del todo.
+  const misma = S.ultimaVista === location.hash, y = window.scrollY;
+  S.ultimaVista = location.hash;
+  await pintarVista();
+  if (misma) window.scrollTo(0, y);
+}
+async function pintarVista() {
   for (const u of S.urls.splice(0)) URL.revokeObjectURL(u);
   const [ruta, a, b] = (location.hash.replace(/^#\/?/, "") || "avisos").split("/");
   $$(".menu a").forEach((x) => x.classList.toggle("activo", x.dataset.ruta === ruta || (ruta === "parte" && x.dataset.ruta === "avisos")));
@@ -118,6 +125,7 @@ async function render() {
   try {
     if (ruta === "avisos") return await vistaAvisos();
     if (ruta === "aviso") return await vistaNuevoAviso();
+    if (ruta === "nuevo") return await vistaNuevoParte();
     if (ruta === "parte") return await vistaParte(a, b || "datos");
     if (ruta === "bandeja") return await vistaBandeja();
     if (ruta === "notificaciones") return await vistaNotificaciones();
@@ -149,7 +157,8 @@ async function vistaAvisos() {
       ${a.direccion_texto ? `<div class="suave">📍 ${esc(a.direccion_texto)}</div>` : ""}</a>`;
   };
   app.innerHTML = `<div class="fila"><h1 class="crece">Mis avisos</h1></div>
-    <a class="boton ancho" href="#/aviso/nuevo">＋ Aviso por llamada</a><div style="height:12px"></div>
+    <a class="boton verde ancho grande" href="#/nuevo">＋ Nuevo parte</a>
+    <p class="centro"><a class="suave peq" href="#/aviso/nuevo">Crear un aviso con todos los datos</a></p>
     ${abiertos.length ? abiertos.map(tarjeta).join("") : `<p class="suave">No tienes avisos abiertos.</p>`}
     ${cerrados.length ? `<h2>Cerrados recientemente</h2>${cerrados.map(tarjeta).join("")}` : ""}`;
   $$("[data-aviso]").forEach((el) => el.addEventListener("click", (e) => { e.preventDefault(); abrirParteDeAviso(el.dataset.aviso); }));
@@ -159,7 +168,7 @@ async function abrirParteDeAviso(avisoId) {
   const aviso = S.avisos.find((a) => a.id === avisoId);
   const todas = (await partes.todas()).filter((p) => p.aviso_id === avisoId);
   const abierta = todas.find((p) => p.estadoLocal !== "ENVIADO");
-  if (abierta) { location.hash = `#/parte/${abierta.id}/datos`; return; }
+  if (abierta) { location.hash = `#/parte/${abierta.id}/${abierta.contenido?.modo === "RAPIDO" ? "rapido" : "datos"}`; return; }
   if (todas.length) {
     const r = await dialogo(`<h2>${esc(aviso.codigo || "Aviso")}</h2><p>Este aviso ya tiene un parte enviado.</p>`,
       [{texto: "Ver el parte enviado", valor: "ver"}, {texto: "Nuevo parte (otra visita)", valor: "nuevo"}]);
@@ -168,10 +177,82 @@ async function abrirParteDeAviso(avisoId) {
   }
   if (aviso.estado === "CERRADO") { avisar("El aviso está cerrado.", {error: true}); return; }
   const id = nuevoId();
+  // Por defecto, el parte rápido (usuario, 2026-11-18): grabar, fotos, horas y firma. El detallado sigue disponible.
   await partes.put({id, aviso_id: aviso.id, aviso: {codigo: aviso.codigo, motivo: aviso.motivo, prioridad: aviso.prioridad},
-    contenido: normalizar(contenidoNuevo(aviso, S.catalogo)), firmas: [], dictados: [], estadoLocal: "BORRADOR", creado: Date.now()});
+    contenido: normalizar({...contenidoNuevo(aviso, S.catalogo), modo: "RAPIDO"}), firmas: [], dictados: [], albaranes: {}, escrito: "",
+    estadoLocal: "BORRADOR", creado: Date.now()});
   await Cola.poner("GUARDAR", "guardar:" + id, {parte_id: id});
-  location.hash = `#/parte/${id}/datos`;
+  location.hash = `#/parte/${id}/rapido`;
+}
+
+/** Aviso del propio técnico (en el teléfono primero; se sube por la cola) y su parte rápido. */
+async function crearAvisoYParte({cliente, direccion = null, contacto = null, equipo = null, motivo = "Intervención de mantenimiento", prioridad = "NORMAL"}) {
+  for (const [tipo, x, lista] of [["CLIENTE", cliente, "clientes"], ["DIRECCION", direccion, "direcciones"], ["CONTACTO", contacto, "contactos"], ["EQUIPO", equipo, "equipos"]]) {
+    if (!x?.nuevo) continue;
+    const {nuevo, ...datos} = x;
+    S.catalogo[lista].push(datos);
+    await Cola.poner("ALTA", "alta:" + x.id, {tipo, datos: {...datos, cliente_id: tipo === "CLIENTE" ? undefined : cliente.id}});
+  }
+  await kv.set("catalogo", S.catalogo);
+  const aviso = {id: nuevoId(), motivo, prioridad, cliente_id: cliente.id, direccion_id: direccion?.id || null,
+    contacto_id: contacto?.id || null, equipo_id: equipo?.id || null, cliente_texto: cliente.nombre, direccion_texto: direccion?.texto || null,
+    contacto_texto: contacto?.nombre || null, equipo_texto: equipo?.nombre || null, origen: "LLAMADA_TECNICO", tecnico_id: S.yo.id};
+  const local = {...aviso, codigo: null, estado: "ASIGNADO"};
+  const locales = (await kv.get("avisosLocales")) || [];
+  await kv.set("avisosLocales", [...locales, local]);
+  S.avisos = [local, ...S.avisos];
+  await kv.set("avisos", S.avisos);
+  await Cola.poner("AVISO", "aviso:" + aviso.id, {aviso});
+  await abrirParteDeAviso(aviso.id);
+}
+
+const sinTildes = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+// Nuevo parte: buscar el cliente (los de STEL ya están en el teléfono) y empezar. Nada más que rellenar.
+async function vistaNuevoParte() {
+  const cat = S.catalogo;
+  const dirs = (c) => cat.direcciones.filter((d) => d.cliente_id === c.id);
+  const hayStel = cat.clientes.some((c) => c.stel_id);
+  app.innerHTML = `<div class="fila"><a href="#/avisos" class="boton mini sec">←</a><h1 class="crece">Nuevo parte</h1></div>
+    ${hayStel ? "" : `<div class="alerta ambar">Todavía no están los clientes de STEL en el teléfono: en la oficina hay que pulsar «Actualizar catálogo desde STEL» (Oficina → Ajustes). Mientras, puedes añadir el cliente a mano.</div>`}
+    <label for="bCli">Cliente</label><input id="bCli" type="search" placeholder="Nombre, NIF, teléfono o dirección" autocomplete="off" enterkeyhint="search">
+    <div id="resCli" style="margin-top:8px"></div>
+    <button type="button" class="boton sec ancho" id="bCliNuevo" style="margin-top:12px">El cliente no está: añadirlo</button>`;
+  const pintar = () => {
+    const q = sinTildes($("#bCli").value).split(/\s+/).filter(Boolean);
+    const lista = !q.length ? [] : cat.clientes.filter((c) => {
+      const t = sinTildes([c.nombre, c.nif, c.telefono, ...dirs(c).map((d) => d.texto)].join(" "));
+      return q.every((p) => t.includes(p));
+    }).slice(0, 40);
+    $("#resCli").innerHTML = !q.length ? `<p class="suave peq">Escribe para buscar entre ${cat.clientes.length} clientes.</p>`
+      : lista.map((c) => `<button type="button" class="eleccion" data-cli="${esc(c.id)}">${esc(c.nombre)}${c.provisional ? " <small>(nuevo, sin STEL)</small>" : ""}
+        <small>${esc([dirs(c)[0]?.texto, c.nif, c.telefono].filter(Boolean).join(" · "))}</small></button>`).join("") || `<p class="suave">Ningún cliente coincide.</p>`;
+    $$("[data-cli]").forEach((b) => b.onclick = async () => {
+      const c = cat.clientes.find((x) => x.id === b.dataset.cli);
+      const ds = dirs(c);
+      let direccion = ds.length === 1 ? ds[0] : null;
+      if (ds.length > 1) {
+        direccion = await elegir("¿Dónde es el trabajo?", ds, {texto: (d) => d.texto, nuevo: "Otra dirección"});
+        if (direccion === "nuevo") direccion = null;
+        else if (!direccion) return;
+      }
+      await crearAvisoYParte({cliente: c, direccion});
+    });
+  };
+  $("#bCli").addEventListener("input", pintar);
+  $("#bCliNuevo").onclick = async () => {
+    const d = await dialogo(`<h2>Cliente nuevo</h2><p class="suave">Queda provisional: la oficina lo vincula con STEL (no se duplica).</p>
+      <label>Nombre o razón social</label><input id="nNombre" value="${esc($("#bCli").value)}"><label>Teléfono (si lo tienes)</label><input id="nTel" inputmode="tel">
+      <label>Dirección del trabajo</label><input id="nDir">`,
+    [{texto: "Cancelar", valor: null}, {texto: "Empezar el parte", valor: (x) => ({nombre: $("#nNombre", x).value.trim(), telefono: $("#nTel", x).value.trim(), dir: $("#nDir", x).value.trim()}),
+      validar: (x) => $("#nNombre", x).value.trim().length > 1}]);
+    if (!d) return;
+    const cliente = {id: nuevoId(), nombre: d.nombre, nif: "", telefono: d.telefono, provisional: true, nuevo: true};
+    const direccion = d.dir ? {id: nuevoId(), cliente_id: cliente.id, texto: d.dir, provisional: true, nuevo: true} : null;
+    await crearAvisoYParte({cliente, direccion});
+  };
+  pintar();
+  $("#bCli").focus();
 }
 
 // Aviso creado por el técnico (llamada directa), con altas provisionales si el cliente no existe.
@@ -227,24 +308,7 @@ async function vistaNuevoAviso() {
     f.motivo = $("#tMotivo").value.trim();
     if (!f.motivo) return avisar("Escribe el motivo del aviso.", {error: true});
     if (!f.cliente) return avisar("Elige o añade el cliente.", {error: true});
-    // Altas provisionales: primero en el teléfono, después en la cola (antes que el aviso).
-    for (const [tipo, x, lista] of [["CLIENTE", f.cliente, "clientes"], ["DIRECCION", f.direccion, "direcciones"], ["CONTACTO", f.contacto, "contactos"], ["EQUIPO", f.equipo, "equipos"]]) {
-      if (!x?.nuevo) continue;
-      const {nuevo, ...datos} = x;
-      S.catalogo[lista].push(datos);
-      await Cola.poner("ALTA", "alta:" + x.id, {tipo, datos: {...datos, cliente_id: tipo === "CLIENTE" ? undefined : f.cliente.id}});
-    }
-    await kv.set("catalogo", S.catalogo);
-    const aviso = {id: nuevoId(), motivo: f.motivo, prioridad: f.prioridad, cliente_id: f.cliente.id, direccion_id: f.direccion?.id || null,
-      contacto_id: f.contacto?.id || null, equipo_id: f.equipo?.id || null, cliente_texto: f.cliente.nombre, direccion_texto: f.direccion?.texto || null,
-      contacto_texto: f.contacto?.nombre || null, equipo_texto: f.equipo?.nombre || null};
-    const local = {...aviso, codigo: null, estado: "ASIGNADO", origen: "LLAMADA_TECNICO", tecnico_id: S.yo.id};
-    const locales = (await kv.get("avisosLocales")) || [];
-    await kv.set("avisosLocales", [...locales, local]);
-    S.avisos = [local, ...S.avisos];
-    await kv.set("avisos", S.avisos);
-    await Cola.poner("AVISO", "aviso:" + aviso.id, {aviso});
-    await abrirParteDeAviso(aviso.id);
+    await crearAvisoYParte(f);
   };
   pintar();
 }
@@ -281,6 +345,7 @@ function asignar(obj, ruta, valor) {
   o[k.at(-1)] = valor;
 }
 function leerValor(el) {
+  if (el.dataset.tipo === "horas") return String(el.value).trim() === "" ? null : minutosDeHoras(el.value);
   if (el.dataset.tipo === "num") { const v = String(el.value).replace(",", ".").trim(); return v === "" || !Number.isFinite(Number(v)) ? null : Number(v); }
   return el.value;
 }
@@ -290,14 +355,17 @@ async function vistaParte(id, paso) {
   if (!p) { app.innerHTML = `<div class="alerta rojo">Este parte no está en este teléfono.</div><a class="boton sec" href="#/avisos">Volver</a>`; return; }
   const editable = p.estadoLocal !== "ENVIADO";
   const c = p.contenido;
+  const rapido = c.modo === "RAPIDO";
+  if (rapido && ["datos", "dictado", "trabajo"].includes(paso)) { location.replace(`#/parte/${p.id}/rapido`); return; }
+  if (!rapido && paso === "rapido") paso = "datos";
   const cabecera = `<div class="fila"><a href="#/avisos" class="boton mini sec">←</a><div class="crece"><b id="codigoParte" data-id="${esc(p.id)}">${esc(p.codigo || "Parte nuevo (sin subir)")}</b>
     <div class="suave peq">${esc(p.aviso?.codigo || "")} · ${esc(c.cliente?.nombre || "")}</div></div>${p.estadoLocal === "ENVIADO" ? chipEstado(p.estadoServidor || "ENVIADO") : ""}</div>
     ${p.estadoServidor === "INFO_SOLICITADA" && editable ? `<div class="alerta rojo"><b>La oficina pide información:</b> ${esc(p.decisionNota || "revisa el parte")}<br>Corrige lo necesario, vuelve a firmar y envía.</div>` : ""}
-    <nav class="pasos">${PASOS.map(([k, t]) => `<a href="#/parte/${p.id}/${k}" class="${k === paso ? "activo" : ""}">${t}</a>`).join("")}</nav>`;
+    ${rapido ? "" : `<nav class="pasos">${PASOS.map(([k, t]) => `<a href="#/parte/${p.id}/${k}" class="${k === paso ? "activo" : ""}">${t}</a>`).join("")}</nav>`}`;
   const ultimas = ["TECNICO", "CLIENTE"].map((r) => p.firmas.filter((f) => f.rol === r).at(-1)).filter(Boolean);
   const avisoFirmas = editable && ultimas.some((f) => !firmaValida(p, f))
-    ? `<div class="alerta ambar">Has cambiado el parte después de firmar: las firmas ya no valen y hay que volver a firmar (paso 4).</div>` : "";
-  const vistas = {datos: pasoDatos, dictado: pasoDictado, trabajo: pasoTrabajo, firmas: pasoFirmas};
+    ? `<div class="alerta ambar">Has cambiado el parte después de firmar: las firmas ya no valen y hay que volver a firmar.</div>` : "";
+  const vistas = {datos: pasoDatos, dictado: pasoDictado, trabajo: pasoTrabajo, firmas: pasoFirmas, rapido: pasoRapido};
   app.innerHTML = cabecera + avisoFirmas + `<div id="paso"></div>`;
   await vistas[paso](p, $("#paso"), editable);
   if (!editable) $$("#paso input, #paso textarea, #paso select, #paso .opcion, #paso [data-editar]").forEach((x) => { x.disabled = true; });
@@ -432,20 +500,227 @@ async function pasoDictado(p, raiz, editable) {
   });
 }
 
-async function transcribirAudio(aid) {
+async function transcribirAudio(aid, {silencioso = false} = {}) {
   const a = await archivos.get(aid);
-  if (!a) return;
-  avisar("Transcribiendo…", {ms: 15000});
+  if (!a || S.transcribiendo.has(aid)) return;
+  S.transcribiendo.add(aid);
+  if (location.hash.includes("/rapido")) render();
+  else if (!silencioso) avisar("Transcribiendo…", {ms: 15000});
   try {
     const texto = await transcribir(S.yo.transcripcion_url || "", a.blob, a.ruta.split("/").pop());
-    await partes.modificar(a.parte_id, (q) => { q.dictados = q.dictados.map((d) => d.archivo_id === aid ? {...d, texto} : d); });
+    await partes.modificar(a.parte_id, (q) => { q.dictados = q.dictados.map((d) => d.archivo_id === aid ? {...d, texto, error: null} : d); });
     await archivos.put({...(await archivos.get(aid)), transcripcion: texto});
     await Cola.poner("ARCHIVO", "archivo:" + aid + ":texto", {archivo_id: aid});
-    avisar("Transcrito. Revísalo antes de usarlo.");
+    if (!silencioso && !location.hash.includes("/rapido")) avisar("Transcrito. Revísalo antes de usarlo.");
   } catch (e) {
-    avisar(e instanceof SinConexion ? "Sin conexión: el audio está guardado; transcríbelo cuando haya cobertura." : "No se pudo transcribir: " + e.message, {error: true});
+    const error = e instanceof SinConexion ? "Sin cobertura: se transcribirá al recuperarla." : e.message;
+    await partes.modificar(a.parte_id, (q) => { q.dictados = q.dictados.map((d) => d.archivo_id === aid ? {...d, error} : d); });
+    if (!silencioso) avisar("No se pudo transcribir: " + error, {error: true});
+  } finally {
+    S.transcribiendo.delete(aid);
   }
-  if (location.hash.includes("/dictado")) render();
+  if (location.hash.includes("/dictado") || location.hash.includes("/rapido")) render();
+}
+
+// ------------------------------------------------------------------ parte rápido (usuario, 2026-11-18)
+// Una sola pantalla: grabar lo hecho, fotos del trabajo, foto del albarán de compra (si lo hay), cómo queda, horas y firmar.
+// El texto del audio se ordena solo (sin inventar) y los materiales salen del albarán del proveedor y de lo dictado con cantidad.
+const HORAS_TRABAJO = [0.5, 1, 1.5, 2, 3, 4, 6, 8];
+const HORAS_DESPLAZAMIENTO = [0, 0.5, 1, 1.5, 2];
+
+async function guardarFotoParte(pid, file, momento, comentario = "") {
+  const lado = momento === "MATERIAL" ? 2200 : 1600;
+  const blob = await comprimirFoto(file, lado, momento === "MATERIAL" ? 0.85 : 0.8);
+  const fid = nuevoId();
+  await archivos.put({id: fid, parte_id: pid, tipo: "FOTO", momento, ruta: `${pid}/${momento === "MATERIAL" ? "albaran-proveedor" : "foto"}-${fid}.jpg`, blob, mime: "image/jpeg",
+    sha256: await sha256(blob), creado: new Date().toISOString(), subido: false, registrado: false});
+  await cambiarParte(pid, (q) => { q.contenido.fotos = [...(q.contenido.fotos || []), {id: fid, momento, comentario}]; }, {inmediato: true});
+  await Cola.poner("ARCHIVO", "archivo:" + fid, {archivo_id: fid});
+  return {fid, blob};
+}
+
+async function guardarAudioParte(pid, blob, nombre) {
+  const aid = nuevoId(), ext = extensionAudio(blob.type || nombre || "");
+  await archivos.put({id: aid, parte_id: pid, tipo: "AUDIO", ruta: `${pid}/audio-${aid}.${ext}`, blob, mime: blob.type || "audio/webm",
+    sha256: await sha256(blob), creado: new Date().toISOString(), subido: false, registrado: false});
+  await partes.modificar(pid, (q) => { q.dictados = [...(q.dictados || []), {archivo_id: aid, texto: ""}]; });
+  await Cola.poner("GUARDAR", "guardar:" + pid, {parte_id: pid});
+  await Cola.poner("ARCHIVO", "archivo:" + aid, {archivo_id: aid});
+  return aid;
+}
+
+/** Lee la foto del albarán del proveedor en el teléfono y guarda lo leído en el parte (no en lo firmado hasta «Firmar»). */
+async function leerAlbaranRapido(pid, fid, blob) {
+  if (S.leyendo.has(fid)) return;
+  S.leyendo.add(fid);
+  await partes.modificar(pid, (q) => { q.albaranes = {...(q.albaranes || {}), [fid]: {estado: "LEYENDO"}}; });
+  if (location.hash.includes("/rapido")) render();
+  let res;
+  try {
+    const {leerFotoAlbaran} = await import("./lib/lector-foto.js");
+    const {materialesDesdeAlbaran} = await import("./lib/materiales-albaran.js");
+    const r = await leerFotoAlbaran(blob);
+    const prop = materialesDesdeAlbaran(r, {articulos: S.catalogo.articulos || [], fotoId: fid});
+    res = {estado: "LEIDO", proveedor: [prop.proveedor, prop.numero ? "n.º " + prop.numero : ""].filter(Boolean).join(" · "),
+      materiales: prop.materiales.map((m) => ({...m, id: nuevoId()})), avisos: prop.avisos};
+  } catch (e) {
+    res = {estado: "ERROR", error: e.message};
+  } finally {
+    S.leyendo.delete(fid);
+  }
+  await partes.modificar(pid, (q) => { q.albaranes = {...(q.albaranes || {}), [fid]: res}; });
+  if (location.hash.includes("/rapido")) render();
+}
+
+async function pasoRapido(p, raiz, editable) {
+  const c = p.contenido;
+  const url = (blob) => { const u = URL.createObjectURL(blob); S.urls.push(u); return u; };
+  const audios = [];
+  for (const d of p.dictados || []) { const a = await archivos.get(d.archivo_id); if (a) audios.push({d, a}); }
+  const fotos = [];
+  for (const f of c.fotos || []) fotos.push({f, a: await archivos.get(f.id)});
+  const trabajo = fotos.filter(({f}) => f.momento !== "MATERIAL"), albs = fotos.filter(({f}) => f.momento === "MATERIAL");
+  const alb = p.albaranes || {};
+  const h = (min) => min === null || min === undefined ? null : Math.round(Number(min) / 60 * 100) / 100;
+  const chips = (campo, valores, actual, cero) => `<div class="opciones horas">${valores.map((v) => `<button type="button" class="opcion ${actual === v ? "si" : ""}" data-horas="${campo}" data-valor="${v}">${v === 0 ? cero : String(v).replace(".", ",") + " h"}</button>`).join("")}
+    <button type="button" class="opcion ${actual !== null && !valores.includes(actual) ? "si" : ""}" data-horas-otra="${campo}">${actual !== null && !valores.includes(actual) ? String(actual).replace(".", ",") + " h" : "Otra…"}</button></div>`;
+  const estadoAudio = ({d, a}) => S.transcribiendo.has(a.id) ? `<p class="suave">⏳ Transcribiendo…</p>`
+    : d.texto ? `<p class="texto-dictado">${esc(d.texto)}</p><button type="button" class="boton mini sec" data-corregir="${esc(a.id)}" data-editar>Corregir el texto</button>`
+    : `<p class="${d.error ? "alerta ambar" : "suave"}">${esc(d.error ? "No transcrito: " + d.error : "Sin transcribir todavía")}</p>
+       <button type="button" class="boton mini" data-transcribir="${esc(a.id)}" data-editar>Transcribir</button>`;
+  const estadoAlb = (fid) => {
+    const x = alb[fid];
+    if (!x || x.estado === "LEYENDO") return `<p class="suave">⏳ Leyendo el albarán… (alrededor de un minuto)</p>`;
+    if (x.estado === "ERROR") return `<p class="alerta ambar">No se pudo leer (${esc(x.error)}). La foto va adjunta: la oficina lo verá.</p>`;
+    const conCant = x.materiales.filter((m) => Number(m.cantidad) > 0 && m.descripcion), sinCant = x.materiales.length - conCant.length;
+    return `<p class="peq"><b>${esc(x.proveedor || "Albarán leído")}</b></p>${conCant.length ? `<ul class="materiales">${conCant.map((m) => `<li>${esc(String(m.cantidad).replace(".", ","))} ${esc(m.unidad)} · ${esc(m.descripcion)}${m.referencia ? ` <span class="suave">(${esc(m.referencia)})</span>` : ""}${m.dudas.length ? ` <span class="chip ambar">a confirmar</span>` : ""}</li>`).join("")}</ul>`
+      : `<p class="suave">No se han reconocido líneas: la oficina las pasará desde la foto.</p>`}${sinCant ? `<p class="suave peq">${sinCant} línea(s) sin cantidad legible: la oficina las verá en la foto.</p>` : ""}`;
+  };
+  const tTrab = h(c.tiempo_trabajo_min), tDesp = h(c.desplazamiento_min);
+  raiz.innerHTML = `<div class="tarjeta"><h2>📍 ${esc(c.cliente?.nombre || "Cliente")}</h2>
+      ${c.direccion?.texto && !c.direccion?.editar ? `<div>${esc(c.direccion.texto)}</div>` : `<label>Dirección del trabajo</label><input data-campo="direccion.texto" value="${esc(c.direccion?.texto || "")}" placeholder="Calle, número y localidad">`}</div>
+    <div class="tarjeta"><h2>🎙️ Cuenta lo que has hecho</h2>
+      <p class="suave peq">Qué le pasaba, qué has hecho, el material que has puesto (con cantidades) y si queda algo pendiente.</p>
+      <button type="button" class="boton ancho grande ${S.grabacion ? "grabando" : ""}" id="bGrabar" data-editar>${S.grabacion ? "■ Parar y guardar" : "● Grabar audio"}</button>
+      <p class="centro" style="margin:8px 0 0"><label class="suave peq enlace-label">o adjuntar un audio del teléfono<input id="iAudioR" type="file" accept="audio/*" hidden data-editar></label></p>
+      ${audios.map((x, i) => `<div class="item" style="margin-top:12px"><div class="fila"><b>Audio ${i + 1}</b><span class="chip ${x.a.registrado ? "verde" : "ambar"}">${x.a.registrado ? "subido" : "por subir"}</span>
+        <button type="button" class="boton mini sec" data-quitar-audio="${esc(x.a.id)}" data-editar>Quitar</button></div>
+        <audio controls preload="none" src="${url(x.a.blob)}" style="width:100%"></audio>${estadoAudio(x)}</div>`).join("")}
+      <details style="margin-top:10px" ${p.escrito ? "open" : ""}><summary>Prefiero escribirlo</summary><textarea id="tEscrito" placeholder="Lo que has hecho…">${esc(p.escrito || "")}</textarea></details></div>
+    <div class="tarjeta"><h2>📷 Fotos del trabajo</h2>
+      <div class="fila"><label class="boton crece">Hacer foto<input id="iFotoC" type="file" accept="image/*" capture="environment" hidden data-editar></label>
+      <label class="boton sec crece">Galería<input id="iFotoG" type="file" accept="image/*" multiple hidden data-editar></label></div>
+      <div class="opciones">${["ANTES", "DESPUES"].map((k) => `<button type="button" class="opcion ${S.momentoRapido === k ? "si" : ""}" data-momento-r="${k}">${k === "ANTES" ? "Antes de arreglar" : "Arreglado"}</button>`).join("")}</div>
+      <div class="fotos">${trabajo.map(({f, a}) => `<div class="foto">${a ? `<img src="${url(a.blob)}" alt="">` : ""}<div class="pie fila"><span class="chip">${esc(MOMENTOS[f.momento] || "")}</span>
+        <button type="button" class="boton mini sec" data-quitar-foto="${esc(f.id)}" data-editar>Quitar</button></div></div>`).join("")}</div></div>
+    <div class="tarjeta"><h2>🧾 Albarán o ticket de compra <span class="suave peq">(si lo hay)</span></h2>
+      <p class="suave peq">Se adjunta al parte y se leen sus materiales solos.</p>
+      <div class="fila"><label class="boton crece">Foto del albarán<input id="iAlbC" type="file" accept="image/*" capture="environment" hidden data-editar></label>
+      <label class="boton sec crece">Galería<input id="iAlbG" type="file" accept="image/*" hidden data-editar></label></div>
+      ${albs.map(({f, a}) => `<div class="item fila" style="margin-top:10px;align-items:flex-start">${a ? `<img class="mini-foto" src="${url(a.blob)}" alt="">` : ""}
+        <div class="crece">${estadoAlb(f.id)}<button type="button" class="boton mini sec" data-quitar-foto="${esc(f.id)}" data-editar>Quitar</button></div></div>`).join("")}</div>
+    <div class="tarjeta"><h2>¿Cómo queda?</h2>${opciones("tipo_visita", {REPARACION_FINALIZADA: "✓ Terminado", PENDIENTE: "Queda pendiente", DIAGNOSTICO: "Solo revisión"}, c.tipo_visita)}
+      ${c.tipo_visita === "PENDIENTE" ? `<label>Pendiente de</label>${opciones("pendiente_de", {PRESUPUESTO: "Presupuesto", REPUESTOS: "Repuestos", SEGUNDA_VISITA: "Otra visita"}, c.pendiente_de)}` : ""}
+      <h3>Horas de trabajo</h3>${chips("tiempo_trabajo_min", HORAS_TRABAJO, tTrab, "")}
+      <h3>Horas de desplazamiento</h3>${chips("desplazamiento_min", HORAS_DESPLAZAMIENTO, tDesp, "Sin desplazamiento")}</div>
+    <button type="button" class="boton verde ancho grande" id="bAFirmar" data-editar>Firmar ✍️</button>
+    <p class="centro" style="margin-top:14px"><a href="#" class="suave peq" id="bDetallado">Rellenar a mano (modo detallado)</a></p>`;
+  if (!editable) return;
+  // Transcribir solos los audios pendientes (una vez por sesión; con error, a mano con «Transcribir»).
+  if (navigator.onLine) for (const {d, a} of audios) if (!d.texto && !S.transcribiendo.has(a.id) && !S.autoTranscrito.has(a.id)) { S.autoTranscrito.add(a.id); transcribirAudio(a.id, {silencioso: true}); }
+  // Lecturas de albarán interrumpidas (se cerró la app): se retoman.
+  for (const {f, a} of albs) if (a && (!alb[f.id] || alb[f.id].estado === "LEYENDO") && !S.leyendo.has(f.id)) leerAlbaranRapido(p.id, f.id, a.blob);
+  $("#bGrabar").onclick = async () => {
+    try {
+      if (!S.grabacion) { S.grabacion = await grabarAudio(); render(); return; }
+      const g = S.grabacion; S.grabacion = null;
+      const aid = await guardarAudioParte(p.id, await g.parar());
+      render();
+      if (navigator.onLine) { S.autoTranscrito.add(aid); transcribirAudio(aid, {silencioso: true}); }
+    } catch (e) { S.grabacion = null; avisar(e.message || "No se pudo usar el micrófono.", {error: true}); render(); }
+  };
+  $("#iAudioR").onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const aid = await guardarAudioParte(p.id, f, f.name);
+    render();
+    if (navigator.onLine) { S.autoTranscrito.add(aid); transcribirAudio(aid, {silencioso: true}); }
+  };
+  $$("[data-transcribir]", raiz).forEach((b) => b.onclick = () => transcribirAudio(b.dataset.transcribir));
+  $$("[data-corregir]", raiz).forEach((b) => b.onclick = async () => {
+    const d = (p.dictados || []).find((x) => x.archivo_id === b.dataset.corregir);
+    const texto = await pedirTexto("Corregir el texto", {valor: d?.texto || "", ayuda: "Corrige solo lo que el reconocimiento de voz haya entendido mal."});
+    if (texto === null || texto === undefined) return;
+    await partes.modificar(p.id, (q) => { q.dictados = q.dictados.map((x) => x.archivo_id === b.dataset.corregir ? {...x, texto} : x); });
+    render();
+  });
+  $$("[data-quitar-audio]", raiz).forEach((b) => b.onclick = async () => {
+    if (!(await confirmar("¿Quitar este audio del parte?", "Quitar"))) return;
+    await partes.modificar(p.id, (q) => { q.dictados = q.dictados.filter((x) => x.archivo_id !== b.dataset.quitarAudio); });
+    render();
+  });
+  $("#tEscrito").addEventListener("input", (e) => { const v = e.target.value; partes.modificar(p.id, (q) => { q.escrito = v; }); });
+  $$("[data-momento-r]", raiz).forEach((b) => b.onclick = () => { S.momentoRapido = b.dataset.momentoR; render(); });
+  const fotosTrabajo = async (files) => {
+    for (const file of files) { try { await guardarFotoParte(p.id, file, S.momentoRapido); } catch (e) { avisar("No se pudo guardar la foto: " + e.message, {error: true}); } }
+    render();
+  };
+  $("#iFotoC").onchange = (e) => fotosTrabajo([...e.target.files]);
+  $("#iFotoG").onchange = (e) => fotosTrabajo([...e.target.files]);
+  const fotoAlbaran = async (file) => {
+    if (!file) return;
+    try {
+      const {fid} = await guardarFotoParte(p.id, file, "MATERIAL", "Albarán o ticket del proveedor");
+      leerAlbaranRapido(p.id, fid, file); // la original, a resolución completa, para leer mejor
+    } catch (e) { avisar("No se pudo guardar la foto: " + e.message, {error: true}); }
+    render();
+  };
+  $("#iAlbC").onchange = (e) => fotoAlbaran(e.target.files[0]);
+  $("#iAlbG").onchange = (e) => fotoAlbaran(e.target.files[0]);
+  $$("[data-quitar-foto]", raiz).forEach((b) => b.onclick = async () => {
+    if (!(await confirmar("¿Quitar esta foto del parte?", "Quitar"))) return;
+    const fid = b.dataset.quitarFoto;
+    await cambiarParte(p.id, (q) => { q.contenido.fotos = q.contenido.fotos.filter((f) => f.id !== fid); if (q.albaranes) delete q.albaranes[fid]; }, {inmediato: true});
+    render();
+  });
+  enlazarOpciones(p, raiz, () => render());
+  $$("[data-horas]", raiz).forEach((b) => b.onclick = async () => {
+    const min = Math.round(Number(b.dataset.valor) * 60);
+    await cambiarParte(p.id, (q) => { q.contenido[b.dataset.horas] = q.contenido[b.dataset.horas] === min ? null : min; }, {inmediato: true});
+    render();
+  });
+  $$("[data-horas-otra]", raiz).forEach((b) => b.onclick = async () => {
+    const t = await pedirTexto("¿Cuántas horas?", {multilinea: false, placeholder: "Por ejemplo 2,5", ayuda: "En horas: 0,25 es un cuarto de hora."});
+    if (t === null || t === undefined || t === "") return;
+    const min = minutosDeHoras(t);
+    if (min === null) return avisar("Escribe un número de horas (por ejemplo 2,5).", {error: true});
+    await cambiarParte(p.id, (q) => { q.contenido[b.dataset.horasOtra] = min; }, {inmediato: true});
+    render();
+  });
+  // Preparar lo que se firma: el texto ordenado, los materiales y la hora de fin. Si ya está firmado y no ha cambiado nada, no se toca.
+  const preparar = async () => {
+    const q = await partes.get(p.id);
+    if (Object.values(q.albaranes || {}).some((x) => x.estado === "LEYENDO") || S.leyendo.size) { avisar("Espera: todavía se está leyendo el albarán de compra.", {error: true}); return false; }
+    if (S.transcribiendo.size) { avisar("Espera a que termine de transcribirse el audio.", {error: true}); return false; }
+    const textos = [...(q.dictados || []).map((d) => d.texto), q.escrito];
+    if ((q.dictados || []).some((d) => !d.texto) && !q.escrito?.trim()) {
+      if (!(await confirmar("Hay audios sin transcribir: su contenido no entrará en el parte. ¿Seguir igualmente?", "Seguir", "Esperar"))) return false;
+    }
+    const materialesAlbaran = Object.values(q.albaranes || {}).filter((x) => x.estado === "LEIDO").flatMap((x) => x.materiales);
+    const propuesto = contenidoRapido(q.contenido, {textos, organizar: organizarDictado, materialesAlbaran, horaFin: q.contenido.hora_fin || ahoraHora(), nuevoId});
+    const firmado = ["TECNICO", "CLIENTE"].some((r) => { const f = q.firmas.filter((x) => x.rol === r).at(-1); return f && firmaValida(q, f); });
+    const igualSalvoHora = iguales({...propuesto, hora_fin: q.contenido.hora_fin}, q.contenido);
+    if (firmado && igualSalvoHora) return true;
+    await cambiarParte(p.id, (x) => { x.contenido = contenidoRapido(x.contenido, {textos, organizar: organizarDictado, materialesAlbaran, horaFin: ahoraHora(), nuevoId}); }, {inmediato: true});
+    return true;
+  };
+  $("#bAFirmar").onclick = async () => { if (await preparar()) location.hash = `#/parte/${p.id}/firmas`; };
+  $("#bDetallado").onclick = async (e) => {
+    e.preventDefault();
+    if (!(await confirmar("Pasar a rellenar el parte a mano por pasos. Lo grabado y las fotos se mantienen. ¿Seguir?", "Seguir"))) return;
+    if (!(await preparar())) return;
+    await cambiarParte(p.id, (x) => { delete x.contenido.modo; }, {inmediato: true});
+    location.hash = `#/parte/${p.id}/datos`;
+  };
 }
 
 function pintarPropuesta(parteId) {
@@ -510,9 +785,9 @@ async function pasoTrabajo(p, raiz, editable) {
     <label class="boton sec ancho" style="margin-top:8px">Albarán del proveedor desde la galería<input id="iAlbaranGal" type="file" accept="image/*" hidden data-editar></label>
     <p class="suave peq">La foto se adjunta al parte y al albarán de trabajo, y se leen sus líneas (referencia, descripción y cantidad) para proponer los materiales. Lo leído con dudas sale en ámbar para compararlo con el papel. Los precios del papel no pasan al parte.</p>
     <div id="propuestaAlbaran"></div></div>
-    <div class="tarjeta"><h2>Tiempos</h2><div class="fila"><div class="crece"><label>Trabajo (minutos)</label><input data-campo="tiempo_trabajo_min" data-tipo="num" inputmode="numeric" value="${esc(c.tiempo_trabajo_min ?? "")}"></div>
-      ${horas ? `<button type="button" class="boton mini sec" id="bUsarHoras" style="margin-top:28px" data-editar>Usar ${horas} min</button>` : ""}</div>
-    <div class="fila"><div class="crece"><label>Desplazamiento (minutos)</label><input data-campo="desplazamiento_min" data-tipo="num" inputmode="numeric" value="${esc(c.desplazamiento_min ?? "")}"></div>
+    <div class="tarjeta"><h2>Tiempos (en horas)</h2><div class="fila"><div class="crece"><label>Trabajo (horas)</label><input data-campo="tiempo_trabajo_min" data-tipo="horas" inputmode="decimal" placeholder="p. ej. 1,5" value="${esc(horasTexto(c.tiempo_trabajo_min).replace(" h", ""))}"></div>
+      ${horas ? `<button type="button" class="boton mini sec" id="bUsarHoras" style="margin-top:28px" data-editar>Usar ${esc(horasTexto(horas))}</button>` : ""}</div>
+    <div class="fila"><div class="crece"><label>Desplazamiento (horas)</label><input data-campo="desplazamiento_min" data-tipo="horas" inputmode="decimal" placeholder="p. ej. 0,5" value="${esc(horasTexto(c.desplazamiento_min).replace(" h", ""))}"></div>
     <div class="crece"><label>Desplazamiento (km)</label><input data-campo="desplazamiento_km" data-tipo="num" inputmode="decimal" value="${esc(c.desplazamiento_km ?? "")}"></div></div></div>
     <div class="tarjeta"><label>Estado final de la instalación</label><textarea data-campo="estado_final">${esc(c.estado_final)}</textarea>
     <label>Trabajos pendientes</label><textarea data-campo="pendientes" placeholder="Qué falta, qué repuesto hay que pedir, si hace falta presupuesto o segunda visita…">${esc(c.pendientes)}</textarea></div>
@@ -592,9 +867,9 @@ function resumenHtml(c) {
     ${fila("Fecha y horas", `${fechaCorta(c.fecha)} · de ${c.hora_inicio || "?"} a ${c.hora_fin || "?"}`)}
     ${(c.comprobaciones || []).length ? `<dt>Comprobaciones</dt><dd>${c.comprobaciones.map((x) => `• ${esc(x.texto)} — <b>${esc(RESULTADOS[x.resultado] || "sin resultado")}</b>`).join("<br>")}</dd>` : ""}
     ${fila("Avería o problema", c.averia)}${fila("Trabajos realizados", c.trabajos)}
-    ${(c.materiales || []).length ? `<dt>Materiales</dt><dd>${c.materiales.map((m) => `• ${esc(String(m.cantidad ?? "?").replace(".", ","))} ${esc(m.unidad)} · ${esc(m.descripcion)}${m.referencia ? " (ref. " + esc(m.referencia) + ")" : ""}`).join("<br>")}</dd>` : ""}
-    ${fila("Tiempo de trabajo", c.tiempo_trabajo_min ? c.tiempo_trabajo_min + " min" : "")}
-    ${fila("Desplazamiento", [c.desplazamiento_min ? c.desplazamiento_min + " min" : "", c.desplazamiento_km ? c.desplazamiento_km + " km" : ""].filter(Boolean).join(" · "))}
+    ${(c.materiales || []).length ? `<dt>Materiales</dt><dd>${c.materiales.map((m) => `• ${esc(String(m.cantidad ?? "?").replace(".", ","))} ${esc(m.unidad)} · ${esc(m.descripcion)}${m.referencia ? " (ref. " + esc(m.referencia) + ")" : ""}${(m.dudas || []).length ? ` <span class="chip ambar">a confirmar por la oficina</span>` : ""}`).join("<br>")}</dd>` : ""}
+    ${fila("Horas de trabajo", horasTexto(c.tiempo_trabajo_min))}
+    ${fila("Desplazamiento", c.desplazamiento_min === 0 ? "Sin desplazamiento" : [horasTexto(c.desplazamiento_min), c.desplazamiento_km ? c.desplazamiento_km + " km" : ""].filter(Boolean).join(" · "))}
     ${fila("Estado final", c.estado_final)}${fila("Pendiente", c.pendientes)}${fila("Fotografías", (c.fotos || []).length ? `${c.fotos.length}` : "")}</dl>`;
 }
 
@@ -624,7 +899,7 @@ async function pasoFirmas(p, raiz, editable) {
       <button type="button" class="boton crece" id="bFirmaCliente" ${problemas.length ? "disabled" : ""}>Firma del responsable</button></div>
       <button type="button" class="boton sec ancho" id="bAusente" style="margin-top:8px" ${problemas.length ? "disabled" : ""}>No está o no quiere firmar…</button>`}</div>
     <div id="envio"></div>
-    <div class="pie-pasos"><a class="boton sec" href="#/parte/${p.id}/trabajo">← Atrás</a></div>`;
+    <div class="pie-pasos"><a class="boton sec" href="#/parte/${p.id}/${c.modo === "RAPIDO" ? "rapido" : "trabajo"}">← Atrás</a></div>`;
   const envio = $("#envio");
   if (enviado) {
     envio.innerHTML = `<div class="alerta verde"><b>Parte enviado a la oficina.</b> ${p.envio?.subido ? "" : "Si no hay conexión, se sube solo en cuanto la haya."}</div>

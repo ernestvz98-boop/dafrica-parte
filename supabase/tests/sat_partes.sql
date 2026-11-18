@@ -320,4 +320,33 @@ do $$ begin
   perform public.prueba_falla($q$select public.sat_ajuste_guardar('precio_hora_mano_obra', '10')$q$, 'sin_permiso');
 end $$;
 reset role;
+-- Parte rápido (20261118_sat_parte_rapido.sql): quien es de oficina Y técnico crea un aviso por llamada → queda a su nombre;
+-- un aviso sin técnico lo coge quien hace el parte; uno asignado a otro técnico, no.
+insert into public.perfiles (id, nombre, email) values ('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'Dirección Prueba', 'di@prueba.invalid');
+insert into public.usuario_roles (usuario_id, rol_id) select 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', id from public.roles where codigo = 'DIRECCION_ADMIN';
+select set_config('prueba.uid', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', false);
+set role authenticated;
+do $$ declare a jsonb; r jsonb; begin
+  a := public.sat_aviso_guardar('{"id":"a0000000-0000-4000-8000-000000000010","motivo":"Llamada","origen":"LLAMADA_TECNICO","cliente_texto":"Cliente Ficticio"}');
+  if a->>'tecnico_id' <> 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' or a->>'estado' <> 'ASIGNADO' or a->>'origen' <> 'LLAMADA_TECNICO' then
+    raise exception 'Aviso por llamada de oficina+técnico mal: %', a; end if;
+  -- Un aviso de oficina sin técnico: el parte lo coge.
+  a := public.sat_aviso_guardar('{"id":"a0000000-0000-4000-8000-000000000011","motivo":"Sin asignar","cliente_texto":"Cliente Ficticio"}');
+  if a->>'tecnico_id' is not null or a->>'estado' <> 'NUEVO' then raise exception 'Aviso de oficina debería quedar sin técnico: %', a; end if;
+  r := public.sat_parte_guardar(jsonb_build_object('id', 'b0000000-0000-4000-8000-000000000011', 'aviso_id', 'a0000000-0000-4000-8000-000000000011',
+    'contenido', (select valor from public.prueba_datos where clave = 'c1')));
+  if r->>'estado' <> 'BORRADOR' then raise exception 'Parte sobre aviso sin asignar mal: %', r; end if;
+  -- Reasignar desde oficina un aviso que vino por llamada sigue funcionando (no se queda pegado a quien reasigna).
+  a := public.sat_aviso_guardar(jsonb_build_object('id', 'a0000000-0000-4000-8000-000000000010', 'motivo', 'Llamada', 'origen', 'LLAMADA_TECNICO',
+    'cliente_texto', 'Cliente Ficticio', 'tecnico_id', '22222222-2222-4222-8222-222222222222'));
+  if a->>'tecnico_id' <> '22222222-2222-4222-8222-222222222222' then raise exception 'La reasignación desde oficina no se aplicó: %', a; end if;
+  perform public.prueba_falla($q$select public.sat_parte_guardar(jsonb_build_object('id', 'b0000000-0000-4000-8000-000000000012',
+    'aviso_id', 'a0000000-0000-4000-8000-000000000010', 'contenido', '{"tipo_visita":null}'::jsonb))$q$, 'aviso_de_otro_tecnico');
+end $$;
+reset role;
+do $$ begin
+  if (select tecnico_id from public.sat_avisos where id = 'a0000000-0000-4000-8000-000000000011') <> 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' then
+    raise exception 'El aviso sin asignar debería quedar a nombre de quien hace el parte'; end if;
+  if not exists (select 1 from public.sat_auditoria where accion = 'AVISO_COGIDO') then raise exception 'Falta la auditoría de AVISO_COGIDO'; end if;
+end $$;
 select 'SAT: todas las pruebas correctas' as resultado;
