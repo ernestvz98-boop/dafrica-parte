@@ -7,6 +7,7 @@ import {organizarDictado} from "./lib/dictado.js";
 import {contenidoNuevo, normalizar, iguales, problemasParaFirmar, minutosEntre, nuevoId, hoy, ahoraHora, resumenTipo, contenidoRapido,
   horasTexto, minutosDeHoras, TIPOS_VISITA, PENDIENTE_DE, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
 import {PanelFirma, comprimirFoto, grabarAudio, extensionAudio} from "./lib/medios.js";
+import {articuloPorReferencia} from "./lib/materiales-albaran.js";
 import {generarPdfParte, huellaContenido} from "./lib/pdf.js";
 import {esc, $, $$, avisar, dialogo, confirmar, pedirTexto, elegir, fechaHora, fechaCorta, chipEstado, abrirBlob, descargarBlob, compartirBlob} from "./lib/ui.js";
 
@@ -594,9 +595,18 @@ async function pasoRapido(p, raiz, editable) {
     const x = alb[fid];
     if (!x || x.estado === "LEYENDO") return `<p class="suave">⏳ Leyendo el albarán… (alrededor de un minuto)</p>`;
     if (x.estado === "ERROR") return `<p class="alerta ambar">No se pudo leer (${esc(x.error)}). La foto va adjunta: la oficina lo verá.</p>`;
-    const conCant = x.materiales.filter((m) => Number(m.cantidad) > 0 && m.descripcion), sinCant = x.materiales.length - conCant.length;
-    return `<p class="peq"><b>${esc(x.proveedor || "Albarán leído")}</b></p>${conCant.length ? `<ul class="materiales">${conCant.map((m) => `<li>${esc(String(m.cantidad).replace(".", ","))} ${esc(m.unidad)} · ${esc(m.descripcion)}${m.referencia ? ` <span class="suave">(${esc(m.referencia)})</span>` : ""}${m.dudas.length ? ` <span class="chip ambar">a confirmar</span>` : ""}</li>`).join("")}</ul>`
-      : `<p class="suave">No se han reconocido líneas: la oficina las pasará desde la foto.</p>`}${sinCant ? `<p class="suave peq">${sinCant} línea(s) sin cantidad legible: la oficina las verá en la foto.</p>` : ""}`;
+    // Entran en el parte las líneas leídas sin dudas y las que el técnico ha comparado con el papel (misma regla que
+    // contenidoRapido). Las dudosas se enseñan para comparar: «Coinciden con el papel», «Corregir» o «Quitar».
+    if (!x.materiales.length) return `<p class="suave">No se han reconocido líneas: la foto va adjunta y la oficina las pasa.</p>`;
+    const entra = (m) => Number(m.cantidad) > 0 && m.descripcion && (!m.dudas.length || m.confirmado);
+    const pendientes = x.materiales.filter((m) => !entra(m));
+    const linea = (m) => `<li class="${entra(m) ? "" : "dudosa"}"><b>${m.cantidad === null ? "¿cantidad?" : esc(String(m.cantidad).replace(".", ","))} ${esc(m.unidad)}</b> · ${esc(m.descripcion || "¿descripción?")}
+      ${m.referencia ? ` <span class="suave">(${esc(m.referencia)})</span>` : ""}${m.confirmado ? ` <span class="chip verde">comprobado</span>` : !m.dudas.length ? "" : ` <span class="chip ambar">comprobar</span>`}
+      <span class="fila" style="margin-top:4px"><button type="button" class="boton mini sec" data-alb-corregir="${esc(fid)}|${esc(m.id)}" data-editar>Corregir</button>
+      <button type="button" class="boton mini sec" data-alb-quitar="${esc(fid)}|${esc(m.id)}" data-editar>Quitar</button></span></li>`;
+    return `<p class="peq"><b>${esc(x.proveedor || "Albarán leído")}</b></p><ul class="materiales">${x.materiales.map(linea).join("")}</ul>
+      ${pendientes.length ? `<p class="alerta ambar peq">${pendientes.length} línea(s) leídas con dudas (en ámbar). Compáralas con el papel: si están bien, pulsa «Coinciden»; si no, «Corregir» o «Quitar». Lo que no confirmes no entra en lo que firma el cliente (la oficina lo pasa con la foto).</p>
+        <button type="button" class="boton verde ancho" data-alb-confirmar="${esc(fid)}" data-editar>✓ Coinciden con el papel</button>` : `<p class="peq">✓ Estas líneas entran en el parte.</p>`}`;
   };
   const tTrab = h(c.tiempo_trabajo_min), tDesp = h(c.desplazamiento_min);
   raiz.innerHTML = `<div class="tarjeta"><h2>📍 ${esc(c.cliente?.nombre || "Cliente")}</h2>
@@ -620,7 +630,7 @@ async function pasoRapido(p, raiz, editable) {
       <div class="fila"><label class="boton crece">Foto del albarán<input id="iAlbC" type="file" accept="image/*" capture="environment" hidden data-editar></label>
       <label class="boton sec crece">Galería<input id="iAlbG" type="file" accept="image/*" hidden data-editar></label></div>
       ${albs.map(({f, a}) => `<div class="item fila" style="margin-top:10px;align-items:flex-start">${a ? `<img class="mini-foto" src="${url(a.blob)}" alt="">` : ""}
-        <div class="crece">${estadoAlb(f.id)}<button type="button" class="boton mini sec" data-quitar-foto="${esc(f.id)}" data-editar>Quitar</button></div></div>`).join("")}</div>
+        <div class="crece">${estadoAlb(f.id)}<button type="button" class="boton mini sec" data-quitar-foto="${esc(f.id)}" data-editar>Quitar la foto</button></div></div>`).join("")}</div>
     <div class="tarjeta"><h2>¿Cómo queda?</h2>${opciones("tipo_visita", {REPARACION_FINALIZADA: "✓ Terminado", PENDIENTE: "Queda pendiente", DIAGNOSTICO: "Solo revisión"}, c.tipo_visita)}
       ${c.tipo_visita === "PENDIENTE" ? `<label>Pendiente de</label>${opciones("pendiente_de", {PRESUPUESTO: "Presupuesto", REPUESTOS: "Repuestos", SEGUNDA_VISITA: "Otra visita"}, c.pendiente_de)}` : ""}
       <h3>Horas de trabajo</h3>${chips("tiempo_trabajo_min", HORAS_TRABAJO, tTrab, "")}
@@ -678,6 +688,38 @@ async function pasoRapido(p, raiz, editable) {
   };
   $("#iAlbC").onchange = (e) => fotoAlbaran(e.target.files[0]);
   $("#iAlbG").onchange = (e) => fotoAlbaran(e.target.files[0]);
+  // Líneas del albarán del proveedor: el técnico las compara con el papel.
+  const cambiarLineas = async (fid, fn) => { await partes.modificar(p.id, (q) => { const x = q.albaranes?.[fid]; if (x?.materiales) fn(x); }); render(); };
+  const conArticulo = (m) => {
+    // Referencia comparada por el técnico: se busca su artículo de STEL (solo si hay UNO con esa referencia).
+    if (m.stel_item_id || !m.referencia) return m;
+    const {articulo} = articuloPorReferencia(m.referencia, S.catalogo.articulos || []);
+    return articulo ? {...m, stel_item_id: articulo.stel_id, articulo_stel: articulo.nombre} : m;
+  };
+  $$("[data-alb-confirmar]", raiz).forEach((b) => b.onclick = async () => {
+    const x = (await partes.get(p.id)).albaranes?.[b.dataset.albConfirmar];
+    const sinDatos = (x?.materiales || []).filter((m) => !(Number(m.cantidad) > 0) || !m.descripcion);
+    if (sinDatos.length) return avisar(`${sinDatos.length} línea(s) sin cantidad o sin descripción: corrígelas o quítalas antes.`, {error: true});
+    if (!(await confirmar("¿Has comparado cada línea (cantidad, descripción y referencia) con el papel y están bien?", "Sí, coinciden", "Todavía no"))) return;
+    cambiarLineas(b.dataset.albConfirmar, (x2) => { x2.materiales = x2.materiales.map((m) => conArticulo({...m, confirmado: true})); });
+  });
+  $$("[data-alb-quitar]", raiz).forEach((b) => b.onclick = () => {
+    const [fid, mid] = b.dataset.albQuitar.split("|");
+    cambiarLineas(fid, (x) => { x.materiales = x.materiales.filter((m) => m.id !== mid); });
+  });
+  $$("[data-alb-corregir]", raiz).forEach((b) => b.onclick = async () => {
+    const [fid, mid] = b.dataset.albCorregir.split("|");
+    const m = (await partes.get(p.id)).albaranes?.[fid]?.materiales?.find((x) => x.id === mid);
+    if (!m) return;
+    const d = await dialogo(`<h2>Corregir la línea</h2><p class="suave">Cópiala tal cual del papel.</p>
+      <label>Cantidad</label><input id="cCant" inputmode="decimal" value="${esc(m.cantidad ?? "")}">
+      <label>Descripción</label><input id="cDesc" value="${esc(m.descripcion || "")}">
+      <label>Referencia</label><input id="cRef" value="${esc(m.referencia || "")}">`,
+    [{texto: "Cancelar", valor: null}, {texto: "Guardar", valor: (x) => ({cantidad: Number(String($("#cCant", x).value).replace(",", ".")), descripcion: $("#cDesc", x).value.trim(), referencia: $("#cRef", x).value.trim()}),
+      validar: (x) => Number(String($("#cCant", x).value).replace(",", ".")) > 0 && $("#cDesc", x).value.trim().length > 1}]);
+    if (!d) return;
+    cambiarLineas(fid, (x) => { x.materiales = x.materiales.map((y) => y.id === mid ? conArticulo({...y, ...d, stel_item_id: d.referencia === y.referencia ? y.stel_item_id : null, confirmado: true}) : y); });
+  });
   $$("[data-quitar-foto]", raiz).forEach((b) => b.onclick = async () => {
     if (!(await confirmar("¿Quitar esta foto del parte?", "Quitar"))) return;
     const fid = b.dataset.quitarFoto;
@@ -855,7 +897,8 @@ function pintarPropuestaAlbaran(parteId, prop) {
     const elegidos = $$("[data-alb]").filter((x) => x.checked).map((x) => prop.materiales[Number(x.dataset.alb)]);
     await cambiarParte(parteId, (q) => {
       q.contenido.materiales = [...(q.contenido.materiales || []), ...elegidos.map((m) => ({id: nuevoId(), descripcion: m.descripcion, referencia: m.referencia,
-        cantidad: m.cantidad, unidad: m.unidad, stel_item_id: m.stel_item_id, dudas: m.dudas, dicho: m.dicho, origen: m.origen}))];
+        cantidad: m.cantidad, unidad: m.unidad, stel_item_id: m.stel_item_id, dudas: m.dudas, dicho: m.dicho, origen: m.origen,
+        ...(m.precio_papel ? {precio_papel: m.precio_papel} : {}), ...(m.precio_neto ? {precio_neto: m.precio_neto} : {})}))];
     }, {inmediato: true});
     avisar(`${elegidos.length} material(es) añadidos desde el albarán del proveedor.`);
     render();

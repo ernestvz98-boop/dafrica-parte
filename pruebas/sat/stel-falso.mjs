@@ -123,11 +123,28 @@ export function crearStelFalso({clave = "clave-falsa", baseUrl = ""} = {}) {
       } else if (recurso === "clients") {
         if (!cuerpo?.name) return err(400, "name obligatorio");
         nuevo = {...cuerpo};
+      } else if ((recurso === "services" || recurso === "products") && cuerpo?.reference && !/^\d+$/.test(cuerpo.reference) && cuerpo["serial-number-id"] !== -2) {
+        // Como el STEL real (E000191, visto el 2026-11-20): una referencia que no es solo de cifras exige la serie MANUAL (-2).
+        return err(400, "Invalid reference: serie MANUAL (-2) obligatoria");
+      } else if (recurso === "services") {
+        if (!cuerpo?.name) return err(400, "name obligatorio");
+        nuevo = {inactive: false, "primary-tax-percentage": 21, ...cuerpo};
+      } else if (recurso === "products") {
+        if (!cuerpo?.name) return err(400, "name obligatorio");
+        // Como el STEL de DAFRICA: no deja dos artículos con el mismo nombre.
+        if (datos.products.some((x) => !x.deleted && String(x.name).toLowerCase() === String(cuerpo.name).toLowerCase())) return err(400, "nombre repetido");
+        nuevo = {inactive: false, "primary-tax-percentage": 21, ...cuerpo};
       } else return err(405, "no permitido en el falso");
       const x = {id: id(), deleted: false, "creation-date": ahora(), "utc-last-modification-date": ahora(), ...nuevo};
       if (recurso === "ordinaryInvoices") x["pdf-path"] = estado.pdfFactura ? `${estado.baseUrl}/__stel/pdf/${x.id}` : "";
       lista.push(x);
       if (perder()) return null;
+      return enviar(200, [limpio(x)]);
+    }
+    if (req.method === "DELETE" && idTexto) {
+      const x = lista.find((y) => String(y.id) === idTexto && !y.deleted);
+      if (!x) return err(404, "no existe");
+      x.deleted = true;
       return enviar(200, [limpio(x)]);
     }
     if (req.method === "PUT" && idTexto) {

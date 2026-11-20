@@ -91,9 +91,9 @@ export function minutosEntre(inicio, fin) {
 
 /**
  * Lo que falta o es dudoso antes de presentar el parte a la firma.
- * Parte rápido (`modo: "RAPIDO"`, usuario 2026-11-18): el técnico solo graba, hace fotos y firma; lo leído con dudas
- * (materiales del albarán del proveedor o dictados) no impide firmar: va marcado «a confirmar por la oficina» en el
- * parte y en el PDF, y lo revisa la oficina. Lo que nunca se inventa: cantidades no dichas ni leídas no entran.
+ * Parte rápido (`modo: "RAPIDO"`, usuario 2026-11-18): el técnico solo graba, hace fotos y firma. Lo dictado con dudas
+ * (una referencia dictada) no impide firmar: va marcado «a confirmar por la oficina». Del albarán del proveedor solo entra
+ * lo leído sin dudas (contenidoRapido); lo demás lo revisa la oficina con la foto. Nunca se inventan cantidades.
  */
 export function problemasParaFirmar(c) {
   const p = [];
@@ -148,8 +148,13 @@ export function contenidoRapido(c, {textos, organizar, materialesAlbaran = [], h
   // Id estable (el mismo dictado da el mismo parte: preparar dos veces no invalida firmas ni descoloca la revisión).
   const dictados = r.materiales.filter((m) => Number(m.cantidad) > 0).map((m, i) => ({id: `dictado-${i + 1}`, descripcion: m.descripcion, referencia: m.referencia || "",
     cantidad: m.cantidad, unidad: m.unidad, stel_item_id: null, dudas: m.dudas || [], dicho: m.dicho, origen: "DICTADO"}));
-  const leidos = materialesAlbaran.filter((m) => Number(m.cantidad) > 0 && m.descripcion).map((m) => ({id: m.id || id(), descripcion: m.descripcion,
-    referencia: m.referencia || "", cantidad: m.cantidad, unidad: m.unidad || "ud", stel_item_id: m.stel_item_id ?? null, dudas: m.dudas || [],
+  // Del albarán del proveedor entra en lo firmado lo leído SIN dudas y lo que el técnico ha comparado con el papel
+  // («Coinciden con el papel» o «Corregir»); lo demás lo revisa la oficina con la foto (con fotos torcidas el lector puede
+  // emparejar mal filas con confianza alta: nada así se firma sin que una persona lo compare).
+  const leidos = materialesAlbaran.filter((m) => Number(m.cantidad) > 0 && m.descripcion && (!(m.dudas || []).length || m.confirmado)).map((m) => ({id: m.id || id(), descripcion: m.descripcion,
+    referencia: m.referencia || "", cantidad: m.cantidad, unidad: m.unidad || "ud", stel_item_id: m.stel_item_id ?? null, dudas: m.confirmado ? [] : (m.dudas || []),
+    ...(m.confirmado ? {comprobado: "TECNICO"} : {}),
+    ...(Number(m.precio_papel) > 0 ? {precio_papel: Number(m.precio_papel)} : {}), ...(Number(m.precio_neto) > 0 ? {precio_neto: Number(m.precio_neto)} : {}),
     ...(m.dicho ? {dicho: m.dicho} : {}), origen: m.origen || "ALBARAN_PROVEEDOR"}));
   n.materiales = [...leidos, ...dictados];
   if (horaFin) n.hora_fin = horaFin; // hora a la que se presenta a la firma

@@ -32,9 +32,12 @@ export function proponerLineas(contenido, articulos, ajustes) {
   const lineas = [];
   for (const m of contenido.materiales || []) {
     const a = m.stel_item_id ? porId.get(Number(m.stel_item_id)) : null;
-    lineas.push({tipo: "MATERIAL", material_id: m.id, stel_item_id: a ? a.stel_id : null,
+    // Material del albarán del proveedor: el PRECIO del papel (usuario, 2026-11-20: «el precio que reflejaba en el
+    // albarán»); si no se leyó con seguridad, el del artículo de STEL; si no hay ninguno, vacío para la oficina.
+    const precio = Number(m.precio_papel) > 0 ? Number(m.precio_papel) : (a?.precio ?? null);
+    lineas.push({tipo: "MATERIAL", material_id: m.id, stel_item_id: a ? a.stel_id : (m.stel_item_id ?? null),
       descripcion: [m.descripcion, m.referencia ? `Ref. ${m.referencia}` : ""].filter(Boolean).join(" "),
-      cantidad: Number(m.cantidad) || null, precio: a?.precio ?? null, descuento_pct: 0, iva_pct: a?.iva_pct ?? 21});
+      cantidad: Number(m.cantidad) || null, precio, descuento_pct: 0, iva_pct: a?.iva_pct ?? 21});
   }
   const servicio = (clave) => porId.get(Number(ajustes?.[clave])) || null;
   const precioHora = (clave, s) => {

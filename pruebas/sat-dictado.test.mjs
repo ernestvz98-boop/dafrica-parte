@@ -104,7 +104,7 @@ test("importes: igual que sat_total() en Supabase (por línea, a céntimos)", ()
 
 test("albarán del proveedor: líneas fiables → materiales; lo dudoso marcado; artículo de STEL solo si es único", () => {
   const campo = (valor, confianza) => ({valor, confianza, estado: "OK"});
-  const resultado = {proveedor: {nombre: "Proveedor Ficticio S.L."}, numero: campo("A-123", 0.99), fecha: campo("2026-11-17", 0.99), confianza: 0.6,
+  const resultado = {proveedor: {nombre: "Proveedor Ficticio S.L."}, numero: campo("A-123", 0.99), fecha: campo("2026-11-17", 0.99), confianza: 0.95,
     lineas: [
       {referencia: campo("TER-01", 0.95), descripcion: campo("TERMOSTATO DIGITAL", 0.95), cantidad: campo(1, 0.95), unidad: campo("UD", 0.95), precio: campo(40, 0.95)},
       {referencia: campo("CD16", 0.6), descripcion: campo("CODO 16", 0.95), cantidad: campo(3, 0.75), unidad: campo("UDS", 0.9)},
@@ -128,6 +128,12 @@ test("albarán del proveedor: líneas fiables → materiales; lo dudoso marcado;
   assert.equal(ter.origen.tipo, "ALBARAN_PROVEEDOR");
   assert.equal(unidadDe("Mts"), "m");
   assert.deepEqual(materialesDesdeAlbaran({lineas: []}).avisos.length, 1);
+  // Albarán no fiable en conjunto (foto torcida de un albarán real): ninguna línea es fiable aunque lo parezca, y no se
+  // busca su artículo en STEL (el código puede ser de otra fila).
+  const torcido = materialesDesdeAlbaran({...resultado, confianza: 0, fiable: false}, {articulos});
+  assert.ok(torcido.materiales.every((m) => !m.fiable && m.dudas.some((d) => /en conjunto/.test(d))));
+  assert.ok(torcido.materiales.every((m) => m.stel_item_id === null));
+  assert.ok(torcido.avisos.some((a) => /entero/.test(a)));
 });
 
 test("STEL: líneas del albarán de trabajo y texto para el cliente (sin importes)", () => {
