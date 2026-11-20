@@ -3,6 +3,65 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-20 · SAT: un solo albarán de trabajo y precios (sat-stel v7)
+
+- Usuario: «quiero que cree un solo albarán, no dos, y que actualice los precios». PT-26-00001 y PT-26-00002 eran el MISMO
+  trabajo (pruebas). Elegido por el usuario: borrar el albarán de trabajo duplicado y precios compra = neto, venta = PRECIO del papel.
+- `sat-stel` v7, acciones solo de oficina (`tiene_permiso('sat.administrar')` con la sesión de la persona):
+  `borrar_albaran` (solo partes NO_FACTURABLE sin factura: borra su albarán de trabajo y, si el aviso no tiene otro parte, su
+  incidencia), `precio_articulo` (compra y venta de UN artículo) y `precios_albaran` (líneas del albarán con los precios de la
+  revisión, o PRECIO del papel / precio por hora). Los albaranes nuevos ya llevan precio en cada línea; los artículos nuevos,
+  compra = neto y venta = PRECIO. Pruebas con el STEL falso (borrado, permisos, precios).
+- Producción, con la sesión del usuario: el parte duplicado NO_FACTURABLE y su aviso ANULADO; borrados en STEL su albarán de trabajo y
+  su incidencia; los 7 artículos con compra neta (comprobada con los importes y el total del papel) y venta PRECIO; en la revisión,
+  un precio mal tecleado corregido y los servicios; el albarán de trabajo que queda, con precio en sus 9 líneas.
+
+## 2026-11-20 · DAFRICA SAT 0.3.7: servicios por horas creados en STEL y PRIMEROS ALBARANES DE TRABAJO
+
+- Usuario: «no he creado nada, créalo». `sat-stel` acción «servicios» (v5–v6; botón en Oficina → Ajustes si faltan): busca por
+  referencia y nombre; si no están, crea «MANO DE OBRA (HORA)» (MO-HORA) y «DESPLAZAMIENTO (HORA)» (DESP-HORA) al precio por hora de
+  Ajustes y 21 %, los elige en Ajustes con la sesión de la persona y entran en la copia del catálogo. STEL exige la serie MANUAL
+  (`serial-number-id: -2`) para referencias que no son solo cifras (E000191, primer intento rechazado sin crear nada): también
+  en el alta de artículos. v4 y v5 en `respaldo-v4-handler.mjs` (v5 = v6 sin la serie manual).
+- Producción (con la sesión del usuario, a petición suya): los dos servicios creados; los dos primeros albaranes de trabajo
+  creados (uno con 7 artículos del albarán del proveedor dados de alta, sin precio) con 3 adjuntos
+  cada uno; la revisión de PT-26-00001 recibió los 7 artículos.
+- Oficina: las líneas de mano de obra y desplazamiento guardadas sin servicio se completan con los de Ajustes al abrir el parte.
+
+## 2026-11-20 · DAFRICA SAT 0.3.6: artículos del albarán del proveedor en STEL y su precio
+
+- Usuario: «necesito que cree el albarán» y «leyó todo perfecto, solo le faltó poner el precio que reflejaba en el albarán».
+  El parte con 7 líneas del proveedor comprobadas por el técnico, parado: esos códigos NO existían en STEL y faltaban los servicios.
+- `sat-stel` v4: antes del albarán de trabajo, cada material leído del albarán del proveedor y comprobado (no lo dictado)
+  se busca en STEL por referencia (igual o con el prefijo del proveedor, `mismaReferencia` del robot) y por nombre exacto;
+  una vez → se usa; varias → lo elige la persona; ninguna → se da de alta con nombre, referencia y, si la línea cuadraba, el
+  precio neto como compra y venta base (regla del robot). Primero se comprueban los servicios (no se dan de alta artículos de
+  un albarán que aún no se puede crear). v3 en `respaldo-v3-handler.mjs`.
+- `sat_partes_7_articulos_del_proveedor`: al quedar creado el albarán, las líneas de la revisión de esos materiales reciben
+  su artículo y los nuevos entran en `sat_articulos` (copia en `respaldo.funciones_20261120_sat` y
+  `respaldo.sat_partes_revision_20261120`).
+- Precios (`preciosDeLinea`): `precio_papel` = columna PRECIO si el lector la aceptó (la oficina la propone al cliente, como
+  la escribía a mano); `precio_neto` solo si la línea cuadra con su importe. No se enseñan al técnico ni salen en el PDF.
+- Pruebas: flujo con STEL falso (usa, prefijo, alta una vez, revisión con artículos, reintento sin duplicar), precios y altas.
+
+## 2026-11-18 · DAFRICA SAT 0.3.5: el técnico confirma las líneas del albarán del proveedor
+
+- Foto buena del mismo albarán real (2400×3200, subida por el usuario): leída como en el móvil, 7 líneas, códigos y
+  cantidades de las 7 bien, descripción exacta en 6 (en una, «Ø63» leído como «163 $», con confianza 0,6);
+  0 campos mal aceptados. Pero el lector da confianza 0,15 al documento: con la regla de 0.3.4 nada entraba.
+- Ahora, bajo la foto, las líneas leídas con dudas se enseñan en ámbar con «✓ Coinciden con el papel», «Corregir» y
+  «Quitar». Lo comparado por el técnico entra en lo firmado (`comprobado: TECNICO`) y, con su referencia, se busca el
+  artículo de STEL (solo si hay uno). Lo no confirmado sigue sin entrar. Probado en el emulador.
+
+## 2026-11-18 · DAFRICA SAT 0.3.4: del albarán del proveedor solo se firma lo leído sin dudas
+
+- Medido con la foto del primer parte real (albarán de un proveedor, 7 líneas; verdad copiada del papel): sin enderezar y con tres
+  variantes de enderezado, 0 líneas enteras bien y campos con confianza ≥ 0,9 emparejados con OTRA fila (p. ej.
+  un código con la cantidad de la fila de al lado). El lector marcaba el documento como no fiable (confianza 0).
+- Regla nueva: si el lector no da por bueno el albarán ENTERO, todas sus líneas son dudosas y no se busca su artículo de
+  STEL (`materialesDesdeAlbaran`); en el parte rápido solo entra en lo firmado lo leído sin dudas (`contenidoRapido`); lo
+  demás lo pasa la oficina con la foto adjunta. Pruebas en `sat-dictado` y `sat-rapido`.
+
 ## 2026-11-18 · DAFRICA SAT 0.3.3: versiones mezcladas tras publicar y foto del albarán con más resolución
 
 - Tras publicar, la oficina daba «does not provide an export named horasTexto»: GitHub Pages deja cada fichero hasta 10 min

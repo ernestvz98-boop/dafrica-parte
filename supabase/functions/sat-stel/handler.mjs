@@ -63,23 +63,29 @@ const horas = (min) => Math.round((Number(min) || 0) / 60 * 100) / 100;
  * Líneas del albarán de trabajo a partir del parte (lo que hizo el técnico, sin precios: los pone administración
  * en la factura). Cada línea necesita un artículo o servicio de STEL; si falta alguno, devuelve `faltan`.
  */
-export function lineasAlbaran(contenido, revision, ajustes) {
+export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map()) {
   const lineas = [], faltan = [];
   const porMaterial = new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id]));
+  // Precio de cada línea (usuario, 2026-11-20: «que actualice los precios»): el de la revisión de la oficina si la hay; si no,
+  // el PRECIO del albarán del proveedor (materiales) o el precio por hora de Ajustes (mano de obra y desplazamiento).
+  const precioRevision = (pred) => { const l = (revision || []).find(pred); return l && Number(l.precio) >= 0 && l.precio !== null && l.precio !== "" ? Number(l.precio) : null; };
+  const conPrecio = (p) => (p !== null && Number.isFinite(p) && p >= 0 ? {"item-base-price": p} : {});
   for (const m of contenido.materiales || []) {
-    const item = m.stel_item_id || porMaterial.get(m.id);
+    const item = m.stel_item_id || porMaterial.get(m.id) || resueltos.get(m.id);
     const cantidad = Number(m.cantidad);
     if (!item) { faltan.push(`artículo de STEL para «${m.descripcion}»`); continue; }
     if (!Number.isFinite(cantidad) || cantidad === 0) { faltan.push(`cantidad de «${m.descripcion}»`); continue; }
     const desc = [m.descripcion, m.referencia ? `Ref. ${m.referencia}` : "", m.unidad ? `(${m.unidad})` : ""].filter(Boolean).join(" ");
-    lineas.push({"line-type": "ITEM", "item-id": Number(item), "units": cantidad, "item-description": desc});
+    const precio = precioRevision((l) => l.material_id === m.id) ?? (Number(m.precio_papel) > 0 ? Number(m.precio_papel) : null);
+    lineas.push({"line-type": "ITEM", "item-id": Number(item), "units": cantidad, "item-description": desc, ...conPrecio(precio)});
   }
   const servicio = (clave) => { const v = ajustes?.[clave]; return Number.isSafeInteger(Number(v)) && Number(v) > 0 ? Number(v) : null; };
+  const porHora = (tipo, clave) => precioRevision((l) => l.tipo === tipo) ?? (Number(ajustes?.[clave]) > 0 ? Number(ajustes[clave]) : null);
   if (Number(contenido.tiempo_trabajo_min) > 0) {
     const id = servicio("stel_servicio_mano_obra_id");
     if (!id) faltan.push("servicio de mano de obra de STEL (Ajustes)");
     else lineas.push({"line-type": "ITEM", "item-id": id, "units": horas(contenido.tiempo_trabajo_min),
-      "item-description": `Mano de obra: ${String(horas(contenido.tiempo_trabajo_min)).replace(".", ",")} h`});
+      "item-description": `Mano de obra: ${String(horas(contenido.tiempo_trabajo_min)).replace(".", ",")} h`, ...conPrecio(porHora("MANO_OBRA", "precio_hora_mano_obra"))});
   }
   if (Number(contenido.desplazamiento_min) > 0 || Number(contenido.desplazamiento_km) > 0) {
     // En horas (usuario, 2026-11-18: «el desplazamiento y el tiempo de mano de obra en horas»); solo km: 1 desplazamiento.
@@ -87,10 +93,34 @@ export function lineasAlbaran(contenido, revision, ajustes) {
     const h = Number(contenido.desplazamiento_min) > 0 ? horas(contenido.desplazamiento_min) : null;
     const partes = [h ? `${String(h).replace(".", ",")} h` : "", Number(contenido.desplazamiento_km) > 0 ? `${contenido.desplazamiento_km} km` : ""].filter(Boolean).join(", ");
     if (!id) faltan.push("servicio de desplazamiento de STEL (Ajustes)");
-    else lineas.push({"line-type": "ITEM", "item-id": id, "units": h || 1, "item-description": `Desplazamiento: ${partes}`});
+    else lineas.push({"line-type": "ITEM", "item-id": id, "units": h || 1, "item-description": `Desplazamiento: ${partes}`,
+      ...conPrecio(porHora("DESPLAZAMIENTO", "precio_hora_desplazamiento"))});
   }
   if (!lineas.length && !faltan.length) faltan.push("al menos un material, tiempo de trabajo o desplazamiento");
   return {lineas, faltan};
+}
+
+const canonRef = (s) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+/**
+ * ¿La referencia de STEL es la del papel? Igual, o «prefijo del proveedor + separador + código» («H8953- 1255087035»):
+ * misma regla que el robot de albaranes (robot-stel/procesar-cola.js, mismaReferencia).
+ */
+export function mismaReferencia(stel, ref) {
+  const r = canonRef(ref);
+  if (!r) return false;
+  if (canonRef(stel) === r) return true;
+  const m = String(stel ?? "").trim().toUpperCase().match(/^([A-Z]{1,3}\d{2,10})(\s*-\s*|\s+)(.+)$/);
+  return Boolean(m) && r.length >= 6 && canonRef(m[3]) === r;
+}
+/**
+ * Material que la función puede buscar o dar de alta en STEL sola (usuario, 2026-11-20: «necesito que cree el albarán»):
+ * leído del albarán del PROVEEDOR, sin dudas o comparado con el papel por el técnico, con referencia y descripción. Lo
+ * dictado (una referencia dictada no es fiable) no se da de alta solo: lo asigna la oficina en la revisión.
+ */
+export function materialDelProveedor(m) {
+  const origen = typeof m?.origen === "object" && m.origen ? m.origen.tipo : m?.origen;
+  return origen === "ALBARAN_PROVEEDOR" && (m.comprobado === "TECNICO" || !(m.dudas || []).length)
+    && canonRef(m.referencia).length >= 3 && String(m.descripcion || "").trim().length >= 2;
 }
 
 /** Texto del albarán visible para el cliente: avería, trabajos, estado final y pendientes (sin importes). */
@@ -229,7 +259,20 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     if (!ctx.cliente?.stel_id) throw new Bloqueo("Cliente provisional: vincúlalo a un cliente de STEL o créalo en STEL");
     const incidente = a.stel_incidencia_id || incidenciasHechas.get(a.id) || null;
     if (!incidente) throw new Espera("Esperando la incidencia de STEL del aviso");
-    const {lineas, faltan} = lineasAlbaran(c, p.revision, ctx.ajustes);
+    // Antes de nada, que no falte un servicio (para no dar de alta artículos de un albarán que no se puede crear todavía).
+    const sinServicio = lineasAlbaran({...c, materiales: []}, p.revision, ctx.ajustes).faltan.filter((f) => /servicio/.test(f));
+    if (sinServicio.length) throw new Bloqueo("Falta: " + sinServicio.join("; "));
+    // Materiales del albarán del proveedor sin artículo de STEL: se busca o se da de alta (regla del robot de albaranes).
+    const conRevision = new Set((p.revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => l.material_id));
+    const resueltos = new Map(), altas = [];
+    for (const m of c.materiales || []) {
+      if (m.stel_item_id || conRevision.has(m.id) || !materialDelProveedor(m)) continue;
+      const r = await articuloParaMaterial(m, p);
+      resueltos.set(m.id, r.id);
+      if (r.creado) altas.push({material_id: m.id, referencia: String(m.referencia).trim(), nombre: String(m.descripcion).trim().slice(0, 250), stel_id: r.id,
+        ...(Number(m.precio_papel) > 0 ? {precio: Number(m.precio_papel)} : Number(m.precio_neto) > 0 ? {precio: Number(m.precio_neto)} : {})});
+    }
+    const {lineas, faltan} = lineasAlbaran(c, p.revision, ctx.ajustes, resueltos);
     if (faltan.length) throw new Bloqueo("Falta: " + faltan.join("; "));
     const titulo = `${p.codigo} · ${a.motivo}`.slice(0, 150);
     const version = Number(ctx.op.detalle?.version || p.version);
@@ -295,7 +338,35 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     }
     const final = primero(lista(await stel("GET", `workDeliveryNotes/${id}`)));
     return {stel_id: id, detalle: {referencia: final?.["full-reference"] || final?.reference || null, version, accion, adjuntos: adjuntados,
-      adjuntos_total: adjuntar.length}};
+      adjuntos_total: adjuntar.length, articulos: Object.fromEntries(resueltos), ...(altas.length ? {articulos_creados: altas} : {})}};
+  }
+
+  /**
+   * Artículo de STEL de un material del albarán del proveedor. Referencia UNA vez en STEL (igual o con el prefijo del
+   * proveedor) → se usa; varias → lo elige la persona; ninguna → mismo nombre UNA vez (STEL no deja dos nombres iguales)
+   * → se usa; si no, se da de alta con nombre, referencia y, si la línea cuadraba, el precio neto como compra y venta base
+   * (regla del robot, usuario 2026-10-30). Reintentar no duplica: la siguiente vez lo encuentra por la referencia.
+   */
+  async function articuloParaMaterial(m, p) {
+    const ref = String(m.referencia).trim(), nombre = String(m.descripcion).trim().slice(0, 250);
+    const porRef = lista(await stel("GET", "products", {query: {reference: ref, limit: 20}})).filter((x) => mismaReferencia(x.reference, ref));
+    if (porRef.length > 1) throw new Bloqueo(`La referencia ${ref} está ${porRef.length} veces en STEL: elige el artículo en la revisión`);
+    if (porRef.length === 1) return {id: idDe(porRef), creado: false};
+    const porNombre = lista(await stel("GET", "products", {query: {name: nombre, limit: 20}})).filter((x) => canonRef(x.name) === canonRef(nombre));
+    if (porNombre.length > 1) throw new Bloqueo(`«${nombre}» está ${porNombre.length} veces en STEL: elige el artículo en la revisión`);
+    if (porNombre.length === 1) return {id: idDe(porNombre), creado: false};
+    // Precios (usuario, 2026-11-20): compra = neto del albarán del proveedor (con descuentos, si la línea cuadraba); venta =
+    // PRECIO del papel; sin PRECIO leído, la venta es el neto; sin ninguno, sin precio.
+    const neto = Number(m.precio_neto), papel = Number(m.precio_papel);
+    const o = typeof m.origen === "object" && m.origen ? m.origen : {};
+    // La referencia es la del papel: serie MANUAL (-2), si no STEL rechaza las que llevan letras o pone la suya (E000191).
+    const creado = await stel("POST", "products", {body: {name: nombre, reference: ref, "serial-number-id": -2,
+      ...(neto > 0 ? {"purchase-price": neto} : {}), ...(papel > 0 ? {"sales-price": papel} : neto > 0 ? {"sales-price": neto} : {}),
+      "private-comments": `Alta de DAFRICA SAT ${p.codigo}: albarán del proveedor ${[o.proveedor, o.numero].filter(Boolean).join(" ")}`.slice(0, 500)}});
+    let id = idDe(creado);
+    if (!id) id = idDe(lista(await stel("GET", "products", {query: {reference: ref, limit: 5}})).filter((x) => mismaReferencia(x.reference, ref)));
+    if (!id) throw new Error(`STEL no devolvió el artículo creado (${ref}); se buscará en el siguiente intento`);
+    return {id, creado: true};
   }
 
   async function factura(ctx) {
@@ -390,6 +461,94 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       await cargar("ARTICULOS", [...(await leerTodo("products")).map(articulo("PRODUCTO")), ...(await leerTodo("services")).map(articulo("SERVICIO"))]);
       await rpc("sat_stel_sumar_llamadas", {p_n: llamadas});
       return responder({ok: true, cargados: r, llamadas});
+    }
+
+    if (cuerpo.accion === "servicios") {
+      // Servicios de mano de obra y desplazamiento por horas (usuario, 2026-11-20: «no he creado nada, créalo»). Solo
+      // oficina (sin parte, sat_puede_procesar exige sat.administrar). Si ya existe UNO (por referencia o nombre), se usa;
+      // varios: se para; ninguno: se crea al precio por hora de Ajustes con el 21 %. Después se eligen en Ajustes (con la
+      // sesión del usuario: queda auditado a su nombre) y eso devuelve a la cola los albaranes parados solo por ellos.
+      if (parteId) return responder({error: "Los servicios no llevan parte"}, 400);
+      hechasHoy = Number(await rpc("sat_stel_sumar_llamadas", {p_n: 0})) || 0;
+      const defs = [
+        {clave: "stel_servicio_mano_obra_id", nombre: "MANO DE OBRA (HORA)", referencia: "MO-HORA", precio: "precio_hora_mano_obra"},
+        {clave: "stel_servicio_desplazamiento_id", nombre: "DESPLAZAMIENTO (HORA)", referencia: "DESP-HORA", precio: "precio_hora_desplazamiento"}];
+      const hechos = [];
+      for (const d of defs) {
+        const precio = Number(await rpc("sat_ajuste", {p_clave: d.precio})) || 50;
+        const porRef = lista(await stel("GET", "services", {query: {reference: d.referencia, limit: 10}})).filter((x) => canonRef(x.reference) === canonRef(d.referencia));
+        const porNombre = porRef.length ? [] : lista(await stel("GET", "services", {query: {name: d.nombre, limit: 10}})).filter((x) => canonRef(x.name) === canonRef(d.nombre));
+        const ya = porRef.length ? porRef : porNombre;
+        if (ya.length > 1) throw new ErrorStel(`Hay ${ya.length} servicios «${d.nombre}» en STEL: elige el bueno en Ajustes`);
+        let fila = ya[0] || null, creado = false;
+        if (!fila) {
+          // Referencia propia: STEL exige la serie MANUAL (-2) si no es solo de cifras (E000191, visto el 2026-11-20).
+          const r = await stel("POST", "services", {body: {name: d.nombre, reference: d.referencia, "serial-number-id": -2, "sales-price": precio, "primary-tax-percentage": 21}});
+          fila = primero(lista(r)) || primero(lista(await stel("GET", "services", {query: {reference: d.referencia, limit: 5}})));
+          creado = true;
+        }
+        const id = idDe(fila);
+        if (!id) throw new Error(`STEL no devolvió el servicio «${d.nombre}»`);
+        await rpc("sat_stel_catalogo_cargar", {p_tipo: "ARTICULOS", p_filas: [{stel_id: id, tipo: "SERVICIO", referencia: fila.reference || d.referencia,
+          nombre: fila.name || d.nombre, precio: Number.isFinite(Number(fila["sales-price"])) ? Number(fila["sales-price"]) : precio,
+          iva_pct: Number.isFinite(Number(fila["primary-tax-percentage"])) ? Number(fila["primary-tax-percentage"]) : 21, activo: !fila.inactive}]});
+        await rpc("sat_ajuste_guardar", {p_clave: d.clave, p_valor: id}, {usuario: true});
+        hechos.push({clave: d.clave, stel_id: id, nombre: fila.name || d.nombre, creado});
+      }
+      await rpc("sat_stel_sumar_llamadas", {p_n: llamadas});
+      return responder({ok: true, servicios: hechos, llamadas});
+    }
+
+    if (["borrar_albaran", "precios_albaran", "precio_articulo"].includes(cuerpo.accion)) {
+      // Acciones de oficina (usuario, 2026-11-20: «quiero un solo albarán, no dos, y que actualice los precios»). Solo con
+      // sat.administrar, comprobado con la sesión de la persona.
+      if ((await rpc("tiene_permiso", {permiso_codigo: "sat.administrar"}, {usuario: true})) !== true) return responder({error: "Solo administración"}, 403);
+      hechasHoy = Number(await rpc("sat_stel_sumar_llamadas", {p_n: 0})) || 0;
+      const fin = async (datos) => { await rpc("sat_stel_sumar_llamadas", {p_n: llamadas}); return responder({ok: true, ...datos, llamadas}); };
+      if (cuerpo.accion === "precio_articulo") {
+        // Precio de compra y de venta base de UN artículo (nunca nombre ni referencia).
+        const id = Number(cuerpo.stel_id), compra = Number(cuerpo.compra), venta = Number(cuerpo.venta);
+        if (!Number.isSafeInteger(id) || id <= 0 || !(compra >= 0) || !(venta >= 0)) return responder({error: "Datos no válidos"}, 400);
+        const art = primero(lista(await stel("GET", `products/${id}`)));
+        if (!art) return responder({error: "El artículo no existe en STEL"}, 404);
+        await stel("PUT", `products/${id}`, {body: {"purchase-price": compra, "sales-price": venta}});
+        await rpc("sat_stel_catalogo_cargar", {p_tipo: "ARTICULOS", p_filas: [{stel_id: id, tipo: "PRODUCTO", referencia: art.reference || null,
+          nombre: art.name || String(id), precio: venta, iva_pct: Number.isFinite(Number(art["primary-tax-percentage"])) ? Number(art["primary-tax-percentage"]) : null, activo: !art.inactive}]});
+        return fin({articulo: {stel_id: id, referencia: art.reference || null, compra, venta}});
+      }
+      if (!parteId) return responder({error: "Falta el parte"}, 400);
+      const det = await rpc("sat_parte_detalle", {p_id: parteId}, {usuario: true});
+      if (cuerpo.accion === "borrar_albaran") {
+        // Solo un parte que la oficina ya marcó NO FACTURABLE y sin factura (duplicado, prueba…): se borra su albarán de
+        // trabajo y, si el aviso no tiene otro parte, su incidencia.
+        if (det.estado !== "NO_FACTURABLE") return responder({error: "Primero marca el parte como no facturable (con el motivo)"}, 409);
+        if (det.factura) return responder({error: "El parte tiene factura: no se borra"}, 409);
+        const borrado = {};
+        if (det.stel_albaran_id) {
+          const doc = primero(lista(await stel("GET", `workDeliveryNotes/${det.stel_albaran_id}`)));
+          if (doc) { await stel("DELETE", `workDeliveryNotes/${det.stel_albaran_id}`); borrado.albaran = doc["full-reference"] || doc.reference || det.stel_albaran_id; }
+        }
+        const avisos = await rpc("sat_avisos_listar", {}, {usuario: true});
+        const av = (avisos || []).find((a) => a.id === det.aviso_id);
+        const inc = det.aviso?.stel_incidencia_id;
+        if (inc && av && (av.partes || []).length <= 1) {
+          const x = primero(lista(await stel("GET", `incidents/${inc}`)));
+          if (x) { await stel("DELETE", `incidents/${inc}`); borrado.incidencia = x["full-reference"] || x.reference || inc; }
+        }
+        return fin({borrado});
+      }
+      // precios_albaran: las líneas del albarán de trabajo con el precio de la revisión (o del papel / por hora).
+      if (!det.stel_albaran_id) return responder({error: "El parte no tiene albarán de trabajo en STEL"}, 409);
+      const doc = primero(lista(await stel("GET", `workDeliveryNotes/${det.stel_albaran_id}`)));
+      if (!doc) return responder({error: "El albarán de trabajo ya no está en STEL"}, 404);
+      const aj = (await rpc("sat_ajustes_leer", {}, {usuario: true})) || {};
+      const {lineas, faltan} = lineasAlbaran(det.contenido, det.revision, aj,
+        new Map((det.revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id])));
+      if (faltan.length) return responder({error: "Falta: " + faltan.join("; ")}, 409);
+      // PUT con «lines» sustituye TODAS las líneas por las que se mandan (especificación de STEL).
+      await stel("PUT", `workDeliveryNotes/${det.stel_albaran_id}`, {body: {lines: lineas}});
+      const final = primero(lista(await stel("GET", `workDeliveryNotes/${det.stel_albaran_id}`)));
+      return fin({albaran: final?.["full-reference"] || null, lineas: (final?.lines || []).map((l) => ({item: l["item-id"], unidades: l.units, precio: l["item-base-price"]}))});
     }
 
     if (cuerpo.accion !== "procesar") return responder({error: "Acción no válida"}, 400);

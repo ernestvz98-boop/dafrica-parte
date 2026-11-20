@@ -313,3 +313,109 @@ test("SAT: límite diario de llamadas a STEL", {timeout: 60000}, async (t) => {
   assert.equal(r.status, 502);
   assert.match((await r.json()).error, /Límite diario/);
 });
+
+test("SAT: materiales del albarán del proveedor → se usan o se dan de alta en STEL (una vez) y la revisión recibe el artículo", {timeout: 120000}, async (t) => {
+  const e = await crearEmulador({demo: true});
+  t.after(() => e.cerrar());
+  // Artículo que ya existe con el prefijo del proveedor delante de la referencia (como los del robot).
+  const pref = e.stel.sembrar("products", {name: "Enlace junta plana ficticio", reference: "H0000- 6000000001", "sales-price": 1, inactive: false});
+  const tec = await e.entrar("tecnico@prueba.local"), adm = await e.entrar("admin@prueba.local");
+  const rpc = async (tok, fn, args) => {
+    const r = await fetch(`${e.origen}/rest/v1/rpc/${fn}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json"}, body: JSON.stringify(args)});
+    const x = await r.text(); assert.equal(r.status, 200, fn + ": " + x); return x ? JSON.parse(x) : null;
+  };
+  const fn = async (tok, cuerpo) => (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json", Origin: e.origen}, body: JSON.stringify(cuerpo)})).json();
+  const subir = (tok, ruta, b, tipo) => fetch(`${e.origen}/storage/v1/object/sat-archivos/${ruta}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": tipo}, body: b});
+  const aviso = (await rpc(tec, "sat_avisos_listar", {}))[0];
+  const cat = await rpc(tec, "sat_catalogo", {});
+  const cli = cat.clientes.find((c) => c.id === aviso.cliente_id);
+  const origen = (linea) => ({tipo: "ALBARAN_PROVEEDOR", proveedor: "Proveedor Ficticio", numero: "A-1", linea});
+  const contenido = {tipo_visita: "REPARACION_FINALIZADA", fecha: "2026-11-20", hora_inicio: "08:00", hora_fin: "09:00", modo: "RAPIDO",
+    cliente: {id: cli.id, stel_id: cli.stel_id, nombre: cli.nombre}, direccion: {texto: "x"}, trabajos: "Cambio de piezas", fotos: [],
+    tiempo_trabajo_min: 60, desplazamiento_min: 0, materiales: [
+      {id: "m1", descripcion: "Termostato digital", referencia: "TER-01", cantidad: 1, unidad: "ud", dudas: [], origen: origen(1), precio_papel: 40},
+      {id: "m2", descripcion: "TE 90 FICTICIA", referencia: "1801999999", cantidad: 1, unidad: "ud", dudas: [], comprobado: "TECNICO", origen: origen(2), precio_papel: 2, precio_neto: 0.76},
+      {id: "m3", descripcion: "Enlace junta plana ficticio", referencia: "6000000001", cantidad: 2, unidad: "ud", dudas: [], origen: origen(3)}]};
+  const parteId = uuid();
+  await rpc(tec, "sat_parte_guardar", {p_parte: {id: parteId, aviso_id: aviso.id, contenido}});
+  const fid = uuid(), pid = uuid(), pdf = Buffer.from("%PDF parte");
+  await subir(tec, `${parteId}/f-${fid}.png`, Buffer.from("png"), "image/png");
+  await rpc(tec, "sat_archivo_registrar", {p: {id: fid, parte_id: parteId, tipo: "FIRMA", storage_path: `${parteId}/f-${fid}.png`}});
+  const b = {parte_id: parteId, texto_alcance: "A", firmado_en: new Date().toISOString(), contenido};
+  await rpc(tec, "sat_firma_registrar", {p: {...b, id: uuid(), rol: "TECNICO", imagen_path: `${parteId}/f-${fid}.png`}});
+  await rpc(tec, "sat_firma_registrar", {p: {...b, id: uuid(), rol: "CLIENTE", ausente_motivo: "No había nadie responsable en el local"}});
+  await subir(tec, `${parteId}/p-${pid}.pdf`, pdf, "application/pdf");
+  await rpc(tec, "sat_archivo_registrar", {p: {id: pid, parte_id: parteId, tipo: "PDF_PARTE", storage_path: `${parteId}/p-${pid}.pdf`, sha256: sha(pdf)}});
+  await rpc(tec, "sat_parte_enviar", {p_id: parteId, p_pdf_path: `${parteId}/p-${pid}.pdf`, p_pdf_sha256: sha(pdf)});
+  // La oficina ya había preparado la revisión (sin artículos de STEL en los materiales).
+  await rpc(adm, "sat_revision_guardar", {p_id: parteId, p_nota: null, p_lineas: ["m1", "m2", "m3"].map((m, i) => ({tipo: "MATERIAL", material_id: m, stel_item_id: null,
+    descripcion: m, cantidad: 1, precio: [40, 2, 4][i], descuento_pct: 0, iva_pct: 21}))});
+  const r1 = await fn(tec, {accion: "procesar", parte_id: parteId});
+  const alb = r1.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO");
+  assert.equal(alb.estado, "OK", JSON.stringify(r1));
+  const nuevos = e.stel.datos.products.filter((x) => x.reference === "1801999999");
+  assert.equal(nuevos.length, 1, "el que no existe se da de alta una vez");
+  assert.equal(nuevos[0].name, "TE 90 FICTICIA");
+  assert.equal(nuevos[0]["purchase-price"], 0.76, "compra = neto del albarán del proveedor");
+  assert.deepEqual(alb.detalle.articulos, {m1: e.semilla.p1.id, m2: nuevos[0].id, m3: pref.id}, "TER-01 por la referencia; el del prefijo, por el nombre");
+  const wdn = e.stel.datos.workDeliveryNotes.at(-1);
+  assert.deepEqual(wdn.lines.slice(0, 3).map((l) => [l["item-id"], l.units]), [[e.semilla.p1.id, 1], [nuevos[0].id, 1], [pref.id, 2]]);
+  // La revisión ya lleva los artículos (la factura los necesita) y el nuevo está en la copia del catálogo.
+  const det = await rpc(adm, "sat_parte_detalle", {p_id: parteId});
+  assert.deepEqual(det.revision.map((l) => l.stel_item_id), [e.semilla.p1.id, nuevos[0].id, pref.id]);
+  assert.ok((await rpc(adm, "sat_articulos_precios", {})).some((a) => Number(a.stel_id) === nuevos[0].id));
+  // Reintentar no duplica nada.
+  await rpc(adm, "sat_stel_reintentar", {p_op: alb.id ?? (det.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO")).id});
+  await fn(adm, {accion: "procesar", parte_id: parteId});
+  assert.equal(e.stel.datos.products.filter((x) => x.reference === "1801999999").length, 1);
+  // El artículo nuevo se creó con compra = neto y venta = PRECIO del papel.
+  assert.equal(nuevos[0]["sales-price"], 2);
+  // Oficina: precio de un artículo (solo administración) y precios de la revisión en las líneas del albarán de trabajo.
+  const sinPermiso = await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + tec, "Content-Type": "application/json", Origin: e.origen},
+    body: JSON.stringify({accion: "precio_articulo", stel_id: nuevos[0].id, compra: 1, venta: 2})});
+  assert.equal(sinPermiso.status, 403, "un técnico no cambia precios");
+  const pa = await (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + adm, "Content-Type": "application/json", Origin: e.origen},
+    body: JSON.stringify({accion: "precio_articulo", stel_id: nuevos[0].id, compra: 0.76, venta: 2})})).json();
+  assert.equal(pa.ok, true, JSON.stringify(pa));
+  assert.deepEqual([nuevos[0]["purchase-price"], nuevos[0]["sales-price"]], [0.76, 2]);
+  const rev2 = (await rpc(adm, "sat_parte_detalle", {p_id: parteId})).revision.map((l, i) => ({...l, precio: [41, 1.25, 3.5][i]}));
+  await rpc(adm, "sat_revision_guardar", {p_id: parteId, p_lineas: rev2, p_nota: null});
+  const pr = await (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + adm, "Content-Type": "application/json", Origin: e.origen},
+    body: JSON.stringify({accion: "precios_albaran", parte_id: parteId})})).json();
+  assert.equal(pr.ok, true, JSON.stringify(pr));
+  assert.deepEqual(e.stel.datos.workDeliveryNotes.at(-1).lines.map((l) => l["item-base-price"]).slice(0, 4), [41, 1.25, 3.5, 50], "materiales de la revisión; mano de obra sin línea en la revisión: precio por hora de Ajustes");
+  // Parte duplicado: no se borra nada si no está marcado NO FACTURABLE; marcado, se borra su albarán y su incidencia.
+  const llamarBorrar = async () => (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + adm, "Content-Type": "application/json", Origin: e.origen},
+    body: JSON.stringify({accion: "borrar_albaran", parte_id: parteId})}));
+  assert.equal((await llamarBorrar()).status, 409);
+  await rpc(adm, "sat_decidir", {p_id: parteId, p_decision: "NO_FACTURABLE", p_nota: "Duplicado de prueba"});
+  const bo = await (await llamarBorrar()).json();
+  assert.equal(bo.ok, true, JSON.stringify(bo));
+  assert.ok(bo.borrado.albaran && bo.borrado.incidencia);
+  assert.equal(e.stel.datos.workDeliveryNotes.at(-1).deleted, true);
+  assert.equal(e.stel.datos.incidents.at(-1).deleted, true);
+});
+
+test("SAT: «servicios» crea en STEL mano de obra y desplazamiento por horas una vez, los elige en Ajustes y desbloquea", {timeout: 120000}, async (t) => {
+  const e = await crearEmulador({demo: true});
+  t.after(() => e.cerrar());
+  const tec = await e.entrar("tecnico@prueba.local"), adm = await e.entrar("admin@prueba.local");
+  const rpc = async (tok, fn, args) => {
+    const r = await fetch(`${e.origen}/rest/v1/rpc/${fn}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json"}, body: JSON.stringify(args)});
+    const x = await r.text(); assert.equal(r.status, 200, fn + ": " + x); return x ? JSON.parse(x) : null;
+  };
+  const fn = async (tok, cuerpo) => { const r = await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json", Origin: e.origen}, body: JSON.stringify(cuerpo)}); return {status: r.status, ...(await r.json())}; };
+  assert.equal((await fn(tec, {accion: "servicios"})).status, 403, "un técnico no puede");
+  const r1 = await fn(adm, {accion: "servicios"});
+  assert.equal(r1.ok, true, JSON.stringify(r1));
+  assert.deepEqual(r1.servicios.map((s) => [s.nombre, s.creado]), [["MANO DE OBRA (HORA)", true], ["DESPLAZAMIENTO (HORA)", true]]);
+  const mo = e.stel.datos.services.find((s) => s.reference === "MO-HORA");
+  assert.equal(mo["sales-price"], 50);
+  const aj = await rpc(adm, "sat_ajustes_leer", {});
+  assert.equal(Number(aj.stel_servicio_mano_obra_id), mo.id);
+  assert.equal(Number(aj.stel_servicio_desplazamiento_id), e.stel.datos.services.find((s) => s.reference === "DESP-HORA").id);
+  assert.ok((await rpc(adm, "sat_articulos_precios", {})).some((a) => Number(a.stel_id) === mo.id), "entra en la copia del catálogo");
+  const r2 = await fn(adm, {accion: "servicios"});
+  assert.deepEqual(r2.servicios.map((s) => s.creado), [false, false], "la segunda vez los reutiliza");
+  assert.equal(e.stel.datos.services.filter((s) => s.reference === "MO-HORA").length, 1);
+});

@@ -58,6 +58,10 @@ async function detalle(raiz, id) {
   const pdfParte = d.pdf_path ? url.get(d.pdf_path) : "";
   const editableEco = ["ENVIADO", "EN_REVISION", "PRESUPUESTAR", "PENDIENTE_APROBACION"].includes(d.estado) && puede("sat.administrar");
   let lineas = structuredClone(d.revision || proponerLineas(c, precios, aj));
+  // Mano de obra y desplazamiento guardados antes de elegir sus servicios en Ajustes: se completan con ellos (la factura
+  // necesita el artículo de STEL de cada línea). Se guarda al pulsar «Guardar revisión».
+  const servicioDe = {MANO_OBRA: aj?.stel_servicio_mano_obra_id, DESPLAZAMIENTO: aj?.stel_servicio_desplazamiento_id};
+  if (editableEco) for (const l of lineas) if (!l.stel_item_id && Number(servicioDe[l.tipo]) > 0) l.stel_item_id = Number(servicioDe[l.tipo]);
   const clienteCat = ctx.S.catalogo.clientes.find((x) => x.id === c.cliente?.id);
 
   raiz.innerHTML = `<div class="fila"><a class="boton mini sec" href="#/admin">←</a><h1 class="crece" style="margin:0">${esc(d.codigo)}</h1>${chipEstado(d.estado)}</div>
@@ -309,6 +313,8 @@ async function ajustes(raiz) {
     <button type="button" class="boton ancho" id="bCatalogo">Actualizar catálogo desde STEL</button></div>
     <div class="tarjeta"><h2>Líneas automáticas</h2><label>Servicio de STEL para la mano de obra (por horas)</label>${selServicio("stel_servicio_mano_obra_id")}
     <label>Servicio de STEL para el desplazamiento</label>${selServicio("stel_servicio_desplazamiento_id")}
+    ${!aj.stel_servicio_mano_obra_id || !aj.stel_servicio_desplazamiento_id ? `<button type="button" class="boton sec ancho" id="bCrearServicios" style="margin-top:8px">Crear en STEL los servicios por horas que falten</button>
+      <p class="suave peq">«MANO DE OBRA (HORA)» y «DESPLAZAMIENTO (HORA)» al precio por hora de abajo y 21 % de IVA. Si ya existen en STEL, se usan.</p>` : ""}
     <div class="fila"><div class="crece"><label>Precio fijo por hora de mano de obra (€)</label><input data-ajuste="precio_hora_mano_obra" data-tipo="num" inputmode="decimal" value="${esc(aj.precio_hora_mano_obra ?? "")}"></div>
     <div class="crece"><label>Precio fijo por hora de desplazamiento (€)</label><input data-ajuste="precio_hora_desplazamiento" data-tipo="num" inputmode="decimal" value="${esc(aj.precio_hora_desplazamiento ?? "")}"></div></div>
     <p class="suave peq">La revisión propone las horas que anotó el técnico (minutos ÷ 60) a este precio. Vacío: el precio del servicio de STEL.</p>
@@ -325,6 +331,17 @@ async function ajustes(raiz) {
       await ctx.refrescar({silencioso: true}); } catch (er) { avisar(er.message, {error: true}); }
     ajustes(raiz);
   };
+  $("#bCrearServicios")?.addEventListener("click", async (e) => {
+    e.target.disabled = true; e.target.textContent = "Creando en STEL…";
+    try {
+      const r = await funcion("sat-stel", {accion: "servicios"});
+      avisar(r.servicios.map((s) => `${s.nombre}: ${s.creado ? "creado" : "ya existía"}`).join(" · "), {ms: 7000});
+      const p = await funcion("sat-stel", {accion: "procesar"});
+      const hechos = (p.operaciones || []).filter((o) => o.tipo === "ALBARAN_TRABAJO" && o.estado === "OK").length;
+      if (hechos) avisar(`${hechos} albarán(es) de trabajo creados en STEL.`, {ms: 7000});
+    } catch (er) { avisar(er.message, {error: true}); }
+    ajustes(raiz);
+  });
   $("#bGuardarAj").onclick = async () => {
     try {
       let servicios = false;
