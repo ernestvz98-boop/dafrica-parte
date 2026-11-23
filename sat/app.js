@@ -589,19 +589,33 @@ async function leerAlbaranRapido(pid, fid, blob) {
   await partes.modificar(pid, (q) => { q.albaranes = {...(q.albaranes || {}), [fid]: {estado: "LEYENDO"}}; });
   if (location.hash.includes("/rapido")) render();
   let res;
+  // Registro de la lectura (usuario, 2026-11-23: en el móvil no salió ninguna línea y no había forma de saber por qué): cuánto
+  // tardó, qué se leyó y el error si lo hubo. Va con el parte a la oficina (sin la imagen ni el texto leído).
+  const t0 = Date.now();
+  const diag = {fecha: new Date().toISOString(), kb: Math.round((blob?.size || 0) / 1024), tipo: blob?.type || null,
+    navegador: navigator.userAgent.slice(0, 160), memoria_gb: navigator.deviceMemory ?? null};
   try {
     const {leerFotoAlbaran} = await import("./lib/lector-foto.js");
     const {materialesDesdeAlbaran} = await import("./lib/materiales-albaran.js");
     const r = await leerFotoAlbaran(blob);
     const prop = materialesDesdeAlbaran(r, {articulos: S.catalogo.articulos || [], fotoId: fid});
+    Object.assign(diag, {segundos: Math.round((Date.now() - t0) / 1000), lineas_lector: (r?.lineas || []).length, materiales: prop.materiales.length,
+      proveedor: prop.proveedor ? true : false, numero: prop.numero ? true : false, confianza: typeof r?.confianza === "number" ? Math.round(r.confianza * 100) / 100 : null,
+      paginas: Array.isArray(r?.paginas) ? r.paginas.length : null});
     res = {estado: "LEIDO", proveedor: [prop.proveedor, prop.numero ? "n.º " + prop.numero : ""].filter(Boolean).join(" · "),
-      materiales: prop.materiales.map((m) => ({...m, id: nuevoId()})), avisos: prop.avisos};
+      materiales: prop.materiales.map((m) => ({...m, id: nuevoId()})), avisos: prop.avisos, diag};
   } catch (e) {
-    res = {estado: "ERROR", error: e.message};
+    Object.assign(diag, {segundos: Math.round((Date.now() - t0) / 1000), error: String(e?.message || e).slice(0, 300)});
+    res = {estado: "ERROR", error: e.message, diag};
   } finally {
     S.leyendo.delete(fid);
   }
   await partes.modificar(pid, (q) => { q.albaranes = {...(q.albaranes || {}), [fid]: res}; });
+  // Al servidor, dentro de la foto del parte, solo si aún no se ha firmado (cambiar lo firmado pediría firmar otra vez).
+  const p = await partes.get(pid);
+  if (p && !(p.firmas || []).length && p.estadoLocal !== "ENVIADO") {
+    await cambiarParte(pid, (q) => { q.contenido.fotos = (q.contenido.fotos || []).map((f) => (f.id === fid ? {...f, lectura: diag} : f)); }, {inmediato: true});
+  }
   if (location.hash.includes("/rapido")) render();
 }
 
@@ -633,10 +647,11 @@ async function pasoRapido(p, raiz, editable) {
   const estadoAlb = (fid) => {
     const x = alb[fid];
     if (!x || x.estado === "LEYENDO") return `<p class="suave">⏳ Leyendo el albarán… (alrededor de un minuto)</p>`;
-    if (x.estado === "ERROR") return `<p class="alerta ambar">No se pudo leer (${esc(x.error)}). La foto va adjunta: la oficina lo verá.</p>`;
+    const releer = `<button type="button" class="boton mini sec" data-alb-releer="${esc(fid)}" data-editar>↻ Volver a leer</button>`;
+    if (x.estado === "ERROR") return `<p class="alerta ambar">No se pudo leer (${esc(x.error)}). La foto va adjunta: la oficina la lee y pasa los materiales.</p>${releer}`;
     // Entran en el parte las líneas leídas sin dudas y las que el técnico ha comparado con el papel (misma regla que
     // contenidoRapido). Las dudosas se enseñan para comparar: «Coinciden con el papel», «Corregir» o «Quitar».
-    if (!x.materiales.length) return `<p class="suave">No se han reconocido líneas: la foto va adjunta y la oficina las pasa.</p>`;
+    if (!x.materiales.length) return `<p class="alerta ambar">No se han podido leer las líneas de esta foto. No pasa nada: la foto va adjunta al parte y la oficina pasa los materiales. Si quieres, repite la foto (el papel entero, plano y con luz) o pulsa «Volver a leer».</p>${releer}`;
     const entra = (m) => Number(m.cantidad) > 0 && m.descripcion && (!m.dudas.length || m.confirmado);
     const pendientes = x.materiales.filter((m) => !entra(m));
     const linea = (m) => `<li class="${entra(m) ? "" : "dudosa"}"><b>${m.cantidad === null ? "¿cantidad?" : esc(String(m.cantidad).replace(".", ","))} ${esc(m.unidad)}</b> · ${esc(m.descripcion || "¿descripción?")}
@@ -743,6 +758,11 @@ async function pasoRapido(p, raiz, editable) {
     if (sinDatos.length) return avisar(`${sinDatos.length} línea(s) sin cantidad o sin descripción: corrígelas o quítalas antes.`, {error: true});
     if (!(await confirmar("¿Has comparado cada línea (cantidad, descripción y referencia) con el papel y están bien?", "Sí, coinciden", "Todavía no"))) return;
     cambiarLineas(b.dataset.albConfirmar, (x2) => { x2.materiales = x2.materiales.map((m) => conArticulo({...m, confirmado: true})); });
+  });
+  $$("[data-alb-releer]", raiz).forEach((b) => b.onclick = async () => {
+    const a = await archivos.get(b.dataset.albReleer);
+    if (!a?.blob) return avisar("La foto ya no está en el teléfono: la lee la oficina.", {error: true});
+    leerAlbaranRapido(p.id, b.dataset.albReleer, a.blob);
   });
   $$("[data-alb-quitar]", raiz).forEach((b) => b.onclick = () => {
     const [fid, mid] = b.dataset.albQuitar.split("|");

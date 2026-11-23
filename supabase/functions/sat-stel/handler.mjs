@@ -168,6 +168,21 @@ export function materialDelProveedor(m) {
     && canonRef(m.referencia).length >= 3 && String(m.descripcion || "").trim().length >= 2;
 }
 
+/**
+ * Materiales que la OFICINA añadió en la revisión leyendo la foto del albarán del proveedor (usuario, 2026-11-23: el móvil no
+ * reconoció líneas; «Leer el albarán del proveedor» en la oficina). No están en lo que firmó el cliente (eso no se toca), pero
+ * van al albarán de trabajo de STEL como los del técnico: misma búsqueda o alta del artículo y mismo precio (coste + margen).
+ */
+export function materialesDeOficina(contenido, revision) {
+  const delParte = new Set((contenido?.materiales || []).map((m) => m.id));
+  return (revision || []).filter((l) => l.oficina === true && l.tipo === "MATERIAL" && l.material_id && !delParte.has(l.material_id)).map((l) => ({
+    id: l.material_id, descripcion: String(l.descripcion_material || l.descripcion || "").trim(), referencia: String(l.referencia || "").trim(),
+    cantidad: l.cantidad, unidad: l.unidad || "ud", stel_item_id: l.stel_item_id || null, dudas: [], comprobado: "OFICINA",
+    origen: {tipo: "ALBARAN_PROVEEDOR", ...(l.origen_material && typeof l.origen_material === "object" ? l.origen_material : {})},
+    ...(Number(l.precio_neto) > 0 ? {precio_neto: Number(l.precio_neto)} : {}),
+    ...(Number(l.precio_neto_estimado) > 0 ? {precio_neto_estimado: Number(l.precio_neto_estimado), neto_estimado_como: l.neto_estimado_como || "leído del papel"} : {})}));
+}
+
 /** Texto del albarán visible para el cliente: avería, trabajos, estado final y pendientes (sin importes). */
 export function textoAlbaran(c) {
   const tipos = {DIAGNOSTICO: "Visita de diagnóstico", REPARACION_FINALIZADA: "Reparación finalizada", PENDIENTE: "Intervención pendiente"};
@@ -300,7 +315,9 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
   }
 
   async function albaran(ctx) {
-    const p = ctx.parte, c = p.contenido, a = ctx.aviso;
+    const p = ctx.parte, a = ctx.aviso;
+    // Lo que firmó el técnico más lo que la oficina añadió leyendo el albarán del proveedor.
+    const c = {...p.contenido, materiales: [...(p.contenido?.materiales || []), ...materialesDeOficina(p.contenido, p.revision)]};
     if (!ctx.cliente?.stel_id) throw new Bloqueo("Cliente provisional: vincúlalo a un cliente de STEL o créalo en STEL");
     const incidente = a.stel_incidencia_id || incidenciasHechas.get(a.id) || null;
     if (!incidente) throw new Espera("Esperando la incidencia de STEL del aviso");
@@ -637,6 +654,19 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       const aj = (await rpc("sat_ajustes_leer", {}, {usuario: true})) || {};
       let revision = det.revision;
       let recalculado = null;
+      // Materiales del parte y los que añadió la oficina leyendo el albarán del proveedor. A los de la oficina sin artículo de
+      // STEL se les busca o da de alta (misma regla que al crear el albarán) y la revisión guarda el artículo.
+      const contenidoTotal = {...det.contenido, materiales: [...(det.contenido?.materiales || []), ...materialesDeOficina(det.contenido, revision)]};
+      if (["precios_albaran", "recalcular_materiales"].includes(cuerpo.accion)) {
+        const sinArticulo = materialesDeOficina(det.contenido, revision).filter((m) => !m.stel_item_id && materialDelProveedor(m));
+        if (sinArticulo.length) {
+          const nuevos = new Map();
+          for (const m of sinArticulo) nuevos.set(m.id, (await articuloParaMaterial(m, {codigo: det.codigo}, aj)).id);
+          revision = revision.map((l) => (nuevos.has(l.material_id) ? {...l, stel_item_id: nuevos.get(l.material_id)} : l));
+          for (const m of contenidoTotal.materiales) if (nuevos.has(m.id)) m.stel_item_id = nuevos.get(m.id);
+          await rpc("sat_revision_guardar", {p_id: parteId, p_lineas: revision, p_nota: det.revision_nota ?? null}, {usuario: true});
+        }
+      }
       if (cuerpo.accion === "precios_desde_stel") {
         // Precios corregidos a mano en el albarán de trabajo de STEL (usuario, 2026-11-23: «si existe error se modifica, o el
         // técnico o en el STEL Order»): se traen a la revisión (cantidad, precio y descuento de cada línea, emparejadas por su
@@ -667,7 +697,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
         // tiene albarán de trabajo, se actualizan sus líneas. Lo que no tiene coste queda como estaba y se dice.
         if (!(revision || []).length) return responder({error: "Guarda primero la revisión económica"}, 409);
         const margen = margenDe(aj);
-        const mats = new Map((det.contenido?.materiales || []).map((m) => [m.id, m]));
+        const mats = new Map(contenidoTotal.materiales.map((m) => [m.id, m]));
         const sinPrecio = (revision || []).map((l) => (l.tipo === "MATERIAL" ? {...l, precio: null} : l));
         const costes = await costesDeStel([...mats.values()], sinPrecio,
           new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id])));
@@ -691,7 +721,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       const pago = pagoDe(aj);
       if (!pago) return responder({error: FALTA_PAGO}, 409);
       const resueltos = new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id]));
-      const {lineas, faltan} = lineasAlbaran(det.contenido, revision, aj, resueltos, await costesDeStel(det.contenido?.materiales, revision, resueltos));
+      const {lineas, faltan} = lineasAlbaran(contenidoTotal, revision, aj, resueltos, await costesDeStel(contenidoTotal.materiales, revision, resueltos));
       if (faltan.length) return responder({error: "Falta: " + faltan.join("; "), ...(recalculado ? {recalculado} : {})}, 409);
       // PUT con «lines» sustituye TODAS las líneas por las que se mandan (especificación de STEL).
       await stel("PUT", `workDeliveryNotes/${det.stel_albaran_id}`, {body: {...pago, lines: lineas}});
