@@ -97,6 +97,12 @@ function cerrarSesionPendiente(){
 }
 
 async function enterApp(){
+  // Técnico que solo tiene el servicio técnico (usuario, 2026-11-23: «que pueda entrar solo para hacer esto y que sea lo más
+  // simple»): va directo a la aplicación de partes, sin pasar por el menú de DAFRICA Control.
+  if(has("sat.tecnico") && !has("sat.administrar") && [...state.permissions].every(p => String(p).startsWith("sat."))){
+    location.replace("./sat/");
+    return;
+  }
   const params = new URLSearchParams(location.search);
   state.qrToken = params.get("token") || "";
   const requested = params.get("mod") || (state.qrToken ? "maquinaria" : "inicio");
