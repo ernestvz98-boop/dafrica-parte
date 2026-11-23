@@ -139,6 +139,10 @@ async function pintarVista() {
 }
 
 // ------------------------------------------------------------------ avisos
+// El técnico ve solo lo imprescindible (usuario, 2026-11-23: «que sea lo más sencillo de trabajar para él»); los atajos de
+// oficina (aviso con todos los datos, modo detallado) solo con permiso de administración.
+const esOficina = () => (S.yo?.permisos || []).includes("sat.administrar");
+
 async function vistaAvisos() {
   const locales = await partes.todas();
   const porAviso = new Map();
@@ -159,7 +163,7 @@ async function vistaAvisos() {
   };
   app.innerHTML = `<div class="fila"><h1 class="crece">Mis avisos</h1></div>
     <a class="boton verde ancho grande" href="#/nuevo">＋ Nuevo parte</a>
-    <p class="centro"><a class="suave peq" href="#/aviso/nuevo">Crear un aviso con todos los datos</a></p>
+    ${esOficina() ? `<p class="centro"><a class="suave peq" href="#/aviso/nuevo">Crear un aviso con todos los datos</a></p>` : ""}
     ${abiertos.length ? abiertos.map(tarjeta).join("") : `<p class="suave">No tienes avisos abiertos.</p>`}
     ${cerrados.length ? `<h2>Cerrados recientemente</h2>${cerrados.map(tarjeta).join("")}` : ""}`;
   $$("[data-aviso]").forEach((el) => el.addEventListener("click", (e) => { e.preventDefault(); abrirParteDeAviso(el.dataset.aviso); }));
@@ -594,11 +598,11 @@ async function pasoRapido(p, raiz, editable) {
   // Precio y descuento leídos del papel (usuario, 2026-11-23: si el lector se equivoca, «lo modifica el técnico o en el STEL»).
   // No van al PDF ni a la firma: solo para que el técnico los compare con el papel y los corrija con «Corregir».
   const eur = (x) => String(Math.round(Number(x) * 10000) / 10000).replace(".", ",");
+  // Solo se enseña cuando hace falta mirarlo: precio leído pero sin comprobar (si cuadra, nada que hacer).
   const precioLinea = (m) => {
-    const precio = m.precio_comprobado ? m.precio_papel : m.precio_papel ?? m.precio_leido, dto = m.dto_leido;
-    if (!(Number(precio) > 0)) return `<div class="suave peq">Precio: no leído · pulsa «Corregir» si lo pone el papel</div>`;
-    const ok = Number(m.precio_neto) > 0;
-    return `<div class="suave peq">Precio ${esc(eur(precio))} €${Number(dto) > 0 ? ` · dto ${esc(eur(dto))} %` : ""}${ok ? ` · neto ${esc(eur(m.precio_neto))} €` : ` <span class="chip ambar">precio sin comprobar</span>`}</div>`;
+    const precio = m.precio_papel ?? m.precio_leido, dto = m.dto_leido;
+    if (Number(m.precio_neto) > 0 || !(Number(precio) > 0)) return "";
+    return `<div class="suave peq">Precio ${esc(eur(precio))} €${Number(dto) > 0 ? ` · dto ${esc(eur(dto))} %` : ""} <span class="chip ambar">mira el precio</span></div>`;
   };
   const estadoAlb = (fid) => {
     const x = alb[fid];
@@ -646,7 +650,7 @@ async function pasoRapido(p, raiz, editable) {
       <h3>Horas de trabajo</h3>${chips("tiempo_trabajo_min", HORAS_TRABAJO, tTrab, "")}
       <h3>Horas de desplazamiento</h3>${chips("desplazamiento_min", HORAS_DESPLAZAMIENTO, tDesp, "Sin desplazamiento")}</div>
     <button type="button" class="boton verde ancho grande" id="bAFirmar" data-editar>Firmar ✍️</button>
-    <p class="centro" style="margin-top:14px"><a href="#" class="suave peq" id="bDetallado">Rellenar a mano (modo detallado)</a></p>`;
+    ${esOficina() ? `<p class="centro" style="margin-top:14px"><a href="#" class="suave peq" id="bDetallado">Rellenar a mano (modo detallado)</a></p>` : ""}`;
   if (!editable) return;
   // Transcribir solos los audios pendientes (una vez por sesión; con error, a mano con «Transcribir»).
   if (navigator.onLine) for (const {d, a} of audios) if (!d.texto && !S.transcribiendo.has(a.id) && !S.autoTranscrito.has(a.id)) { S.autoTranscrito.add(a.id); transcribirAudio(a.id, {silencioso: true}); }
@@ -778,7 +782,7 @@ async function pasoRapido(p, raiz, editable) {
     return true;
   };
   $("#bAFirmar").onclick = async () => { if (await preparar()) location.hash = `#/parte/${p.id}/firmas`; };
-  $("#bDetallado").onclick = async (e) => {
+  if ($("#bDetallado")) $("#bDetallado").onclick = async (e) => {
     e.preventDefault();
     if (!(await confirmar("Pasar a rellenar el parte a mano por pasos. Lo grabado y las fotos se mantienen. ¿Seguir?", "Seguir"))) return;
     if (!(await preparar())) return;
