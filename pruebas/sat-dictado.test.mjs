@@ -88,8 +88,12 @@ test("importes: igual que sat_total() en Supabase (por línea, a céntimos)", ()
   const art = [{stel_id: 1, precio: 40, iva_pct: 21, nombre: "Termostato"}, {stel_id: 9, precio: 35, iva_pct: 21, nombre: "Mano de obra"}];
   const l = proponerLineas({materiales: [{id: "m1", descripcion: "Termostato", cantidad: 1, stel_item_id: 1}, {id: "m2", descripcion: "Codo", cantidad: 2}],
     tiempo_trabajo_min: 90}, art, {stel_servicio_mano_obra_id: 9});
-  assert.deepEqual(l.map((x) => [x.tipo, x.stel_item_id, x.cantidad, x.precio]), [["MATERIAL", 1, 1, 40], ["MATERIAL", null, 2, null], ["MANO_OBRA", 9, 1.5, 35]]);
-  assert.equal(lineasIncompletas(l).length, 1, "el codo sin artículo ni precio queda para completar; nunca se inventa un precio");
+  // Materiales (usuario, 2026-11-23): coste neto + margen; sin neto del papel, vacío (la oficina trae el de compra de STEL).
+  assert.deepEqual(l.map((x) => [x.tipo, x.stel_item_id, x.cantidad, x.precio]), [["MATERIAL", 1, 1, null], ["MATERIAL", null, 2, null], ["MANO_OBRA", 9, 1.5, 35]]);
+  assert.equal(lineasIncompletas(l).length, 2, "sin coste ni artículo quedan para completar; nunca se inventa un precio");
+  const conNeto = proponerLineas({materiales: [{id: "m1", descripcion: "Termostato", cantidad: 2, stel_item_id: 1, precio_papel: 20, precio_neto: 10.45}]}, art, {});
+  assert.deepEqual([conNeto[0].coste, conNeto[0].precio, conNeto[0].descuento_pct, conNeto[0].margen_pct], [10.45, 13.59, 0, 30], "30 % por defecto sobre el neto, no sobre el PRECIO");
+  assert.equal(proponerLineas({materiales: [{id: "m1", descripcion: "x", cantidad: 1, precio_neto: 10}]}, art, {margen_materiales_pct: 25})[0].precio, 12.5);
   // Precio fijo por hora de Ajustes (usuario, 2026-11-18: 50 €/h) por encima del precio del servicio de STEL.
   const art2 = [...art, {stel_id: 8, precio: 30, iva_pct: 21, nombre: "Desplazamiento"}];
   const aj = {stel_servicio_mano_obra_id: 9, stel_servicio_desplazamiento_id: 8, precio_hora_mano_obra: 50, precio_hora_desplazamiento: 50};
@@ -146,6 +150,17 @@ test("STEL: líneas del albarán de trabajo y texto para el cliente (sin importe
   assert.deepEqual(x.faltan, []);
   assert.deepEqual(x.lineas.map((l) => [l["item-id"], l.units]), [[5, 1], [6, 2], [7, 0.75], [8, 1]]);
   assert.ok(x.lineas.every((l) => !("item-base-price" in l)), "el albarán no lleva precios del técnico");
+  // Materiales comprados al proveedor (usuario, 2026-11-23): coste neto con descuentos + margen; sin coste, se para.
+  const prov = {tipo: "ALBARAN_PROVEEDOR"};
+  const cm = {materiales: [{id: "a", descripcion: "Válvula", cantidad: 2, stel_item_id: 5, origen: prov, precio_papel: 20, precio_neto: 7.2},
+    {id: "b", descripcion: "Racor", cantidad: 1, stel_item_id: 6, origen: prov, precio_papel: 3}]};
+  const pagoAj = {margen_materiales_pct: 30};
+  x = lineasAlbaran(cm, null, pagoAj);
+  assert.deepEqual(x.faltan, ["precio de compra con descuentos de «Racor» (escríbelo en la revisión)"], "nunca el PRECIO bruto del papel");
+  x = lineasAlbaran(cm, null, pagoAj, new Map(), new Map([["b", 1.5]]));
+  assert.deepEqual(x.lineas.map((l) => [l["item-base-price"], l["discount-percentage"]]), [[9.36, 0], [1.95, 0]], "neto del papel o compra de STEL, + 30 %");
+  x = lineasAlbaran(cm, [{material_id: "a", precio: 11, descuento_pct: 5}, {material_id: "b", precio: 2}], pagoAj);
+  assert.deepEqual(x.lineas.map((l) => [l["item-base-price"], l["discount-percentage"]]), [[11, 5], [2, 0]], "la revisión manda, con su descuento");
   assert.equal(textoAlbaran(c).split("\n")[0], "Intervención pendiente de repuestos");
   assert.equal(fechaStel("2026-11-16", "09:05"), "2026-11-16T09:05:00+0100");
   assert.equal(fechaStel("2026-07-01", "09:05"), "2026-07-01T09:05:00+0200");

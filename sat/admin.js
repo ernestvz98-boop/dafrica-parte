@@ -3,7 +3,7 @@
 import {rpc, funcion, urlFirmada, subirArchivo, SinConexion} from "./lib/api.js";
 import {sha256} from "./lib/almacen.js";
 import {nuevoId, resumenTipo, horasTexto, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
-import {proponerLineas, totales, totalLinea, euros, lineasIncompletas} from "./lib/economia.js";
+import {proponerLineas, totales, totalLinea, euros, lineasIncompletas, margenDe} from "./lib/economia.js";
 import {esc, $, $$, avisar, dialogo, confirmar, pedirTexto, elegir, fechaHora, fechaCorta, chipEstado} from "./lib/ui.js";
 
 let ctx;
@@ -130,7 +130,8 @@ async function detalle(raiz, id) {
         <button type="button" class="eleccion" data-art="${i}" style="margin:4px 0">${l.stel_item_id ? esc((precios.find((p) => Number(p.stel_id) === Number(l.stel_item_id)) || {}).nombre || "Artículo " + l.stel_item_id) : "<b>Elegir artículo de STEL…</b>"}</button>
         <input data-l="${i}" data-k="descripcion" value="${esc(l.descripcion)}" placeholder="Descripción"></td>
         <td><input data-l="${i}" data-k="cantidad" inputmode="decimal" value="${esc(l.cantidad ?? "")}" style="width:72px"></td>
-        <td><input data-l="${i}" data-k="precio" inputmode="decimal" value="${esc(l.precio ?? "")}" style="width:90px" class="${l.precio === null || l.precio === "" ? "dudoso" : ""}"></td>
+        <td><input data-l="${i}" data-k="precio" inputmode="decimal" value="${esc(l.precio ?? "")}" style="width:90px" class="${l.precio === null || l.precio === "" ? "dudoso" : ""}">
+          ${Number(l.coste) > 0 ? `<div class="suave peq" title="${esc(l.coste_origen || "")}">coste ${euros(l.coste)} + ${esc(l.margen_pct ?? margenDe(aj))} %</div>` : ""}</td>
         <td><input data-l="${i}" data-k="descuento_pct" inputmode="decimal" value="${esc(l.descuento_pct ?? 0)}" style="width:64px"></td>
         <td><input data-l="${i}" data-k="iva_pct" inputmode="decimal" value="${esc(l.iva_pct ?? "")}" style="width:64px"></td>
         <td class="num">${euros(totalLinea(l))}</td><td><button type="button" class="boton mini sec" data-quitar="${i}">✕</button></td></tr>`).join("")}
@@ -138,7 +139,9 @@ async function detalle(raiz, id) {
       <p class="num" style="text-align:right">Base ${euros(t.base)} · IVA ${euros(t.iva)} · <b>Total ${euros(t.total)}</b></p>
       ${lineasIncompletas(lineas).length ? `<div class="alerta ambar">${lineasIncompletas(lineas).length} línea(s) sin artículo de STEL, cantidad, precio o IVA.</div>` : ""}
       ${editableEco ? `<div class="fila"><button type="button" class="boton sec mini" id="bLinea">＋ Línea</button><button type="button" class="boton sec mini" id="bProponer">Proponer desde el parte</button>
-        <button type="button" class="boton crece" id="bGuardarEco">Guardar revisión</button></div>` : ""}`;
+        ${lineas.some((l) => l.tipo === "MATERIAL" && l.material_id) ? `<button type="button" class="boton sec mini" id="bMargen">Precios de materiales (compra + ${esc(margenDe(aj))} %)</button>` : ""}
+        <button type="button" class="boton crece" id="bGuardarEco">Guardar revisión</button></div>
+        <p class="suave peq">Materiales: coste neto con los descuentos del albarán del proveedor (o el precio de compra de STEL) más el ${esc(margenDe(aj))} %.${d.stel_albaran_ref ? ` El botón también actualiza las líneas, la forma de pago y la cuenta del albarán ${esc(d.stel_albaran_ref)}.` : ""}</p>` : ""}`;
     if (!editableEco) { $$("input, select, .eleccion, [data-quitar]", eco).forEach((x) => { x.disabled = true; }); return; }
     $$("[data-l]", eco).forEach((el) => el.addEventListener("change", () => {
       const l = lineas[Number(el.dataset.l)], k = el.dataset.k;
@@ -156,6 +159,16 @@ async function detalle(raiz, id) {
     $$("[data-quitar]", eco).forEach((b) => b.onclick = () => { lineas.splice(Number(b.dataset.quitar), 1); pintarEco(); });
     $("#bLinea").onclick = () => { lineas.push({tipo: "OTRO", stel_item_id: null, descripcion: "", cantidad: 1, precio: null, descuento_pct: 0, iva_pct: 21}); pintarEco(); };
     $("#bProponer").onclick = async () => { if (await confirmar("¿Sustituir las líneas por las propuestas desde el parte?", "Sustituir")) { lineas = proponerLineas(c, precios, aj); pintarEco(); } };
+    $("#bMargen")?.addEventListener("click", async (ev) => {
+      ev.target.disabled = true; ev.target.textContent = "Calculando…";
+      try {
+        await rpc("sat_revision_guardar", {p_id: id, p_lineas: lineas, p_nota: null});
+        const r = await funcion("sat-stel", {accion: "recalcular_materiales", parte_id: id});
+        const sin = r.recalculado?.sin_coste || [];
+        avisar(`${r.recalculado?.materiales?.length || 0} material(es) a coste + ${r.recalculado?.margen} %${r.albaran ? ` · albarán ${r.albaran} actualizado` : ""}${sin.length ? ` · sin coste: ${sin.join(", ")}` : ""}.`, {ms: 9000, error: sin.length > 0});
+      } catch (e) { avisar(e.message, {error: true}); }
+      ctx.render();
+    });
     $("#bGuardarEco").onclick = async () => {
       try { await rpc("sat_revision_guardar", {p_id: id, p_lineas: lineas, p_nota: null}); avisar("Revisión guardada."); ctx.render(); }
       catch (e) { avisar(e.message, {error: true}); }
@@ -320,6 +333,14 @@ async function ajustes(raiz) {
     <p class="suave peq">La revisión propone las horas que anotó el técnico (minutos ÷ 60) a este precio. Vacío: el precio del servicio de STEL.</p>
     <label>Serie de los albaranes de trabajo (id de STEL, vacío = la predeterminada)</label><input data-ajuste="stel_serie_albaran_trabajo_id" data-tipo="num" value="${esc(aj.stel_serie_albaran_trabajo_id ?? "")}">
     <label>Límite propio de llamadas a STEL al día</label><input data-ajuste="stel_limite_llamadas_dia" data-tipo="num" value="${esc(aj.stel_limite_llamadas_dia ?? 250)}"></div>
+    <div class="tarjeta"><h2>Materiales y cobro</h2>
+    <label>Margen sobre el coste de los materiales comprados (%)</label><input data-ajuste="margen_materiales_pct" data-tipo="num" inputmode="decimal" value="${esc(aj.margen_materiales_pct ?? 30)}">
+    <p class="suave peq">Precio al cliente = coste neto (con los descuentos del albarán del proveedor) + este %.</p>
+    <label>Forma de pago y cuenta de todos los albaranes de trabajo y facturas</label>
+    <p>${aj.stel_forma_pago_id && aj.stel_cuenta_bancaria_id ? `<b>${esc(aj.stel_pago_descripcion || `forma ${aj.stel_forma_pago_id} · cuenta ${aj.stel_cuenta_bancaria_id}`)}</b>` : `<span class="chip rojo">sin elegir: los albaranes y facturas se paran</span>`}</p>
+    <div class="fila"><div class="crece"><label>Forma de pago en STEL</label><input id="pagoForma" value="transferencia"></div>
+    <div class="crece"><label>Últimas cifras de la cuenta</label><input id="pagoCuenta" inputmode="numeric" placeholder="4 cifras"></div></div>
+    <button type="button" class="boton sec ancho" id="bPago">Buscar en STEL y guardar</button></div>
     <div class="tarjeta"><h2>Factura</h2><label class="fila" style="font-weight:400"><input type="checkbox" data-ajuste="stel_emitir_factura" data-tipo="bool" style="width:24px;min-height:24px" ${aj.stel_emitir_factura === true ? "checked" : ""} ${puede("sat.facturar") ? "" : "disabled"}>
       Emitir la factura en STEL (Verifactu) al aprobarla. Sin marcar: se crea en STEL y se emite allí.</label></div>
     <div class="tarjeta"><h2>Firma y dictado</h2><label>Texto del alcance de la firma</label><textarea data-ajuste="texto_alcance_firma" style="min-height:140px">${esc(aj.texto_alcance_firma || "")}</textarea>
@@ -329,6 +350,15 @@ async function ajustes(raiz) {
     e.target.disabled = true; e.target.textContent = "Leyendo STEL…";
     try { const r = await funcion("sat-stel", {accion: "catalogo"}); avisar(`Catálogo actualizado: ${Object.entries(r.cargados).map(([k, v]) => `${v} ${k}`).join(", ")} (${r.llamadas} llamadas).`, {ms: 7000});
       await ctx.refrescar({silencioso: true}); } catch (er) { avisar(er.message, {error: true}); }
+    ajustes(raiz);
+  };
+  $("#bPago").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "Buscando en STEL…";
+    try {
+      const r = await funcion("sat-stel", {accion: "pagos", forma: $("#pagoForma").value, cuenta: $("#pagoCuenta").value});
+      avisar(`Guardado: ${r.descripcion}${r.aviso ? " · " + r.aviso : ""}`, {ms: 9000, error: Boolean(r.aviso)});
+      await funcion("sat-stel", {accion: "procesar"}).catch(() => {});
+    } catch (er) { avisar(er.message, {error: true, ms: 9000}); }
     ajustes(raiz);
   };
   $("#bCrearServicios")?.addEventListener("click", async (e) => {

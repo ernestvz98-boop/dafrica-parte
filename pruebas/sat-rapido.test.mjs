@@ -122,6 +122,8 @@ test("precios del albarán del proveedor: PRECIO si se leyó con seguridad; neto
   assert.deepEqual(preciosDeLinea({precio: c(8, 0.6), importe: c(4.18)}, 1), {});
   // Sin descuento y cuadra: el neto es el precio.
   assert.deepEqual(preciosDeLinea({precio: c(2.5), importe: c(7.5)}, 3), {precio_papel: 2.5, precio_neto: 2.5});
+  // Descuento en cascada «60+10» (el lector da el equivalente, 64 %): 2 × 10 × 0,36 = 7,20 → neto 3,60.
+  assert.deepEqual(preciosDeLinea({precio: c(10), descuento: c(64), importe: c(7.2)}, 2), {precio_papel: 10, precio_neto: 3.6});
 });
 
 test("sat-stel: solo da de alta lo leído del albarán del proveedor y comprobado; referencias con el prefijo del proveedor", async () => {

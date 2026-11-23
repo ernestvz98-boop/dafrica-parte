@@ -24,20 +24,30 @@ export function euros(x) {
  * Propuesta de líneas económicas a partir del parte: materiales (con el artículo y precio de STEL si se eligió),
  * mano de obra y desplazamiento con los servicios configurados. Mano de obra y desplazamiento: por horas (minutos que
  * anotó el técnico ÷ 60) al precio fijo por hora de Ajustes (usuario, 2026-11-18: 50 €/h); sin ese ajuste, el del
- * servicio de STEL. Materiales: precio SOLO del catálogo de STEL. Sin precio o sin horas, la línea queda incompleta para
+ * servicio de STEL. Materiales: coste neto + margen (ver abajo). Sin precio o sin horas, la línea queda incompleta para
  * que administración la complete (nunca se inventa).
  */
+/** Margen de los materiales comprados (usuario, 2026-11-23: 30 %); el mismo cálculo que la función sat-stel. */
+export function margenDe(ajustes) {
+  const v = ajustes?.margen_materiales_pct;
+  return v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 30;
+}
+export function precioVenta(coste, margen) { return redondear2(Number(coste) * (1 + Number(margen) / 100)); }
+
 export function proponerLineas(contenido, articulos, ajustes) {
   const porId = new Map((articulos || []).map((a) => [Number(a.stel_id), a]));
   const lineas = [];
+  const margen = margenDe(ajustes);
   for (const m of contenido.materiales || []) {
     const a = m.stel_item_id ? porId.get(Number(m.stel_item_id)) : null;
-    // Material del albarán del proveedor: el PRECIO del papel (usuario, 2026-11-20: «el precio que reflejaba en el
-    // albarán»); si no se leyó con seguridad, el del artículo de STEL; si no hay ninguno, vacío para la oficina.
-    const precio = Number(m.precio_papel) > 0 ? Number(m.precio_papel) : (a?.precio ?? null);
+    // Materiales comprados (usuario, 2026-11-23): coste NETO con los descuentos del albarán del proveedor (solo si la línea
+    // cuadraba) más el margen. Sin ese neto, el precio queda vacío: «Precios de materiales (compra + margen)» lo trae del
+    // precio de compra de STEL. Nunca el PRECIO bruto del papel (no lleva los descuentos).
+    const coste = Number(m.precio_neto) > 0 ? Number(m.precio_neto) : null;
     lineas.push({tipo: "MATERIAL", material_id: m.id, stel_item_id: a ? a.stel_id : (m.stel_item_id ?? null),
       descripcion: [m.descripcion, m.referencia ? `Ref. ${m.referencia}` : ""].filter(Boolean).join(" "),
-      cantidad: Number(m.cantidad) || null, precio, descuento_pct: 0, iva_pct: a?.iva_pct ?? 21});
+      cantidad: Number(m.cantidad) || null, precio: coste !== null ? precioVenta(coste, margen) : null, descuento_pct: 0, iva_pct: a?.iva_pct ?? 21,
+      ...(coste !== null ? {coste, coste_origen: "albarán del proveedor (con descuentos)", margen_pct: margen} : {})});
   }
   const servicio = (clave) => porId.get(Number(ajustes?.[clave])) || null;
   const precioHora = (clave, s) => {
