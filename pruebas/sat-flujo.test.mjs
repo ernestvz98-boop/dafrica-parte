@@ -394,6 +394,16 @@ test("SAT: materiales del albarán del proveedor → se usan o se dan de alta en
   assert.deepEqual(rc.recalculado.sin_coste, ["m1"]);
   assert.deepEqual(e.stel.datos.workDeliveryNotes.at(-1).lines.map((l) => l["item-base-price"]).slice(0, 3), [41, 0.99, 2.73]);
   assert.deepEqual((await rpc(adm, "sat_parte_detalle", {p_id: parteId})).revision.map((l) => l.precio).slice(0, 3), [41, 0.99, 2.73], "la revisión (y la factura) con los mismos precios");
+  // La oficina corrige un precio a mano en el albarán de STEL: «Traer precios corregidos» lo pasa a la revisión (y a la factura).
+  const enStel = e.stel.datos.workDeliveryNotes.at(-1).lines[1];
+  enStel["item-base-price"] = 1.1; enStel["discount-percentage"] = 10;
+  const ds = await (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + adm, "Content-Type": "application/json", Origin: e.origen},
+    body: JSON.stringify({accion: "precios_desde_stel", parte_id: parteId})})).json();
+  assert.equal(ds.ok, true, JSON.stringify(ds));
+  // También la cantidad: la revisión de la prueba tenía 1 en la tercera línea y el albarán (como el parte) 2.
+  assert.deepEqual(ds.cambios.map((x) => [x.antes.cantidad, x.ahora.cantidad, x.antes.precio, x.ahora.precio, x.ahora.dto]), [[1, 1, 0.99, 1.1, 10], [1, 2, 2.73, 2.73, 0]]);
+  const rev3 = (await rpc(adm, "sat_parte_detalle", {p_id: parteId})).revision[1];
+  assert.deepEqual([rev3.precio, rev3.descuento_pct, rev3.coste_origen], [1.1, 10, "corregido en el albarán de STEL"]);
   // Parte duplicado: no se borra nada si no está marcado NO FACTURABLE; marcado, se borra su albarán y su incidencia.
   const llamarBorrar = async () => (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + adm, "Content-Type": "application/json", Origin: e.origen},
     body: JSON.stringify({accion: "borrar_albaran", parte_id: parteId})}));

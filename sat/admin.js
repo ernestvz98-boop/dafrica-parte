@@ -130,8 +130,8 @@ async function detalle(raiz, id) {
         <button type="button" class="eleccion" data-art="${i}" style="margin:4px 0">${l.stel_item_id ? esc((precios.find((p) => Number(p.stel_id) === Number(l.stel_item_id)) || {}).nombre || "Artículo " + l.stel_item_id) : "<b>Elegir artículo de STEL…</b>"}</button>
         <input data-l="${i}" data-k="descripcion" value="${esc(l.descripcion)}" placeholder="Descripción"></td>
         <td><input data-l="${i}" data-k="cantidad" inputmode="decimal" value="${esc(l.cantidad ?? "")}" style="width:72px"></td>
-        <td><input data-l="${i}" data-k="precio" inputmode="decimal" value="${esc(l.precio ?? "")}" style="width:90px" class="${l.precio === null || l.precio === "" ? "dudoso" : ""}">
-          ${Number(l.coste) > 0 ? `<div class="suave peq" title="${esc(l.coste_origen || "")}">coste ${euros(l.coste)} + ${esc(l.margen_pct ?? margenDe(aj))} %</div>` : ""}</td>
+        <td><input data-l="${i}" data-k="precio" inputmode="decimal" value="${esc(l.precio ?? "")}" style="width:90px" class="${l.precio === null || l.precio === "" || l.coste_dudoso ? "dudoso" : ""}">
+          ${Number(l.coste) > 0 ? `<div class="suave peq" title="${esc(l.coste_origen || "")}">coste ${euros(l.coste)} + ${esc(l.margen_pct ?? margenDe(aj))} %${l.coste_dudoso ? ` <span class="chip ambar">sin comprobar</span>` : ""}</div>` : ""}</td>
         <td><input data-l="${i}" data-k="descuento_pct" inputmode="decimal" value="${esc(l.descuento_pct ?? 0)}" style="width:64px"></td>
         <td><input data-l="${i}" data-k="iva_pct" inputmode="decimal" value="${esc(l.iva_pct ?? "")}" style="width:64px"></td>
         <td class="num">${euros(totalLinea(l))}</td><td><button type="button" class="boton mini sec" data-quitar="${i}">✕</button></td></tr>`).join("")}
@@ -140,12 +140,14 @@ async function detalle(raiz, id) {
       ${lineasIncompletas(lineas).length ? `<div class="alerta ambar">${lineasIncompletas(lineas).length} línea(s) sin artículo de STEL, cantidad, precio o IVA.</div>` : ""}
       ${editableEco ? `<div class="fila"><button type="button" class="boton sec mini" id="bLinea">＋ Línea</button><button type="button" class="boton sec mini" id="bProponer">Proponer desde el parte</button>
         ${lineas.some((l) => l.tipo === "MATERIAL" && l.material_id) ? `<button type="button" class="boton sec mini" id="bMargen">Precios de materiales (compra + ${esc(margenDe(aj))} %)</button>` : ""}
+        ${d.stel_albaran_ref && d.revision ? `<button type="button" class="boton sec mini" id="bDesdeStel">Traer precios corregidos en ${esc(d.stel_albaran_ref)}</button>` : ""}
         <button type="button" class="boton crece" id="bGuardarEco">Guardar revisión</button></div>
         <p class="suave peq">Materiales: coste neto con los descuentos del albarán del proveedor (o el precio de compra de STEL) más el ${esc(margenDe(aj))} %.${d.stel_albaran_ref ? ` El botón también actualiza las líneas, la forma de pago y la cuenta del albarán ${esc(d.stel_albaran_ref)}.` : ""}</p>` : ""}`;
     if (!editableEco) { $$("input, select, .eleccion, [data-quitar]", eco).forEach((x) => { x.disabled = true; }); return; }
     $$("[data-l]", eco).forEach((el) => el.addEventListener("change", () => {
       const l = lineas[Number(el.dataset.l)], k = el.dataset.k;
       l[k] = ["cantidad", "precio", "descuento_pct", "iva_pct"].includes(k) ? (el.value.trim() === "" ? null : Number(el.value.replace(",", "."))) : el.value;
+      if (k === "precio" && l.coste_dudoso) { l.coste_dudoso = false; l.coste_origen = "precio puesto por la oficina"; }
       pintarEco();
     }));
     $$("[data-art]", eco).forEach((b) => b.onclick = async () => {
@@ -166,6 +168,15 @@ async function detalle(raiz, id) {
         const r = await funcion("sat-stel", {accion: "recalcular_materiales", parte_id: id});
         const sin = r.recalculado?.sin_coste || [];
         avisar(`${r.recalculado?.materiales?.length || 0} material(es) a coste + ${r.recalculado?.margen} %${r.albaran ? ` · albarán ${r.albaran} actualizado` : ""}${sin.length ? ` · sin coste: ${sin.join(", ")}` : ""}.`, {ms: 9000, error: sin.length > 0});
+      } catch (e) { avisar(e.message, {error: true}); }
+      ctx.render();
+    });
+    $("#bDesdeStel")?.addEventListener("click", async (ev) => {
+      ev.target.disabled = true; ev.target.textContent = "Leyendo STEL…";
+      try {
+        const r = await funcion("sat-stel", {accion: "precios_desde_stel", parte_id: id});
+        avisar(r.cambios.length ? `${r.cambios.length} línea(s) actualizadas con lo corregido en ${r.albaran}: ${r.cambios.map((x) => `${x.descripcion} ${euros(x.antes.precio)} → ${euros(x.ahora.precio)}${x.ahora.dto ? " −" + x.ahora.dto + "%" : ""}`).join(" · ")}`
+          : `Sin cambios: la revisión ya coincide con ${r.albaran}.`, {ms: 10000});
       } catch (e) { avisar(e.message, {error: true}); }
       ctx.render();
     });

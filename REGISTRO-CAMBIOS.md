@@ -3,6 +3,19 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-23 · DAFRICA SAT 0.3.9: precio estimado si no cuadra; corregir en la app o en STEL (sat-stel v9)
+
+- Usuario: «que de igual manera intente rellenar y ya si existe error se modifica, o el técnico o en el STEL Order».
+- Sin neto comprobado (la línea no cuadra con su importe), el lector ESTIMA el coste con lo leído: importe ÷ cantidad (ya
+  lleva los descuentos) o, si no encaja, precio − descuento leído (`precio_neto_estimado`, `neto_estimado_como`). Orden del
+  coste: neto comprobado → precio de compra de STEL → estimado. Lo estimado va en ámbar «sin comprobar» en la revisión y en los
+  comentarios PRIVADOS del albarán de trabajo; nunca se usa como precio de compra de un artículo nuevo de STEL.
+- Técnico: cada línea del albarán del proveedor enseña precio y descuento leídos; «Corregir» deja copiarlos del papel
+  («60+10» en cascada) y el neto queda comprobado por él. No salen en el PDF ni en la firma.
+- Oficina: «Traer precios corregidos en ABT…» (acción `precios_desde_stel`) pasa a la revisión la cantidad, el precio y el
+  descuento de cada línea corregida a mano en el albarán de trabajo de STEL, para que la factura salga igual. Solo lee STEL.
+- Verificado: `npm run test:sat` (27) y `npm test` (358), con datos ficticios.
+
 ## 2026-11-23 · DAFRICA SAT 0.3.8: materiales a coste neto + 30 % y cobro por transferencia (sat-stel v8)
 
 - Usuario: «a todos los materiales que se compren le pongas un 30 % por encima del precio y también tiene que revisar que

@@ -1,5 +1,6 @@
 // DAFRICA SAT · contenido del parte (lo que se firma) y comprobaciones antes de firmar.
 // El contenido NO lleva importes: firmar la intervención no supone aceptar precios.
+import {camposDePrecio} from "./materiales-albaran.js";
 
 export const TIPOS_VISITA = {
   DIAGNOSTICO: "Visita de diagnóstico",
@@ -154,7 +155,7 @@ export function contenidoRapido(c, {textos, organizar, materialesAlbaran = [], h
   const leidos = materialesAlbaran.filter((m) => Number(m.cantidad) > 0 && m.descripcion && (!(m.dudas || []).length || m.confirmado)).map((m) => ({id: m.id || id(), descripcion: m.descripcion,
     referencia: m.referencia || "", cantidad: m.cantidad, unidad: m.unidad || "ud", stel_item_id: m.stel_item_id ?? null, dudas: m.confirmado ? [] : (m.dudas || []),
     ...(m.confirmado ? {comprobado: "TECNICO"} : {}),
-    ...(Number(m.precio_papel) > 0 ? {precio_papel: Number(m.precio_papel)} : {}), ...(Number(m.precio_neto) > 0 ? {precio_neto: Number(m.precio_neto)} : {}),
+    ...camposDePrecio(m),
     ...(m.dicho ? {dicho: m.dicho} : {}), origen: m.origen || "ALBARAN_PROVEEDOR"}));
   n.materiales = [...leidos, ...dictados];
   if (horaFin) n.hora_fin = horaFin; // hora a la que se presenta a la firma
