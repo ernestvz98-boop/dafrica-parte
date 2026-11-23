@@ -543,7 +543,7 @@ function leerTablaPagina(pagina){
  const asignar=linea=>{
   const celdas={},conflictos=[];let partida=false,textoEstimado=false;
   let ultimoTexto=null;
-  for(const c of linea.celdas.filter(c=>c.x1>=xMinTabla).flatMap(partir)){
+  for(const c of linea.celdas.filter(c=>c.x1>=xMinTabla&&!ruidoMargen(c)).flatMap(partir)){
    if(c.partida)partida=true;
    if(c.partida&&["referencia","descripcion"].includes(c.campoPartida))textoEstimado=true;
    let campo=c.campoPartida||columnaDe(c,cols)?.campo||"otra";
@@ -588,6 +588,18 @@ function leerTablaPagina(pagina){
  const altoFila=pagina.lineas[cab.indice].alto;
  // Lo que queda claramente a la izquierda de la primera columna no pertenece a la tabla.
  const xMinTabla=Math.min(...cab.columnas.map(c=>c.x0))-3*altoFila;
+ // Texto vertical del margen (foto real, 2026-11-23: trozos «585» y «255» leídos justo antes del código, que se quedaban
+ // como referencia y mandaban el código real a la descripción, y una fila fantasma). Es ruido solo si TODO se cumple: está
+ // a la izquierda de todos los títulos de la tabla, termina claramente antes de donde empiezan los códigos de las filas
+ // (mediana de al menos 3 filas) y es corto (4 caracteres como mucho). Una columna con título (nº de línea) no se toca.
+ const xIniTabla=Math.min(...cab.columnas.map(c=>c.x0));
+ const iniciosCodigo=pagina.lineas.slice(cab.hasta+1,cab.hasta+40)
+  .map(l=>l.celdas.find(c=>{const t=String(c.texto).trim().split(/\s+/)[0];return c.x1>=xMinTabla&&/^[A-Z0-9][A-Z0-9.\/-]{3,}$/i.test(t)&&/\d/.test(t);})?.x0)
+  .filter(v=>v!=null).sort((a,b)=>a-b);
+ const xCodigo=iniciosCodigo.length>=3?iniciosCodigo[Math.floor(iniciosCodigo.length/2)]:null;
+ function ruidoMargen(c){
+  return xCodigo!=null&&c.x1<xIniTabla-0.5*altoFila&&c.x1<xCodigo-1.5*altoFila&&String(c.texto).trim().length<=4;
+ }
  let actual=null,fin=false,anotacion=false,yAnterior=pagina.lineas[cab.hasta].y;
  for(const linea of pagina.lineas.slice(cab.hasta+1)){
   if(fin){
@@ -609,6 +621,11 @@ function leerTablaPagina(pagina){
     if(!esManuscrita(linea)&&celdas.cantidad&&pareceNumero(celdas.cantidad.texto)&&(celdas.referencia||celdas.descripcion)&&
       (celdas.referencia||celdas.precio||celdas.importe)&&linea.texto.split(/\s+/).length<=14)dudosasTrasFin.push(linea.texto);
    }
+   continue;
+  }
+  // Renglón que solo es ruido del margen: se registra y no es una fila.
+  if(linea.celdas.length&&linea.celdas.every(ruidoMargen)){
+   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Texto del margen, fuera de la tabla"});
    continue;
   }
   if(evaluarCabecera(linea.celdas).valida){ // cabecera repetida: se registra, nunca se pierde en silencio
@@ -1411,5 +1428,5 @@ function celdasEtiqueta(pagina,campo){
  return out;
 }
 
-return {VERSION,UMBRAL_FIABLE,restituirGlifos,extraerPdf,extraerDePaginas,finalizar,leerTablaPagina,identificarProveedor,cuadre,celdasEtiqueta};
+return {VERSION,UMBRAL_FIABLE,restituirGlifos,extraerPdf,extraerDePaginas,finalizar,leerTablaPagina,identificarProveedor,cuadre,celdasEtiqueta,campoDe};
 });
