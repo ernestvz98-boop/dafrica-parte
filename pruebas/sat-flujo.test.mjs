@@ -484,3 +484,31 @@ test("SAT: forma de pago y cuenta obligatorias; «pagos» las busca en STEL (una
   const wdn = e.stel.datos.workDeliveryNotes.at(-1);
   assert.deepEqual([wdn["payment-option-id"], wdn["bank-account-id"]], [e.semilla.fp.id, e.semilla.cb.id]);
 });
+
+test("SAT: el técnico descarta un parte sin enviar (duplicado); no el de otro ni uno enviado", {timeout: 120000}, async (t) => {
+  const e = await crearEmulador({demo: true});
+  t.after(() => e.cerrar());
+  const tec = await e.entrar("tecnico@prueba.local"), tec2 = await e.entrar("tecnico2@prueba.local"), adm = await e.entrar("admin@prueba.local");
+  const llamar = async (tok, fn, args) => {
+    const r = await fetch(`${e.origen}/rest/v1/rpc/${fn}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json"}, body: JSON.stringify(args)});
+    const x = await r.text(); return {status: r.status, datos: x ? JSON.parse(x) : null};
+  };
+  const rpc = async (tok, fn, args) => { const r = await llamar(tok, fn, args); assert.equal(r.status, 200, fn + ": " + JSON.stringify(r.datos)); return r.datos; };
+  const cli = (await rpc(tec, "sat_catalogo", {})).clientes[0];
+  // El técnico crea él mismo el aviso dos veces (como en el primer parte real) y su parte.
+  const aviso = {id: uuid(), motivo: "Intervención", prioridad: "NORMAL", cliente_id: cli.id, cliente_texto: cli.nombre};
+  await rpc(tec, "sat_aviso_guardar", {p: aviso});
+  const contenido = {tipo_visita: null, fecha: "2026-11-23", cliente: {id: cli.id, stel_id: cli.stel_id, nombre: cli.nombre}, modo: "RAPIDO", materiales: [], fotos: []};
+  const parteId = uuid();
+  await rpc(tec, "sat_parte_guardar", {p_parte: {id: parteId, aviso_id: aviso.id, contenido}});
+  assert.equal((await llamar(tec2, "sat_parte_descartar", {p_id: parteId})).status, 403, "otro técnico no puede");
+  const r = await rpc(tec, "sat_parte_descartar", {p_id: parteId});
+  assert.deepEqual([r.descartado, r.aviso_estado], [true, "ANULADO"], "el aviso que creó el técnico, sin partes, queda anulado");
+  assert.equal((await rpc(tec, "sat_parte_descartar", {p_id: parteId})).ya_no_existia, true, "repetirlo no falla (cola del teléfono)");
+  assert.equal((await rpc(adm, "sat_partes_listar", {p_estado: null})).some((p) => p.id === parteId), false);
+  // Un aviso de la oficina vuelve a ASIGNADO al descartar su único parte.
+  const avisoOf = (await rpc(tec, "sat_avisos_listar", {})).find((a) => a.origen === "ADMINISTRACION" && a.tecnico_id);
+  const p2 = uuid();
+  await rpc(tec, "sat_parte_guardar", {p_parte: {id: p2, aviso_id: avisoOf.id, contenido: {...contenido, cliente: {id: avisoOf.cliente_id, nombre: avisoOf.cliente_texto}}}});
+  assert.equal((await rpc(tec, "sat_parte_descartar", {p_id: p2})).aviso_estado, "ASIGNADO");
+});

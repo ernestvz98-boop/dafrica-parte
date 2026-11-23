@@ -46,6 +46,7 @@ const TAREAS = {
       q.firmas = q.firmas.map((x) => x.id === firma_id ? {...x, servidor: {valida: r.valida, motivo: r.invalidada_motivo}} : x);
     });
   },
+  async DESCARTAR({parte_id}) { await rpc("sat_parte_descartar", {p_id: parte_id}); },
   async ENVIAR({parte_id, pdf_path, sha}) {
     const r = await rpc("sat_parte_enviar", {p_id: parte_id, p_pdf_path: pdf_path, p_pdf_sha256: sha});
     await partes.modificar(parte_id, (q) => { q.estadoServidor = r.estado; q.codigo = r.codigo; });
@@ -97,6 +98,23 @@ export async function reintentarTodo() {
   await procesar();
 }
 export async function descartar(n) { await cola.quitar(n); await avisar(); }
+
+/**
+ * Descarta un parte SIN ENVIAR (usuario, 2026-11-23: partes duplicados): se quita del teléfono con sus fotos, audios y firmas,
+ * se quitan sus tareas pendientes de subir (para que no se vuelva a crear) y se pide al servidor que lo borre. Si su aviso se
+ * creó en este teléfono, no ha subido aún y no tiene otro parte, tampoco se sube (`quitarAviso`).
+ */
+export async function descartarParte(parteId, {avisoId = null, quitarAviso = false} = {}) {
+  const suyos = await archivos.deParte(parteId);
+  const ids = new Set(suyos.map((a) => a.id));
+  for (const t of await cola.todas()) {
+    const d = t.datos || {};
+    if (d.parte_id === parteId || (t.tipo === "ARCHIVO" && ids.has(d.archivo_id)) || (quitarAviso && t.tipo === "AVISO" && d.aviso?.id === avisoId)) await cola.quitar(t.n);
+  }
+  for (const a of suyos) await archivos.borrar(a.id);
+  await partes.borrar(parteId);
+  await poner("DESCARTAR", "descartar:" + parteId, {parte_id: parteId});
+}
 export function arrancar() {
   window.addEventListener("online", () => { sinConexion = false; procesar(); });
   window.addEventListener("offline", () => { sinConexion = true; avisar(); });
