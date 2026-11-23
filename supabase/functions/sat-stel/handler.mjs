@@ -58,34 +58,72 @@ function aBase64(bytes) {
 const primero = (v) => (Array.isArray(v) ? v[0] : v) || null;
 const idDe = (v) => { const x = primero(v); const n = Number(x?.id); return Number.isSafeInteger(n) && n > 0 ? n : null; };
 const horas = (min) => Math.round((Number(min) || 0) / 60 * 100) / 100;
+const redondear2 = (x) => Math.round((Number(x) + Number.EPSILON) * 100) / 100;
 
 /**
- * Líneas del albarán de trabajo a partir del parte (lo que hizo el técnico, sin precios: los pone administración
- * en la factura). Cada línea necesita un artículo o servicio de STEL; si falta alguno, devuelve `faltan`.
+ * Margen de los materiales comprados (usuario, 2026-11-23: «a todos los materiales que se compren le pongas un 30 % por
+ * encima del precio»): ajuste `margen_materiales_pct`, 30 si no está.
  */
-export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map()) {
+export function margenDe(ajustes) {
+  const v = ajustes?.margen_materiales_pct;
+  return v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 30;
+}
+/** Precio de venta de un material: su coste NETO (con los descuentos) más el margen, a céntimos. */
+export function precioVenta(coste, margen) { return redondear2(Number(coste) * (1 + Number(margen) / 100)); }
+/** Coste de un material: el neto del albarán del proveedor (la línea cuadraba con sus descuentos); si no, el de compra de STEL. */
+export function costeDe(m, costesStel = new Map()) {
+  if (Number(m?.precio_neto) > 0) return {coste: Number(m.precio_neto), origen: "albarán del proveedor (con descuentos)"};
+  const c = Number(costesStel.get(m?.id));
+  return c > 0 ? {coste: c, origen: "precio de compra en STEL"} : null;
+}
+const esDelProveedor = (m) => (typeof m?.origen === "object" && m.origen ? m.origen.tipo : m?.origen) === "ALBARAN_PROVEEDOR";
+/**
+ * Forma de pago y cuenta bancaria de STEL de todos los albaranes de trabajo y facturas (usuario, 2026-11-23: «en forma de
+ * pago siempre tiene que ser transferencia y cuenta bancaria la terminada en …»). Sin las dos, null: el documento se para.
+ */
+export function pagoDe(ajustes) {
+  const fp = Number(ajustes?.stel_forma_pago_id), cb = Number(ajustes?.stel_cuenta_bancaria_id);
+  return Number.isSafeInteger(fp) && fp > 0 && Number.isSafeInteger(cb) && cb > 0 ? {"payment-option-id": fp, "bank-account-id": cb} : null;
+}
+export const FALTA_PAGO = "Falta: forma de pago y cuenta bancaria (Ajustes)";
+
+/**
+ * Líneas del albarán de trabajo a partir del parte. Cada línea necesita un artículo o servicio de STEL; si falta alguno,
+ * devuelve `faltan`. `costesStel`: precio de compra en STEL de los materiales sin neto del papel (id del material → €).
+ */
+export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map(), costesStel = new Map()) {
   const lineas = [], faltan = [];
   const porMaterial = new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id]));
-  // Precio de cada línea (usuario, 2026-11-20: «que actualice los precios»): el de la revisión de la oficina si la hay; si no,
-  // el PRECIO del albarán del proveedor (materiales) o el precio por hora de Ajustes (mano de obra y desplazamiento).
+  // Precio de cada línea: el de la revisión de la oficina si la hay; si no, materiales a su coste neto más el margen
+  // (usuario, 2026-11-23) y mano de obra y desplazamiento al precio por hora de Ajustes.
   const precioRevision = (pred) => { const l = (revision || []).find(pred); return l && Number(l.precio) >= 0 && l.precio !== null && l.precio !== "" ? Number(l.precio) : null; };
   const conPrecio = (p) => (p !== null && Number.isFinite(p) && p >= 0 ? {"item-base-price": p} : {});
+  const margen = margenDe(ajustes);
   for (const m of contenido.materiales || []) {
     const item = m.stel_item_id || porMaterial.get(m.id) || resueltos.get(m.id);
     const cantidad = Number(m.cantidad);
     if (!item) { faltan.push(`artículo de STEL para «${m.descripcion}»`); continue; }
     if (!Number.isFinite(cantidad) || cantidad === 0) { faltan.push(`cantidad de «${m.descripcion}»`); continue; }
     const desc = [m.descripcion, m.referencia ? `Ref. ${m.referencia}` : "", m.unidad ? `(${m.unidad})` : ""].filter(Boolean).join(" ");
-    const precio = precioRevision((l) => l.material_id === m.id) ?? (Number(m.precio_papel) > 0 ? Number(m.precio_papel) : null);
-    lineas.push({"line-type": "ITEM", "item-id": Number(item), "units": cantidad, "item-description": desc, ...conPrecio(precio)});
+    let precio = precioRevision((l) => l.material_id === m.id), dto = 0;
+    if (precio !== null) dto = Number((revision || []).find((l) => l.material_id === m.id)?.descuento_pct) || 0;
+    else {
+      const c = costeDe(m, costesStel);
+      // Comprado al proveedor sin coste con descuentos comprobado: nunca el PRECIO bruto del papel (no lleva los descuentos).
+      if (!c && esDelProveedor(m)) { faltan.push(`precio de compra con descuentos de «${m.descripcion}» (escríbelo en la revisión)`); continue; }
+      if (c) precio = precioVenta(c.coste, margen);
+    }
+    // El descuento de la revisión también va al albarán (antes se perdía); el coste + margen ya lleva los del proveedor.
+    lineas.push({"line-type": "ITEM", "item-id": Number(item), "units": cantidad, "item-description": desc, ...conPrecio(precio), ...(precio !== null ? {"discount-percentage": dto} : {})});
   }
   const servicio = (clave) => { const v = ajustes?.[clave]; return Number.isSafeInteger(Number(v)) && Number(v) > 0 ? Number(v) : null; };
+  const dtoRevision = (tipo) => { const d = Number((revision || []).find((l) => l.tipo === tipo && l.precio !== null && l.precio !== "")?.descuento_pct); return d > 0 ? {"discount-percentage": d} : {}; };
   const porHora = (tipo, clave) => precioRevision((l) => l.tipo === tipo) ?? (Number(ajustes?.[clave]) > 0 ? Number(ajustes[clave]) : null);
   if (Number(contenido.tiempo_trabajo_min) > 0) {
     const id = servicio("stel_servicio_mano_obra_id");
     if (!id) faltan.push("servicio de mano de obra de STEL (Ajustes)");
     else lineas.push({"line-type": "ITEM", "item-id": id, "units": horas(contenido.tiempo_trabajo_min),
-      "item-description": `Mano de obra: ${String(horas(contenido.tiempo_trabajo_min)).replace(".", ",")} h`, ...conPrecio(porHora("MANO_OBRA", "precio_hora_mano_obra"))});
+      "item-description": `Mano de obra: ${String(horas(contenido.tiempo_trabajo_min)).replace(".", ",")} h`, ...conPrecio(porHora("MANO_OBRA", "precio_hora_mano_obra")), ...dtoRevision("MANO_OBRA")});
   }
   if (Number(contenido.desplazamiento_min) > 0 || Number(contenido.desplazamiento_km) > 0) {
     // En horas (usuario, 2026-11-18: «el desplazamiento y el tiempo de mano de obra en horas»); solo km: 1 desplazamiento.
@@ -94,7 +132,7 @@ export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map(
     const partes = [h ? `${String(h).replace(".", ",")} h` : "", Number(contenido.desplazamiento_km) > 0 ? `${contenido.desplazamiento_km} km` : ""].filter(Boolean).join(", ");
     if (!id) faltan.push("servicio de desplazamiento de STEL (Ajustes)");
     else lineas.push({"line-type": "ITEM", "item-id": id, "units": h || 1, "item-description": `Desplazamiento: ${partes}`,
-      ...conPrecio(porHora("DESPLAZAMIENTO", "precio_hora_desplazamiento"))});
+      ...conPrecio(porHora("DESPLAZAMIENTO", "precio_hora_desplazamiento")), ...dtoRevision("DESPLAZAMIENTO")});
   }
   if (!lineas.length && !faltan.length) faltan.push("al menos un material, tiempo de trabajo o desplazamiento");
   return {lineas, faltan};
@@ -259,7 +297,10 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     if (!ctx.cliente?.stel_id) throw new Bloqueo("Cliente provisional: vincúlalo a un cliente de STEL o créalo en STEL");
     const incidente = a.stel_incidencia_id || incidenciasHechas.get(a.id) || null;
     if (!incidente) throw new Espera("Esperando la incidencia de STEL del aviso");
-    // Antes de nada, que no falte un servicio (para no dar de alta artículos de un albarán que no se puede crear todavía).
+    // Antes de nada, que no falte un servicio ni la forma de pago (para no dar de alta artículos de un albarán que no se
+    // puede crear todavía).
+    const pago = pagoDe(ctx.ajustes);
+    if (!pago) throw new Bloqueo(FALTA_PAGO);
     const sinServicio = lineasAlbaran({...c, materiales: []}, p.revision, ctx.ajustes).faltan.filter((f) => /servicio/.test(f));
     if (sinServicio.length) throw new Bloqueo("Falta: " + sinServicio.join("; "));
     // Materiales del albarán del proveedor sin artículo de STEL: se busca o se da de alta (regla del robot de albaranes).
@@ -267,12 +308,13 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     const resueltos = new Map(), altas = [];
     for (const m of c.materiales || []) {
       if (m.stel_item_id || conRevision.has(m.id) || !materialDelProveedor(m)) continue;
-      const r = await articuloParaMaterial(m, p);
+      const r = await articuloParaMaterial(m, p, ctx.ajustes);
       resueltos.set(m.id, r.id);
       if (r.creado) altas.push({material_id: m.id, referencia: String(m.referencia).trim(), nombre: String(m.descripcion).trim().slice(0, 250), stel_id: r.id,
-        ...(Number(m.precio_papel) > 0 ? {precio: Number(m.precio_papel)} : Number(m.precio_neto) > 0 ? {precio: Number(m.precio_neto)} : {})});
+        ...(Number(m.precio_neto) > 0 ? {precio: precioVenta(m.precio_neto, margenDe(ctx.ajustes))} : {})});
     }
-    const {lineas, faltan} = lineasAlbaran(c, p.revision, ctx.ajustes, resueltos);
+    const costes = await costesDeStel(c.materiales, p.revision, resueltos, new Set(altas.map((x) => x.material_id)));
+    const {lineas, faltan} = lineasAlbaran(c, p.revision, ctx.ajustes, resueltos, costes);
     if (faltan.length) throw new Bloqueo("Falta: " + faltan.join("; "));
     const titulo = `${p.codigo} · ${a.motivo}`.slice(0, 150);
     const version = Number(ctx.op.detalle?.version || p.version);
@@ -298,6 +340,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       ...(c.direccion?.stel_id ? {"work-address-id": Number(c.direccion.stel_id)} : {}),
       ...(c.equipo?.stel_id ? {assets: [{id: Number(c.equipo.stel_id)}]} : {}),
       ...(Number(ctx.ajustes?.stel_serie_albaran_trabajo_id) > 0 ? {"serial-number-id": Number(ctx.ajustes.stel_serie_albaran_trabajo_id)} : {}),
+      ...pago,
       lines: lineas,
     };
     let id, accion;
@@ -347,7 +390,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
    * → se usa; si no, se da de alta con nombre, referencia y, si la línea cuadraba, el precio neto como compra y venta base
    * (regla del robot, usuario 2026-10-30). Reintentar no duplica: la siguiente vez lo encuentra por la referencia.
    */
-  async function articuloParaMaterial(m, p) {
+  async function articuloParaMaterial(m, p, ajustes) {
     const ref = String(m.referencia).trim(), nombre = String(m.descripcion).trim().slice(0, 250);
     const porRef = lista(await stel("GET", "products", {query: {reference: ref, limit: 20}})).filter((x) => mismaReferencia(x.reference, ref));
     if (porRef.length > 1) throw new Bloqueo(`La referencia ${ref} está ${porRef.length} veces en STEL: elige el artículo en la revisión`);
@@ -355,13 +398,13 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     const porNombre = lista(await stel("GET", "products", {query: {name: nombre, limit: 20}})).filter((x) => canonRef(x.name) === canonRef(nombre));
     if (porNombre.length > 1) throw new Bloqueo(`«${nombre}» está ${porNombre.length} veces en STEL: elige el artículo en la revisión`);
     if (porNombre.length === 1) return {id: idDe(porNombre), creado: false};
-    // Precios (usuario, 2026-11-20): compra = neto del albarán del proveedor (con descuentos, si la línea cuadraba); venta =
-    // PRECIO del papel; sin PRECIO leído, la venta es el neto; sin ninguno, sin precio.
-    const neto = Number(m.precio_neto), papel = Number(m.precio_papel);
+    // Precios: compra = neto del albarán del proveedor (con descuentos, si la línea cuadraba); venta = ese neto más el margen
+    // (usuario, 2026-11-23: 30 %). Sin neto comprobado, sin precios (nunca el PRECIO bruto del papel, que no lleva descuentos).
+    const neto = Number(m.precio_neto);
     const o = typeof m.origen === "object" && m.origen ? m.origen : {};
     // La referencia es la del papel: serie MANUAL (-2), si no STEL rechaza las que llevan letras o pone la suya (E000191).
     const creado = await stel("POST", "products", {body: {name: nombre, reference: ref, "serial-number-id": -2,
-      ...(neto > 0 ? {"purchase-price": neto} : {}), ...(papel > 0 ? {"sales-price": papel} : neto > 0 ? {"sales-price": neto} : {}),
+      ...(neto > 0 ? {"purchase-price": neto, "sales-price": precioVenta(neto, margenDe(ajustes))} : {}),
       "private-comments": `Alta de DAFRICA SAT ${p.codigo}: albarán del proveedor ${[o.proveedor, o.numero].filter(Boolean).join(" ")}`.slice(0, 500)}});
     let id = idDe(creado);
     if (!id) id = idDe(lista(await stel("GET", "products", {query: {reference: ref, limit: 5}})).filter((x) => mismaReferencia(x.reference, ref)));
@@ -369,10 +412,30 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     return {id, creado: true};
   }
 
+  /**
+   * Precio de compra en STEL de los materiales que no traen el neto del papel ni precio en la revisión y ya tienen
+   * artículo (los recién dados de alta sin neto no tienen precio de compra: no se piden).
+   */
+  async function costesDeStel(materiales, revision, resueltos = new Map(), recienCreados = new Set()) {
+    const conPrecio = new Set((revision || []).filter((l) => l.material_id && l.precio !== null && l.precio !== "" && Number(l.precio) >= 0).map((l) => l.material_id));
+    const porMaterial = new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id]));
+    const costes = new Map(), leidos = new Map();
+    for (const m of materiales || []) {
+      if (Number(m.precio_neto) > 0 || conPrecio.has(m.id) || recienCreados.has(m.id)) continue;
+      const item = Number(m.stel_item_id || porMaterial.get(m.id) || resueltos.get(m.id));
+      if (!(item > 0)) continue;
+      if (!leidos.has(item)) leidos.set(item, Number(primero(lista(await stel("GET", `products/${item}`)))?.["purchase-price"]));
+      if (leidos.get(item) > 0) costes.set(m.id, leidos.get(item));
+    }
+    return costes;
+  }
+
   async function factura(ctx) {
     const p = ctx.parte, f = ctx.factura;
     if (!f) throw new Bloqueo("La factura no está aprobada");
     if (!p.stel_albaran_id) throw new Espera("Esperando el albarán de trabajo en STEL");
+    const pago = pagoDe(ctx.ajustes);
+    if (!pago) throw new Bloqueo(FALTA_PAGO);
     let doc = null, accion;
     if (f.stel_factura_id) doc = primero(lista(await stel("GET", `ordinaryInvoices/${f.stel_factura_id}`)));
     if (!doc) {
@@ -388,7 +451,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       const creada = await stel("POST", "ordinaryInvoices", {body: {"account-id": Number(ctx.cliente.stel_id), "parent-document-id": Number(p.stel_albaran_id),
         ...(ctx.aviso.stel_incidencia_id ? {"parent-incident-id": Number(ctx.aviso.stel_incidencia_id)} : {}),
         title: `${p.codigo} · ${ctx.aviso.motivo}`.slice(0, 150), "private-comments": `DAFRICA SAT ${p.codigo} · factura aprobada el ${String(f.aprobado_en).slice(0, 10)}`,
-        lines: lineas}});
+        ...pago, lines: lineas}});
       const id = idDe(creada);
       if (!id) throw new Error("STEL no devolvió el id de la factura (se buscará en el siguiente intento)");
       doc = primero(lista(await stel("GET", `ordinaryInvoices/${id}`))) || {id};
@@ -499,12 +562,36 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       return responder({ok: true, servicios: hechos, llamadas});
     }
 
-    if (["borrar_albaran", "precios_albaran", "precio_articulo"].includes(cuerpo.accion)) {
+    if (["borrar_albaran", "precios_albaran", "precio_articulo", "pagos", "recalcular_materiales"].includes(cuerpo.accion)) {
       // Acciones de oficina (usuario, 2026-11-20: «quiero un solo albarán, no dos, y que actualice los precios»). Solo con
       // sat.administrar, comprobado con la sesión de la persona.
       if ((await rpc("tiene_permiso", {permiso_codigo: "sat.administrar"}, {usuario: true})) !== true) return responder({error: "Solo administración"}, 403);
       hechasHoy = Number(await rpc("sat_stel_sumar_llamadas", {p_n: 0})) || 0;
       const fin = async (datos) => { await rpc("sat_stel_sumar_llamadas", {p_n: llamadas}); return responder({ok: true, ...datos, llamadas}); };
+      if (cuerpo.accion === "pagos") {
+        // Forma de pago y cuenta bancaria de todos los documentos del SAT (usuario, 2026-11-23). Se busca en STEL la forma de
+        // pago por su nombre («transferencia») y la cuenta por sus últimas cifras; solo si cada una es UNA se guardan en
+        // Ajustes (con la sesión de la persona: queda auditado) y los documentos parados por ellas vuelven a la cola.
+        const sinAcentos = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const forma = sinAcentos(cuerpo.forma), cifras = String(cuerpo.cuenta ?? "").replace(/\D/g, "");
+        if (forma.length < 3 || cifras.length < 4) return responder({error: "Escribe la forma de pago y al menos las 4 últimas cifras de la cuenta"}, 400);
+        const opciones = lista(await stel("GET", "paymentOptions", {query: {limit: 100}}));
+        let fp = opciones.filter((o) => sinAcentos(o.name) === forma);
+        if (!fp.length) fp = opciones.filter((o) => sinAcentos(o.name).includes(forma));
+        const cuentas = lista(await stel("GET", "bankAccounts", {query: {limit: 100}}));
+        const cb = cuentas.filter((c) => [c.account, c.name, c.description].some((x) => String(x ?? "").replace(/\D/g, "").endsWith(cifras)));
+        const final4 = (c) => "···" + String(c.account ?? "").replace(/\D/g, "").slice(-4);
+        if (fp.length !== 1) { await rpc("sat_stel_sumar_llamadas", {p_n: llamadas});
+          return responder({error: `${fp.length} formas de pago de STEL encajan con «${cuerpo.forma}». En STEL: ${opciones.map((o) => o.name).join(", ") || "ninguna"}`, formas: opciones.map((o) => o.name)}, 409); }
+        if (cb.length !== 1) { await rpc("sat_stel_sumar_llamadas", {p_n: llamadas});
+          return responder({error: `${cb.length} cuentas bancarias de STEL terminan en ${cifras}. En STEL: ${cuentas.map((c) => `${c.name || "cuenta"} ${final4(c)}`).join(", ") || "ninguna"}`, cuentas: cuentas.map((c) => `${c.name || "Cuenta"} ${final4(c)}`)}, 409); }
+        const descripcion = `${fp[0].name} · ${cb[0].name || "cuenta"} ${final4(cb[0])}`;
+        await rpc("sat_ajuste_guardar", {p_clave: "stel_pago_descripcion", p_valor: descripcion}, {usuario: true});
+        await rpc("sat_ajuste_guardar", {p_clave: "stel_cuenta_bancaria_id", p_valor: idDe(cb)}, {usuario: true});
+        await rpc("sat_ajuste_guardar", {p_clave: "stel_forma_pago_id", p_valor: idDe(fp)}, {usuario: true});
+        return fin({forma_pago: {stel_id: idDe(fp), nombre: fp[0].name}, cuenta: {stel_id: idDe(cb), nombre: cb[0].name || null, final: final4(cb[0])}, descripcion,
+          ...(fp[0]["linked-to-bank-account"] === false ? {aviso: "En STEL esa forma de pago no está ligada a una cuenta bancaria: STEL puede no guardar la cuenta en los documentos"} : {})});
+      }
       if (cuerpo.accion === "precio_articulo") {
         // Precio de compra y de venta base de UN artículo (nunca nombre ni referencia).
         const id = Number(cuerpo.stel_id), compra = Number(cuerpo.compra), venta = Number(cuerpo.venta);
@@ -537,18 +624,47 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
         }
         return fin({borrado});
       }
-      // precios_albaran: las líneas del albarán de trabajo con el precio de la revisión (o del papel / por hora).
+      const aj = (await rpc("sat_ajustes_leer", {}, {usuario: true})) || {};
+      let revision = det.revision;
+      let recalculado = null;
+      if (cuerpo.accion === "recalcular_materiales") {
+        // Materiales de la revisión a su coste NETO (con descuentos: el del albarán del proveedor o, si no, el de compra
+        // en STEL) más el margen (usuario, 2026-11-23). Se guarda la revisión (con la sesión de la persona) y, si el parte ya
+        // tiene albarán de trabajo, se actualizan sus líneas. Lo que no tiene coste queda como estaba y se dice.
+        if (!(revision || []).length) return responder({error: "Guarda primero la revisión económica"}, 409);
+        const margen = margenDe(aj);
+        const mats = new Map((det.contenido?.materiales || []).map((m) => [m.id, m]));
+        const sinPrecio = (revision || []).map((l) => (l.tipo === "MATERIAL" ? {...l, precio: null} : l));
+        const costes = await costesDeStel([...mats.values()], sinPrecio,
+          new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id])));
+        const sinCoste = [];
+        revision = revision.map((l) => {
+          if (l.tipo !== "MATERIAL" || !l.material_id || !mats.has(l.material_id)) return l;
+          const c = costeDe(mats.get(l.material_id), costes);
+          if (!c) { sinCoste.push(l.descripcion); return l; }
+          return {...l, coste: c.coste, coste_origen: c.origen, margen_pct: margen, precio: precioVenta(c.coste, margen), descuento_pct: 0};
+        });
+        await rpc("sat_revision_guardar", {p_id: parteId, p_lineas: revision, p_nota: det.revision_nota ?? null}, {usuario: true});
+        recalculado = {margen, materiales: revision.filter((l) => l.coste_origen).map((l) => ({descripcion: l.descripcion, coste: l.coste, origen: l.coste_origen, precio: l.precio})),
+          sin_coste: sinCoste};
+        if (!det.stel_albaran_id) return fin({recalculado});
+      }
+      // precios_albaran: las líneas del albarán de trabajo con el precio de la revisión (o coste + margen / por hora), y
+      // la forma de pago y la cuenta de Ajustes.
       if (!det.stel_albaran_id) return responder({error: "El parte no tiene albarán de trabajo en STEL"}, 409);
       const doc = primero(lista(await stel("GET", `workDeliveryNotes/${det.stel_albaran_id}`)));
       if (!doc) return responder({error: "El albarán de trabajo ya no está en STEL"}, 404);
-      const aj = (await rpc("sat_ajustes_leer", {}, {usuario: true})) || {};
-      const {lineas, faltan} = lineasAlbaran(det.contenido, det.revision, aj,
-        new Map((det.revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id])));
-      if (faltan.length) return responder({error: "Falta: " + faltan.join("; ")}, 409);
+      const pago = pagoDe(aj);
+      if (!pago) return responder({error: FALTA_PAGO}, 409);
+      const resueltos = new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id]));
+      const {lineas, faltan} = lineasAlbaran(det.contenido, revision, aj, resueltos, await costesDeStel(det.contenido?.materiales, revision, resueltos));
+      if (faltan.length) return responder({error: "Falta: " + faltan.join("; "), ...(recalculado ? {recalculado} : {})}, 409);
       // PUT con «lines» sustituye TODAS las líneas por las que se mandan (especificación de STEL).
-      await stel("PUT", `workDeliveryNotes/${det.stel_albaran_id}`, {body: {lines: lineas}});
+      await stel("PUT", `workDeliveryNotes/${det.stel_albaran_id}`, {body: {...pago, lines: lineas}});
       const final = primero(lista(await stel("GET", `workDeliveryNotes/${det.stel_albaran_id}`)));
-      return fin({albaran: final?.["full-reference"] || null, lineas: (final?.lines || []).map((l) => ({item: l["item-id"], unidades: l.units, precio: l["item-base-price"]}))});
+      return fin({albaran: final?.["full-reference"] || null, forma_pago: final?.["payment-option-id"] ?? null, cuenta: final?.["bank-account-id"] ?? null,
+        total: final?.["total-amount"] ?? null, ...(recalculado ? {recalculado} : {}),
+        lineas: (final?.lines || []).map((l) => ({item: l["item-id"], unidades: l.units, precio: l["item-base-price"], dto: l["discount-percentage"] ?? 0}))});
     }
 
     if (cuerpo.accion !== "procesar") return responder({error: "Acción no válida"}, 400);

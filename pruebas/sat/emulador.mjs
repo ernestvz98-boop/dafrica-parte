@@ -34,12 +34,13 @@ const TIPOS = {".html": "text/html; charset=utf-8", ".js": "text/javascript; cha
   ".css": "text/css; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png",
   ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".ico": "image/x-icon", ".pdf": "application/pdf", ".map": "application/json"};
 
-export async function crearEmulador({puerto = 0, demo = false, registro = () => {}} = {}) {
+export async function crearEmulador({puerto = 0, demo = false, sinPago = false, registro = () => {}} = {}) {
   const db = new PGlite();
   await ejecutarFicheros(db, [path.join(RAIZ, "supabase/tests/sat_simulado.sql"), path.join(RAIZ, "supabase/propuestas/20261116_sat_partes.sql"),
     path.join(RAIZ, "supabase/propuestas/20261118_sat_precio_hora.sql"), path.join(RAIZ, "supabase/propuestas/20261118_sat_parte_rapido.sql"),
     path.join(RAIZ, "supabase/propuestas/20261118_sat_servicios_desbloquean.sql"),
-    path.join(RAIZ, "supabase/propuestas/20261120_sat_articulos_del_proveedor.sql")], {silencioso: true});
+    path.join(RAIZ, "supabase/propuestas/20261120_sat_articulos_del_proveedor.sql"),
+    path.join(RAIZ, "supabase/propuestas/20261123_sat_margen_y_pago.sql")], {silencioso: true});
   for (const u of USUARIOS) {
     await db.query("insert into public.perfiles (id, nombre, email) values ($1, $2, $3)", [u.id, u.nombre, u.email]);
     await db.query("insert into public.usuario_roles (usuario_id, rol_id) select $1, id from public.roles where codigo = $2", [u.id, u.rol]);
@@ -51,6 +52,9 @@ export async function crearEmulador({puerto = 0, demo = false, registro = () => 
   let origen = "";
   const stel = crearStelFalso({clave: "clave-falsa"});
   const semilla = sembrarCatalogo(stel);
+  // Forma de pago y cuenta ya elegidas (como en producción); `sinPago` para probar que sin ellas se para.
+  if (!sinPago) await db.query("insert into public.sat_ajustes (clave, valor) values ('stel_forma_pago_id', $1::jsonb), ('stel_cuenta_bancaria_id', $2::jsonb)",
+    [JSON.stringify(semilla.fp.id), JSON.stringify(semilla.cb.id)]);
 
   // Como PostgREST: el cuerpo JSON se convierte al tipo de cada parámetro de la función.
   const tiposDe = new Map();

@@ -141,6 +141,8 @@ test("SAT: flujo completo de punta a punta con STEL falso", {timeout: 120000}, a
   const fac = e.stel.datos.ordinaryInvoices[0];
   assert.equal(fac["parent-document-id"], wdn.id);
   assert.equal(fac["total-amount"], 150.35);
+  assert.deepEqual([fac["payment-option-id"], fac["bank-account-id"], wdn["payment-option-id"], wdn["bank-account-id"]],
+    [e.semilla.fp.id, e.semilla.cb.id, e.semilla.fp.id, e.semilla.cb.id], "transferencia y la cuenta de Ajustes en albarán y factura");
   assert.equal(r.operaciones[0].detalle.diferencia_total, 0);
   // Creada en STEL pero SIN emitir (emisión por la API desactivada): su PDF nunca va al técnico.
   assert.equal(r.operaciones[0].detalle.emitida, false);
@@ -318,7 +320,7 @@ test("SAT: materiales del albarán del proveedor → se usan o se dan de alta en
   const e = await crearEmulador({demo: true});
   t.after(() => e.cerrar());
   // Artículo que ya existe con el prefijo del proveedor delante de la referencia (como los del robot).
-  const pref = e.stel.sembrar("products", {name: "Enlace junta plana ficticio", reference: "H0000- 6000000001", "sales-price": 1, inactive: false});
+  const pref = e.stel.sembrar("products", {name: "Enlace junta plana ficticio", reference: "H0000- 6000000001", "sales-price": 1, "purchase-price": 2.1, inactive: false});
   const tec = await e.entrar("tecnico@prueba.local"), adm = await e.entrar("admin@prueba.local");
   const rpc = async (tok, fn, args) => {
     const r = await fetch(`${e.origen}/rest/v1/rpc/${fn}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json"}, body: JSON.stringify(args)});
@@ -368,8 +370,8 @@ test("SAT: materiales del albarán del proveedor → se usan o se dan de alta en
   await rpc(adm, "sat_stel_reintentar", {p_op: alb.id ?? (det.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO")).id});
   await fn(adm, {accion: "procesar", parte_id: parteId});
   assert.equal(e.stel.datos.products.filter((x) => x.reference === "1801999999").length, 1);
-  // El artículo nuevo se creó con compra = neto y venta = PRECIO del papel.
-  assert.equal(nuevos[0]["sales-price"], 2);
+  // El artículo nuevo se creó con compra = neto y venta = neto + 30 % (usuario, 2026-11-23), no el PRECIO bruto del papel.
+  assert.equal(nuevos[0]["sales-price"], 0.99);
   // Oficina: precio de un artículo (solo administración) y precios de la revisión en las líneas del albarán de trabajo.
   const sinPermiso = await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + tec, "Content-Type": "application/json", Origin: e.origen},
     body: JSON.stringify({accion: "precio_articulo", stel_id: nuevos[0].id, compra: 1, venta: 2})});
@@ -384,6 +386,14 @@ test("SAT: materiales del albarán del proveedor → se usan o se dan de alta en
     body: JSON.stringify({accion: "precios_albaran", parte_id: parteId})})).json();
   assert.equal(pr.ok, true, JSON.stringify(pr));
   assert.deepEqual(e.stel.datos.workDeliveryNotes.at(-1).lines.map((l) => l["item-base-price"]).slice(0, 4), [41, 1.25, 3.5, 50], "materiales de la revisión; mano de obra sin línea en la revisión: precio por hora de Ajustes");
+  // «Precios de materiales (compra + 30 %)»: neto del papel (0,76) o compra de STEL (2,10); sin coste, como estaba.
+  const rc = await (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + adm, "Content-Type": "application/json", Origin: e.origen},
+    body: JSON.stringify({accion: "recalcular_materiales", parte_id: parteId})})).json();
+  assert.equal(rc.ok, true, JSON.stringify(rc));
+  assert.deepEqual(rc.recalculado.materiales.map((m) => [m.coste, m.precio]), [[0.76, 0.99], [2.1, 2.73]]);
+  assert.deepEqual(rc.recalculado.sin_coste, ["m1"]);
+  assert.deepEqual(e.stel.datos.workDeliveryNotes.at(-1).lines.map((l) => l["item-base-price"]).slice(0, 3), [41, 0.99, 2.73]);
+  assert.deepEqual((await rpc(adm, "sat_parte_detalle", {p_id: parteId})).revision.map((l) => l.precio).slice(0, 3), [41, 0.99, 2.73], "la revisión (y la factura) con los mismos precios");
   // Parte duplicado: no se borra nada si no está marcado NO FACTURABLE; marcado, se borra su albarán y su incidencia.
   const llamarBorrar = async () => (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + adm, "Content-Type": "application/json", Origin: e.origen},
     body: JSON.stringify({accion: "borrar_albaran", parte_id: parteId})}));
@@ -418,4 +428,49 @@ test("SAT: «servicios» crea en STEL mano de obra y desplazamiento por horas un
   const r2 = await fn(adm, {accion: "servicios"});
   assert.deepEqual(r2.servicios.map((s) => s.creado), [false, false], "la segunda vez los reutiliza");
   assert.equal(e.stel.datos.services.filter((s) => s.reference === "MO-HORA").length, 1);
+});
+
+test("SAT: forma de pago y cuenta obligatorias; «pagos» las busca en STEL (una sola) y desbloquea", {timeout: 120000}, async (t) => {
+  const e = await crearEmulador({demo: true, sinPago: true});
+  t.after(() => e.cerrar());
+  const tec = await e.entrar("tecnico@prueba.local"), adm = await e.entrar("admin@prueba.local");
+  const rpc = async (tok, fn, args) => {
+    const r = await fetch(`${e.origen}/rest/v1/rpc/${fn}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json"}, body: JSON.stringify(args)});
+    const x = await r.text(); assert.equal(r.status, 200, fn + ": " + x); return x ? JSON.parse(x) : null;
+  };
+  const fn = async (tok, cuerpo) => { const r = await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json", Origin: e.origen}, body: JSON.stringify(cuerpo)}); return {status: r.status, ...(await r.json())}; };
+  const subir = (tok, ruta, b, tipo) => fetch(`${e.origen}/storage/v1/object/sat-archivos/${ruta}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": tipo}, body: b});
+  const aviso = (await rpc(tec, "sat_avisos_listar", {}))[0];
+  const cli = (await rpc(tec, "sat_catalogo", {})).clientes.find((c) => c.id === aviso.cliente_id);
+  const contenido = {tipo_visita: "REPARACION_FINALIZADA", fecha: "2026-11-23", hora_inicio: "08:00", hora_fin: "09:00", modo: "RAPIDO",
+    cliente: {id: cli.id, stel_id: cli.stel_id, nombre: cli.nombre}, direccion: {texto: "x"}, trabajos: "Revisión", fotos: [], tiempo_trabajo_min: 60, desplazamiento_min: 0, materiales: []};
+  const parteId = uuid(), fid = uuid(), pid = uuid(), pdf = Buffer.from("%PDF parte");
+  await rpc(tec, "sat_parte_guardar", {p_parte: {id: parteId, aviso_id: aviso.id, contenido}});
+  await subir(tec, `${parteId}/f-${fid}.png`, Buffer.from("png"), "image/png");
+  await rpc(tec, "sat_archivo_registrar", {p: {id: fid, parte_id: parteId, tipo: "FIRMA", storage_path: `${parteId}/f-${fid}.png`}});
+  const b = {parte_id: parteId, texto_alcance: "A", firmado_en: new Date().toISOString(), contenido};
+  await rpc(tec, "sat_firma_registrar", {p: {...b, id: uuid(), rol: "TECNICO", imagen_path: `${parteId}/f-${fid}.png`}});
+  await rpc(tec, "sat_firma_registrar", {p: {...b, id: uuid(), rol: "CLIENTE", ausente_motivo: "No había nadie responsable en el local"}});
+  await subir(tec, `${parteId}/p-${pid}.pdf`, pdf, "application/pdf");
+  await rpc(tec, "sat_archivo_registrar", {p: {id: pid, parte_id: parteId, tipo: "PDF_PARTE", storage_path: `${parteId}/p-${pid}.pdf`, sha256: sha(pdf)}});
+  await rpc(tec, "sat_parte_enviar", {p_id: parteId, p_pdf_path: `${parteId}/p-${pid}.pdf`, p_pdf_sha256: sha(pdf)});
+  let r = await fn(tec, {accion: "procesar", parte_id: parteId});
+  const alb = r.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO");
+  assert.deepEqual([alb.estado, alb.error], ["BLOQUEADA", "Falta: forma de pago y cuenta bancaria (Ajustes)"]);
+  assert.equal(e.stel.datos.workDeliveryNotes.length, 0, "sin forma de pago no se crea");
+  assert.equal((await fn(tec, {accion: "pagos", forma: "transferencia", cuenta: "1111"})).status, 403, "un técnico no puede");
+  let p = await fn(adm, {accion: "pagos", forma: "transferencia", cuenta: "1111"});
+  assert.equal(p.status, 409, "dos formas de pago llevan «transferencia»: no elige sola");
+  assert.match(p.error, /Transferencia bancaria/);
+  p = await fn(adm, {accion: "pagos", forma: "Transferencia bancaria", cuenta: "0000"});
+  assert.equal(p.status, 409, "varias cuentas terminan en 0000");
+  p = await fn(adm, {accion: "pagos", forma: "Transferencia bancaria", cuenta: "1111"});
+  assert.equal(p.ok, true, JSON.stringify(p));
+  assert.equal(p.descripcion, "Transferencia bancaria · Banco Ficticio ···1111");
+  const aj = await rpc(adm, "sat_ajustes_leer", {});
+  assert.deepEqual([Number(aj.stel_forma_pago_id), Number(aj.stel_cuenta_bancaria_id), Number(aj.margen_materiales_pct)], [e.semilla.fp.id, e.semilla.cb.id, 30]);
+  r = await fn(tec, {accion: "procesar", parte_id: parteId});
+  assert.equal(r.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO").estado, "OK", JSON.stringify(r));
+  const wdn = e.stel.datos.workDeliveryNotes.at(-1);
+  assert.deepEqual([wdn["payment-option-id"], wdn["bank-account-id"]], [e.semilla.fp.id, e.semilla.cb.id]);
 });

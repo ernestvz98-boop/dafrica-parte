@@ -59,14 +59,17 @@ Diseño y capacidades de STEL comprobadas: [`docs/sat-diseno.md`](../docs/sat-di
   transcripción, firmas (válidas e invalidadas), versiones, PDF firmado, estado de STEL y registro completo.
 - **Cliente provisional**: «Vincular a cliente de STEL» (lo normal: no duplica) o «Crear en STEL» (antes busca
   por NIF y por nombre; si hay parecidos, se para y lo decides tú).
-- **Revisión económica**: «Proponer desde el parte» rellena los materiales con los precios del catálogo de STEL, y la
+- **Revisión económica**: «Proponer desde el parte» rellena los materiales a su **coste neto + margen** (30 % por
+  defecto, en Ajustes): el coste es el precio con los descuentos del albarán del proveedor (si la línea cuadra con su
+  importe) o, con «Precios de materiales (compra + 30 %)», el precio de compra del artículo en STEL. La
   mano de obra y el desplazamiento **por horas** (minutos anotados por el técnico ÷ 60) al **precio fijo por hora** de
   Ajustes (50 € por defecto; vacío = precio del servicio de STEL). Un desplazamiento solo con km queda sin horas para
   completarlo. Completa artículo, precio, descuento e IVA. **Guardar revisión**.
 - **Decisión**: Facturar (pasa a aprobación), Presupuestar, Pedir información al técnico o No facturable.
 - **STEL**: estado de cada operación, motivo de los bloqueos y «Reintentar». Pestaña **STEL** para todo lo
-  pendiente. **Ajustes**: catálogo, servicios de mano de obra y desplazamiento, serie, límite de llamadas,
-  texto del alcance de la firma y servicio de transcripción.
+  pendiente. **Ajustes**: catálogo, servicios de mano de obra y desplazamiento, margen de los materiales, forma de
+  pago y cuenta bancaria («Buscar en STEL y guardar»: van en todos los albaranes de trabajo y facturas; sin ellas se
+  paran), serie, límite de llamadas, texto del alcance de la firma y servicio de transcripción.
 
 ### Responsable de facturación
 - **Aprobar factura**: ve líneas y total, marca la confirmación y aprueba. Solo entonces se crea la factura

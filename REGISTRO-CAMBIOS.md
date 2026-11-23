@@ -3,6 +3,24 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-23 · DAFRICA SAT 0.3.8: materiales a coste neto + 30 % y cobro por transferencia (sat-stel v8)
+
+- Usuario: «a todos los materiales que se compren le pongas un 30 % por encima del precio y también tiene que revisar que
+  coja los descuentos. En forma de pago siempre tiene que ser transferencia y cuenta bancaria la terminada en …».
+- Precio de cada material = coste NETO × (1 + margen). Coste: el neto del albarán del proveedor (precio con sus descuentos,
+  también en cascada «60+10»; solo si la línea cuadra con su importe) o, si no, el precio de compra del artículo en STEL.
+  Nunca el PRECIO bruto del papel: un material del proveedor sin coste comprobado para el albarán de trabajo («Falta:
+  precio de compra con descuentos de …») hasta que la oficina lo escribe en la revisión. Margen en Ajustes
+  (`margen_materiales_pct`, 30 por defecto). Los artículos nuevos se dan de alta con compra = neto y venta = neto + margen.
+- La revisión propone ese precio (guarda `coste`, `coste_origen`, `margen_pct`) y el botón «Precios de materiales
+  (compra + 30 %)» (acción `recalcular_materiales`) los trae de STEL, guarda la revisión y actualiza el albarán de trabajo.
+  El descuento de la revisión ahora también va al albarán de trabajo (antes se perdía).
+- Forma de pago y cuenta: Ajustes → «Buscar en STEL y guardar» (acción `pagos`: una sola forma de pago con ese nombre y una
+  sola cuenta con esas últimas cifras; si no, dice cuáles hay). Van en todos los albaranes de trabajo, en sus
+  actualizaciones y en las facturas; sin ellas, el documento se para («Falta: forma de pago y cuenta bancaria (Ajustes)»)
+  y vuelve solo a la cola al elegirlas. Migración `sat_partes_8` (`20261123_sat_margen_y_pago.sql`).
+- Verificado: `npm run test:sat` (27, con una prueba nueva de forma de pago y cuenta) y `npm test` (358), con datos ficticios.
+
 ## 2026-11-20 · SAT: un solo albarán de trabajo y precios (sat-stel v7)
 
 - Usuario: «quiero que cree un solo albarán, no dos, y que actualice los precios». PT-26-00001 y PT-26-00002 eran el MISMO

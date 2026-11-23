@@ -11,7 +11,7 @@ export function crearStelFalso({clave = "clave-falsa", baseUrl = ""} = {}) {
   const ahora = () => new Date().toISOString().replace(/\.\d+Z$/, "+0000");
   const datos = {
     clients: [], addresses: [], contacts: [], assets: [], products: [], services: [],
-    incidents: [], workDeliveryNotes: [], entityAttachments: [], ordinaryInvoices: [],
+    incidents: [], workDeliveryNotes: [], entityAttachments: [], ordinaryInvoices: [], paymentOptions: [], bankAccounts: [],
   };
   const estado = {
     llamadas: [], perderRespuesta: new Set(), fallar: new Map(), pdfFactura: true, emitidas: new Set(), baseUrl,
@@ -106,7 +106,9 @@ export function crearStelFalso({clave = "clave-falsa", baseUrl = ""} = {}) {
         nuevo["full-reference"] = "INC" + nuevo.reference;
       } else if (recurso === "workDeliveryNotes" || recurso === "ordinaryInvoices") {
         if (!datos.clients.some((c) => c.id === cuerpo?.["account-id"])) return err(400, "account-id no existe");
-        if (recurso === "ordinaryInvoices" && cuerpo["parent-document-id"] && !datos.workDeliveryNotes.some((d) => d.id === cuerpo["parent-document-id"]))
+        for (const [campo, rec] of [["payment-option-id", "paymentOptions"], ["bank-account-id", "bankAccounts"]])
+        if (cuerpo?.[campo] !== undefined && cuerpo[campo] !== null && !datos[rec].some((x) => x.id === cuerpo[campo])) return err(400, `${campo} no existe`);
+      if (recurso === "ordinaryInvoices" && cuerpo["parent-document-id"] && !datos.workDeliveryNotes.some((d) => d.id === cuerpo["parent-document-id"]))
           return err(400, "parent-document-id no válido");
         if ("external-id" in (cuerpo || {})) return err(400, "external-id no admitido al crear documentos");
         const lineas = lineasDe(cuerpo.lines, err); if (!lineas) return null;
@@ -173,5 +175,11 @@ export function sembrarCatalogo(stel) {
   const p2 = stel.sembrar("products", {name: "Tubo multicapa 16 mm (metro)", reference: "TUB-16", "sales-price": 3.2, "primary-tax-percentage": 21, inactive: false});
   const s1 = stel.sembrar("services", {name: "Mano de obra técnico (hora)", reference: "MO", "sales-price": 35, "primary-tax-percentage": 21, inactive: false});
   const s2 = stel.sembrar("services", {name: "Desplazamiento", reference: "DESP", "sales-price": 25, "primary-tax-percentage": 21, inactive: false});
-  return {c1, c2, d1, p1, p2, s1, s2};
+  // Formas de pago y cuentas ficticias (IBAN inventados).
+  stel.sembrar("paymentOptions", {name: "Contado", "linked-to-bank-account": false, default: true});
+  const fp = stel.sembrar("paymentOptions", {name: "Transferencia bancaria", "linked-to-bank-account": true, default: false});
+  stel.sembrar("paymentOptions", {name: "Transferencia 30 días", "linked-to-bank-account": true, default: false});
+  const cb = stel.sembrar("bankAccounts", {name: "Banco Ficticio", account: "ES00 0000 0000 0000 0000 1111", default: true});
+  stel.sembrar("bankAccounts", {name: "Otro Banco Ficticio", account: "ES00 0000 0000 0000 0000 2222", default: false});
+  return {c1, c2, d1, p1, p2, s1, s2, fp, cb};
 }
