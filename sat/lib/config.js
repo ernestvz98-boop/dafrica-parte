@@ -9,5 +9,5 @@ export const CONFIG = {
   // Misma sesión que DAFRICA Control: quien ya ha entrado allí no tiene que volver a entrar.
   sesionClave: "dafrica_web_session",
   loginProduccion: "../?mod=sat",
-  version: "0.3.9",
+  version: "0.3.10",
 };
