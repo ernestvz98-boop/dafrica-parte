@@ -676,7 +676,8 @@ async function pasoRapido(p, raiz, editable) {
       <h3>Horas de trabajo</h3>${chips("tiempo_trabajo_min", HORAS_TRABAJO, tTrab, "")}
       <h3>Horas de desplazamiento</h3>${chips("desplazamiento_min", HORAS_DESPLAZAMIENTO, tDesp, "Sin desplazamiento")}</div>
     <button type="button" class="boton verde ancho grande" id="bAFirmar" data-editar>Firmar ✍️</button>
-    ${esOficina() ? `<p class="centro" style="margin-top:14px"><a href="#" class="suave peq" id="bDetallado">Rellenar a mano (modo detallado)</a></p>` : ""}`;
+    ${esOficina() ? `<p class="centro" style="margin-top:14px"><a href="#" class="suave peq" id="bDetallado">Rellenar a mano (modo detallado)</a></p>` : ""}
+    ${["BORRADOR", "FIRMADO", undefined, null].includes(p.estadoServidor) ? `<p class="centro" style="margin-top:18px"><a href="#" class="suave peq" id="bDescartar" data-editar>🗑️ Descartar este parte</a></p>` : ""}`;
   if (!editable) return;
   // Transcribir solos los audios pendientes (una vez por sesión; con error, a mano con «Transcribir»).
   if (navigator.onLine) for (const {d, a} of audios) if (!d.texto && !S.transcribiendo.has(a.id) && !S.autoTranscrito.has(a.id)) { S.autoTranscrito.add(a.id); transcribirAudio(a.id, {silencioso: true}); }
@@ -808,6 +809,24 @@ async function pasoRapido(p, raiz, editable) {
     return true;
   };
   $("#bAFirmar").onclick = async () => { if (await preparar()) location.hash = `#/parte/${p.id}/firmas`; };
+  // Descartar un parte sin enviar (empezado por error o repetido): se borra en el teléfono y en el servidor.
+  $("#bDescartar")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    if (!(await confirmar(`¿Descartar el parte de ${c.cliente?.nombre || "este cliente"}? Se borra con sus fotos, audios y firmas, y no se puede deshacer.`, "Descartar", "No", "peligro"))) return;
+    const otros = (await partes.todas()).filter((x) => x.aviso_id === p.aviso_id && x.id !== p.id);
+    const locales = (await kv.get("avisosLocales")) || [];
+    const avisoSoloLocal = locales.some((a) => a.id === p.aviso_id);
+    await Cola.descartarParte(p.id, {avisoId: p.aviso_id, quitarAviso: avisoSoloLocal && !otros.length});
+    // Un aviso creado por el técnico que se queda sin partes desaparece de su lista (en el servidor queda anulado).
+    const aviso = S.avisos.find((a) => a.id === p.aviso_id);
+    if (!otros.length && aviso && aviso.origen === "LLAMADA_TECNICO") {
+      S.avisos = S.avisos.filter((a) => a.id !== p.aviso_id);
+      await kv.set("avisos", S.avisos);
+      await kv.set("avisosLocales", locales.filter((a) => a.id !== p.aviso_id));
+    }
+    avisar("Parte descartado.");
+    location.hash = "#/avisos";
+  });
   if ($("#bDetallado")) $("#bDetallado").onclick = async (e) => {
     e.preventDefault();
     if (!(await confirmar("Pasar a rellenar el parte a mano por pasos. Lo grabado y las fotos se mantienen. ¿Seguir?", "Seguir"))) return;

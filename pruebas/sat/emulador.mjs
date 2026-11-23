@@ -40,7 +40,8 @@ export async function crearEmulador({puerto = 0, demo = false, sinPago = false, 
     path.join(RAIZ, "supabase/propuestas/20261118_sat_precio_hora.sql"), path.join(RAIZ, "supabase/propuestas/20261118_sat_parte_rapido.sql"),
     path.join(RAIZ, "supabase/propuestas/20261118_sat_servicios_desbloquean.sql"),
     path.join(RAIZ, "supabase/propuestas/20261120_sat_articulos_del_proveedor.sql"),
-    path.join(RAIZ, "supabase/propuestas/20261123_sat_margen_y_pago.sql")], {silencioso: true});
+    path.join(RAIZ, "supabase/propuestas/20261123_sat_margen_y_pago.sql"),
+    path.join(RAIZ, "supabase/propuestas/20261123b_sat_parte_descartar.sql")], {silencioso: true});
   for (const u of USUARIOS) {
     await db.query("insert into public.perfiles (id, nombre, email) values ($1, $2, $3)", [u.id, u.nombre, u.email]);
     await db.query("insert into public.usuario_roles (usuario_id, rol_id) select $1, id from public.roles where codigo = $2", [u.id, u.rol]);
