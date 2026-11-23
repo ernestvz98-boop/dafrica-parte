@@ -35,10 +35,10 @@ const caja=c=>c?[Math.round(c.x0*10)/10,Math.round(c.y*10)/10,Math.round(c.x1*10
 /* ---------------------------- Cabecera de tabla ---------------------------- */
 const COLUMNAS=[
  ["referencia",/^(REF|REFERENCIA|REF ARTICULO|COD|CODIGO|COD ART|CODIGO ARTICULO|COD ARTICULO|ART|ARTICULO)$/],
- ["descripcion",/^(DESCRIPCION|CONCEPTO|CONCEPTOS|DENOMINACION|DESIGNACION|DETALLE|PRODUCTO|DESCRIPCION ARTICULO|DESCRIPCION DEL PRODUCTO|DESCRIPCION DEL ARTICULO|DESCRIPCION DEL|DESCRIPCION DE)$/],
+ ["descripcion",/^(DESCRIPCION|CONCEPTO|CONCEPTOS|DENOMINACION|DESIGNACION|DETALLE|PRODUCTO|DESCRIPCION ARTICULO|DESCRIPCION DEL PRODUCTO|DESCRIPCION DEL ARTICULO|DESCRIPCION DEL|DESCRIPCION DE|DESCRIPCION EQUIPOS ALQUILADOS|DESCRIPCION EQUIPOS|EQUIPOS ALQUILADOS|DESCRIPCION SERVICIO|DESCRIPCION SERVICIOS)$/],
  ["cantidad",/^(CANTIDAD|CANT|UDS|UNIDADES|UNDS|CTDAD|CANT SERVIDA|CANTIDAD SERVIDA|KILOS|KGS)$/],
- ["unidad",/^(UD|U M|UM|UNIDAD|MEDIDA)$/],
- ["precio",/^(PRECIO|PRECIO ?UNIDAD|PRECIO ?UNITARIO|PRECIO ?UNIT|P UNIT|P UNITARIO|PUNITARIO|PUNIT|PVP|PRECIO ?UD|PRECIO NETO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000)$/],
+ ["unidad",/^(UD|UN|U M|UM|UNIDAD|MEDIDA)$/],
+ ["precio",/^(PRECIO|PRECIO ?UNIDAD|PRECIO ?UNITARIO|PRECIO ?UNIT|P UNIT|P UNITARIO|PUNITARIO|PUNIT|PVP|PRECIO ?UD|PRECIO ?UNID|P UNID|PRECIO DIA|PRECIO DIARIO|PRECIO ALQUILER|PRECIO NETO|PRECIO NETO U|PRECIO NETO UD|PRECIO NETO UNIT|PRECIO NETO UNITARIO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000)$/],
  ["subtotal",/^(SUBTOTAL|BRUTO|IMPORTE BRUTO)$/],
  ["descuento",/^(DTO|DTOS|DESC|DESCUENTO|DTO %|% DTO|%DTO|DTO%|% DESC|DESC %|DTO ?[123]|DESC ?[123]|% ?DTO ?[123]|DTO ?[123] ?%)$/],
  ["importe",/^(IMPORTE|IMPORTE NETO|TOTAL|NETO|TOTAL LINEA|IMPORTE TOTAL|IMPORTE EUR)$/]
@@ -103,7 +103,17 @@ function evaluarCabecera(celdas){
   const mezcla=r.some(x=>x.campo==="otra")&&r.some(x=>x.campo!=="otra");
   return mezcla&&celdas.length>1?[{campo:"otra",clave:clave(c.texto),x0:c.x0,x1:c.x1}]:r;
  });
- const columnas=todas;
+ // Un título de dos palabras que el OCR parte en dos celdas («IMPORTE» | «NETO», «PRECIO» | «UNID.»; fallo real 2026-11-18: la
+ // segunda se tomaba por otra columna de importe y se ignoraba, y las cifras, centradas bajo ella, se perdían). Dos títulos
+ // pegados (hueco menor que 1,5 altos) que juntos son un título conocido del mismo campo que el primero se unen.
+ const altoTit=Math.max(0,...celdas.map(c=>c.alto||0))||10;
+ const columnas=[];
+ for(const c of [...todas].sort((a,b)=>a.x0-b.x0)){
+  const prev=columnas[columnas.length-1];
+  const junto=prev&&c.x0-prev.x1<=1.5*altoTit&&prev.campo!=="otra"?campoDe(prev.clave+" "+c.clave):null;
+  if(junto&&junto.campo===prev.campo){prev.clave=junto.clave;prev.x1=Math.max(prev.x1,c.x1);continue;}
+  columnas.push({...c});
+ }
  const campos=new Set(columnas.map(c=>c.campo));
  if(campos.has("referencia")&&!campos.has("descripcion")){
   // «ARTÍCULO» sin columna de descripción es la descripción.
@@ -165,6 +175,9 @@ function fusionarTitulos(arriba,abajo){
 }
 function intervalos(columnas){
  const orden=[...columnas].sort((a,b)=>(a.x0+a.x1)-(b.x0+b.x1));
+ // «P.V.P.» y «PRECIO NETO» en la misma tabla: el precio de la línea es el neto (el otro es la tarifa, sin el descuento).
+ const netos=orden.filter(c=>c.campo==="precio"&&/NETO/.test(c.clave||""));
+ if(netos.length===1)for(const c of orden)if(c.campo==="precio"&&c!==netos[0])c.campo="otra";
  const usados=new Map();
  return orden.map((c,i)=>{
   const ini=i===0?-Infinity:(orden[i-1].x1+c.x0)/2;
@@ -210,7 +223,9 @@ const EXCLUIR_FECHA=/ENTREGA|VENCIMIENTO|PEDIDO|NACIMIENTO|CADUCIDAD|PREVISTA|SE
 // Quita separadores y restos de etiqueta («º 77812», «Nº: 123», «nº. 45»).
 const limpiarValor=v=>String(v||"").replace(/^[\s:#\-–.º°]+/,"").replace(/^N[ºo°O]?\.?(?=[\s:.]|$)/i,"").replace(/^[\s:#\-–.º°]+/,"").trim();
 
-function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar){
+// huecoDerecha (en altos de la etiqueta): el valor a la derecha ha de estar a esa distancia como mucho (otra columna no vale).
+// unirDerecha: debajo de la etiqueta, si la celda más próxima no vale, se prueba unida a la celda pegada a su derecha.
+function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=Infinity,unirDerecha=false}={}){
  const hallados=[];
  lineas.forEach((linea,li)=>linea.celdas.forEach((celda,ci)=>{
   const k=N().sinAcentos(celda.texto).replace(/[.:]/g," ").replace(/\s+/g," ").trim();
@@ -220,7 +235,9 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar){
   const resto=limpiarValor(celda.texto.slice(Math.min(celda.texto.length,m[0].length)));
   if(resto)candidatos.push({texto:resto,celda});
   // A la derecha, saltando restos de la etiqueta («N.», «Nº», «:»).
-  const derecha=linea.celdas.slice(ci+1).filter(c=>c.x0>=celda.x1-1).find(c=>limpiarValor(c.texto));
+  // Sin el resto de la etiqueta que el OCR deja en su propia celda («Nº» leído «N?», «No»; fallo real 2026-11-12: «Albarán | N? |
+  // 1009999999» se quedaba sin número).
+  const derecha=linea.celdas.slice(ci+1).filter(c=>c.x0>=celda.x1-1&&c.x0-celda.x1<=huecoDerecha*(celda.alto||10)).find(c=>limpiarValor(c.texto)&&!/^N[ºo°O]?[^A-Za-z0-9]?$/i.test(c.texto.trim()));
   if(derecha)candidatos.push({texto:limpiarValor(derecha.texto),celda:derecha});
   // El OCR puede partir la fila de valores en varias líneas (bases distintas): se miran hasta
   // tres líneas y se sigue bajando si la celda hallada no tiene forma de valor válido.
@@ -233,6 +250,12 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar){
    const c=[...abajo.celdas].map(c=>({c,d:Math.max(0,c.x0-celda.x1,celda.x0-c.x1),dc:Math.abs((c.x0+c.x1)/2-centro)}))
     .filter(x=>x.d<=Math.max(anchoEt,2*celda.alto)).sort((a,b)=>a.d-b.d||a.dc-b.dc)[0]?.c;
    if(c){candidatos.push({texto:limpiarValor(c.texto),celda:c});if(aceptar(limpiarValor(c.texto)))break;}
+   // Serie y número en dos celdas («SERIE» | «2600001», fallo real 2026-11-18): con unirDerecha, la celda pegada a su derecha.
+   if(c&&unirDerecha){
+    const sig=abajo.celdas.filter(x=>x!==c&&x.x0>=c.x1-1&&x.x0-c.x1<=2*(c.alto||celda.alto||10)).sort((a,b)=>a.x0-b.x0)[0];
+    const junto=sig&&limpiarValor(c.texto+" "+sig.texto);
+    if(junto){candidatos.push({texto:junto,celda:{...c,texto:c.texto+" "+sig.texto,x1:sig.x1}});if(aceptar(junto))break;}
+   }
   }
   const valido=candidatos.find(c=>aceptar(c.texto));
   if(valido)hallados.push({...valido,etiqueta:celda.texto});
@@ -245,7 +268,9 @@ const RE_NUMERO_GENERICO=/^(N[ºO°]|NUM|NUMERO)(\b|$)/;
 const EXCLUIR_GENERICO=/CLIENTE|PEDIDO|PROVEEDOR|TELEF|TLF|FAX|PAGINA|PAG|OBRA|CIF|NIF|FACTURA|PRESUPUESTO|CUENTA|IBAN|SERIE|LOTE|BULTOS|MATRICULA|REGISTRO|TOMO|FOLIO|HOJA|INSCRIPCION/;
 function leerNumero(lineas){
  const r={literal:"",valor:null,estado:"VACIO",motivos:[],notas:[],caja:null};
- const aceptar=t=>/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i.test(t)&&/\d/.test(t)&&N().fecha(t).estado!=="OK";
+ // Prueba real 2026-10-28: un número impreso con coma («600,111», ficticio) se leía «600». La coma solo se
+ // admite entre cifras; el formato del proveedor decide después (extraerDePaginas).
+ const aceptar=t=>(/^[A-Z0-9][A-Z0-9\/\-.]{2,24}$/i.test(t)||/^\d{1,3}(,\d{3})+$/.test(t))&&/\d/.test(t)&&N().fecha(t).estado!=="OK";
  let hallados=valoresEtiquetados(lineas,RE_NUMERO,EXCLUIR_NUMERO,aceptar);
  if(!hallados.length){
   hallados=valoresEtiquetados(lineas,RE_NUMERO_GENERICO,EXCLUIR_GENERICO,aceptar);
@@ -257,7 +282,7 @@ function leerNumero(lineas){
   if(!/^\d{2,4}$/.test(h.texto))return h;
   const linea=lineas.find(l=>l.celdas.includes(h.celda)),i=linea?.celdas.indexOf(h.celda);
   const siguiente=linea?.celdas[i+1];
-  if(!siguiente||!/^\/\s*\d{2,10}$/.test(siguiente.texto.trim())||
+  if(!siguiente||!/^(\/\s*\d{2,10}|[.,]\d{3})$/.test(siguiente.texto.trim())||
      siguiente.x0-h.celda.x1>3*h.celda.alto)return h;
   return {...h,texto:h.texto+siguiente.texto.replace(/\s/g,""),
    celda:{...h.celda,x1:siguiente.x1,conf:h.celda.conf==null?siguiente.conf:
@@ -494,8 +519,9 @@ function identificarProveedor(paginas,registro,limiteCabecera=null){
 }
 
 /* ---------------------------------- Tabla ---------------------------------- */
-const RE_PIE=/^(TOTAL(ES)?|SUMA|BASE IMPONIBLE|BASE|IMPORTE TOTAL|TOTAL ALBARAN|TOTAL LINEAS|N[ºO°]? LINEAS|OBSERVACIONES|FORMA DE PAGO|RECIBI|CONFORME|FIRMA|SUBTOTAL|I V A|IVA|SUMA Y SIGUE)\b/;
+const RE_PIE=/^(TOTAL(ES)?|PESO (BRUTO|NETO|TOTAL)|SUMA|BASE IMPONIBLE|BASE|IMPORTE TOTAL|TOTAL ALBARAN|TOTAL LINEAS|N[ºO°]? LINEAS|OBSERVACIONES|FORMA DE PAGO|RECIBI|CONFORME|FIRMA|SUBTOTAL|I V A|IVA|SUMA Y SIGUE)\b/;
 const RE_ANOTACION=/^(RETIRADO POR|RECOGIDO POR|PEDIDO POR|ENTREGA EN|ENTREGAR EN|ENTREGADO A|CONTACTO|OBRA|S ?REF|SU REF|REF CLIENTE|ATENCION|OBSERVACIONES|DE PEDIDO|PEDIDO DE CLIENTE|SU PEDIDO|EN ALMACEN|TRANSPORTISTA|SUMA Y SIGUE)\b/;
+const RE_ROTULO_REPARTO=/^[^A-Z0-9]*[A-Z]?(ZONA|ZONAS|PLANTA|SALA|ESTANCIA|VESTUARIOS?|CAPITULO|APARTADO)\b/;
 const RE_PIE_CUALQUIERA=/^(BASE IMPONIBLE|TOTAL LINEAS|SUMA Y SIGUE|TOTAL ALBARAN|N[ºO°]? LINEAS)\b/;
 
 /*
@@ -508,20 +534,92 @@ function inferirColumnaCodigo(pagina,cab){
  const desc=cab.columnas.find(c=>c.campo==="descripcion");
  if(!desc)return;
  const siguientes=pagina.lineas.slice(cab.hasta+1,cab.hasta+12);
- const codigos=siguientes.flatMap(l=>l.celdas.filter(c=>c.x1<desc.x0-0.5*l.alto&&/^[A-Z0-9][A-Z0-9.\/-]{3,}$/i.test(c.texto.trim())&&/\d/.test(c.texto)));
+ // Columna «Nº» con códigos de artículo (fallo real 2026-11-18: «Nº | Descripción | Cantidad | Un.» con «MODELOX» debajo): es el
+ // código si lo que hay debajo son códigos con letras, nunca números de línea («1», «2»…).
+ // (El título «Nº» no llega a ser columna: tan corto, se toma por una mota; se busca en el renglón de títulos.)
+ const lt=pagina.lineas[cab.indice];
+ const num=pagina.lineas.filter(l=>Math.abs(l.y-lt.y)<=1.2*Math.max(lt.alto,l.alto)).flatMap(l=>l.celdas||[]).find(c=>/^N\s?[O0º°]?\.?$/i.test(String(c.texto||"").trim())&&c.x1<=desc.x0);
+ if(num){
+  const ancho=Math.max(num.x1-num.x0,10),bajo=siguientes.flatMap(l=>l.celdas.filter(c=>c.x0<desc.x0-0.5*l.alto&&c.x1>num.x0-ancho&&c.x0<num.x1+3*ancho));
+  if(bajo.length&&bajo.every(c=>/^[A-Z0-9][A-Z0-9.\/-]{2,}$/i.test(c.texto.trim())&&/[A-Z]/i.test(c.texto)&&!/^\d+$/.test(c.texto.trim()))){
+   const x0=Math.min(num.x0,...bajo.map(c=>c.x0)),x1=Math.max(num.x1,...bajo.map(c=>c.x1));
+   cab.columnas.unshift({campo:"referencia",clave:"(Nº)",x0,x1,inferida:true});
+   desc.x0=Math.min(desc.x0,x1+pagina.lineas[cab.indice].alto);
+   return;
+  }
+ }
+ // Un código solo de letras (un modelo, «MODELOX»; fallo real 2026-11-18, el título «Nº» perdido por el OCR) vale si la misma
+ // palabra está también en la descripción de su fila (prueba de que es el modelo, no una palabra suelta).
+ const enSuDescripcion=(l,c)=>{const w=c.texto.trim().toUpperCase();
+  return /^[A-Z]{4,}$/.test(w)&&l.celdas.some(o=>o!==c&&o.x0>=desc.x0-0.5*l.alto&&new RegExp("(^|[^A-Z])"+w+"([^A-Z]|$)").test(String(o.texto||"").toUpperCase()));};
+ const codigos=siguientes.flatMap(l=>l.celdas.filter(c=>c.x1<desc.x0-0.5*l.alto&&/^[A-Z0-9][A-Z0-9.\/-]{3,}$/i.test(c.texto.trim())&&(/\d/.test(c.texto)||enSuDescripcion(l,c))));
  if(!codigos.length)return;
  const x0=Math.min(...codigos.map(c=>c.x0)),x1=Math.max(...codigos.map(c=>c.x1));
  cab.columnas.unshift({campo:"referencia",clave:"(inferida)",x0,x1,inferida:true});
  // El título de la descripción suele ir centrado: su columna empieza justo después de los códigos.
  desc.x0=Math.min(desc.x0,x1+pagina.lineas[cab.indice].alto);
 }
-function leerTablaPagina(pagina){
- const cab=buscarCabeceraTabla(pagina.lineas);
+/*
+ * Cabecera con las columnas del perfil del proveedor, si el OCR perdió la fila de títulos o sus títulos de la derecha (fallo
+ * real 2026-10-30: tabla bien leída y descartada por no ver «CÓDIGO»). La tabla empieza en su fila de títulos o, sin ella, en
+ * la primera fila cuyo código tiene el formato del proveedor. Nunca se inventa un valor: solo se decide a qué columna va cada cifra.
+ */
+function cabeceraDePerfil(pagina,perfil,cab){
+ let indice=cab?.indice;
+ if(indice==null){
+  const re=perfil.formato_referencia?new RegExp(perfil.formato_referencia):null;
+  const i=re?pagina.lineas.findIndex(l=>re.test(String(l.celdas?.[0]?.texto||"").trim().split(/\s+/)[0])):-1;
+  if(i>=1)indice=i-1;
+  else{
+   indice=pagina.lineas.findIndex(l=>/\b(CODIGO|C[OÓ]DIGO|DESCRIPCI[OÓ]N|CONCEPTO)\b/i.test(l.texto||""));
+   if(indice<0)return null;
+  }
+ }
+ const k=(pagina.ancho||595)/595;
+ // de_perfil: las posiciones son las del perfil, no las de unos títulos leídos (otra lectura con títulos puede ser mejor).
+ return {indice,hasta:indice,valida:true,ajenas:0,de_perfil:true,columnas:perfil.columnas.map(([campo,x0,x1])=>({campo,clave:campo.toUpperCase(),x0:x0*k,x1:x1*k}))};
+}
+/*
+ * ¿Casan las columnas del perfil con los títulos que SÍ se leyeron? (foto real 2026-11-23: en una foto el papel no ocupa las
+ * posiciones de un escaneo; con las del perfil, la tabla salía en 10 filas en vez de 7 y las cifras en columnas ajenas). Cada
+ * título leído de un campo del perfil ha de tener su centro dentro de la columna de ese campo (con un cuarto de su anchura de
+ * margen). Sin títulos leídos no hay nada que lo contradiga.
+ */
+function perfilCasaConTitulos(pagina,perfil,cab){
+ if(!cab)return true;
+ const k=(pagina.ancho||595)/595;
+ return cab.columnas.every(c=>{
+  const p=perfil.columnas.find(([campo])=>campo===c.campo);
+  if(!p||c.x0==null||c.x1==null)return true;
+  const x0=p[1]*k,x1=p[2]*k,m=0.25*(x1-x0),centro=(c.x0+c.x1)/2;
+  return centro>=x0-m&&centro<=x1+m;
+ });
+}
+function leerTablaPagina(pagina,perfil=null){
+ let cab=buscarCabeceraTabla(pagina.lineas);
+ if(perfil?.columnas&&(perfil.columnas_fijas||((!cab||!cab.columnas.some(c=>c.campo==="importe"))&&perfilCasaConTitulos(pagina,perfil,cab))))
+  cab=cabeceraDePerfil(pagina,perfil,cab)||cab;
  if(!cab)return null;
  inferirColumnaCodigo(pagina,cab);
  const cols=intervalos(cab.columnas);
  const filas=[],ignoradas=[],pie=[],dudosasTrasFin=[];
  const NUMERICAS=new Set(["cantidad","precio","descuento","descuento2","subtotal","importe"]);
+ // Un código completo con el formato del proveedor no sigue en una palabra con letras que lo rompe: esa palabra es el
+ // principio de la descripción (fallo real 2026-11-12, Saltoki escaneado: «código + ABRAZADERA» como código porque la
+ // descripción empezaba 3 puntos antes del límite de columna del perfil). Solo decide la columna; no cambia ningún carácter.
+ const reFormatoCodigo=perfil?.formato_referencia?new RegExp(perfil.formato_referencia):null;
+ // ¿Tiene forma de código de artículo? Con el formato del proveedor, ese; sin él, 4 o más letras y cifras (con alguna cifra)
+ // sin signos ajenos («4)», «T. M» no lo son).
+ const pareceCodigoFila=t=>{
+  const p=String(t||"").trim().split(/\s+/)[0]||"";
+  if(!p)return false;
+  return reFormatoCodigo?reFormatoCodigo.test(p):/\d/.test(p)&&/^[A-Z0-9][A-Z0-9.\-\/]{3,}$/i.test(p);
+ };
+ const sinCifras=c=>!["cantidad","precio","importe","descuento","descuento2","subtotal"].some(k=>c[k]&&pareceNumero(c[k].texto));
+ const fueraDelCodigo=(codigo,palabra)=>{
+  const a=String(codigo||"").trim(),b=String(palabra||"").trim().split(/\s+/)[0]||"";
+  return !!reFormatoCodigo&&cols.some(x=>x.campo==="descripcion")&&reFormatoCodigo.test(a)&&/[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(b)&&!reFormatoCodigo.test(a+b);
+ };
  // Una celda que cruza columnas (ERP que escribe la fila como un solo texto)
  // se reparte por la posición estimada de cada palabra. Un texto no numérico
  // nunca se coloca en una columna numérica.
@@ -531,7 +629,14 @@ function leerTablaPagina(pagina){
   for(const p of palabrasConPosicion(c)){
    let campo=columnaDe(p,cols)?.campo||"otra";
    const ultimo=grupos[grupos.length-1];
-   if(NUMERICAS.has(campo)&&!pareceNumero(p.texto)&&ultimo)campo=ultimo.campo;
+   if(campo==="referencia"&&ultimo?.campo==="referencia"&&fueraDelCodigo(ultimo.texto,p.texto))campo="descripcion";
+   // Cifra de una columna numérica seguida, en el mismo texto, del principio de la descripción (fallo real 2026-11-20, factura
+   // digital: «1,00 RTH» de CANTIDAD | DESCRIPCIÓN en un solo trozo; la posición estimada de «RTH» caía en la cantidad): la palabra
+   // que no es cifra ni unidad va a la columna de texto siguiente. Solo decide la columna.
+   const sigTexto=NUMERICAS.has(campo)&&ultimo?.campo===campo&&pareceNumero(ultimo.texto)&&!pareceNumero(p.texto)&&!RE_UNIDAD_SOLA.test(p.texto.trim())
+    ?cols.find(x=>["descripcion","referencia"].includes(x.campo)&&x.ini>=(columnaDe(p,cols)?.fin??Infinity)):null;
+   if(sigTexto)campo=sigTexto.campo;
+   else if(NUMERICAS.has(campo)&&!pareceNumero(p.texto)&&ultimo)campo=ultimo.campo;
    if(ultimo&&ultimo.campo===campo){ultimo.texto+=" "+p.texto;ultimo.x1=p.x1;}
    else grupos.push({campo,texto:p.texto,x0:p.x0,x1:p.x1,alto:c.alto,y:c.y});
   }
@@ -564,6 +669,7 @@ function leerTablaPagina(pagina){
    // del texto anterior («Tablero 2,44 x 1,22 x 19 mm»).
    const col=cols.find(x=>x.campo===campo);
    if(NUMERICAS.has(campo)&&col?.x0!=null&&c.x1<col.x0-2*(c.alto||altoFila)&&ultimoTexto)campo=ultimoTexto;
+   if(campo==="referencia"&&celdas.referencia&&!celdas.descripcion&&fueraDelCodigo(celdas.referencia.texto,c.texto))campo="descripcion";
    if(!NUMERICAS.has(campo))ultimoTexto=campo;
    if(celdas[campo]){
     // Código separado de la descripción por un hueco amplio (título de descripción centrado
@@ -580,12 +686,43 @@ function leerTablaPagina(pagina){
      celdas[campo].texto+=" "+c.texto;celdas[campo].x1=c.x1;
      if(c.conf!=null)celdas[campo].conf=Math.min(celdas[campo].conf??c.conf,c.conf);
     }
-    else conflictos.push(campo);
+    // Descuento sin título bajo el del precio (fallo real 2026-11-17: «PRECIO 7,63 50,00» con el importe 3,81): sin columna de
+    // descuento, la segunda cifra a la derecha del precio se PRUEBA como descuento; solo vale si la línea cuadra con su importe
+    // (si no, vuelve a ser «varias cifras en la misma columna»: ver _sinTitulo tras el cuadre).
+    else if(campo==="precio"&&!celdas.descuento&&!cols.some(x=>/^descuento/.test(x.campo))&&pareceNumero(c.texto)&&pareceNumero(celdas.precio.texto)&&c.x0>celdas.precio.x1)
+     celdas.descuento={...c,_sinTitulo:true};
+    else{
+     // Cifras de más en la columna del importe (fallo real 2026-11-20: el «7» de «55+7» o el «52» del descuento caían ahí): se
+     // guardan para probarlas como descuentos tras el cuadre (descuentoEnColumnaImporte); si no cuadran, sigue el conflicto.
+     if(campo==="importe"&&pareceNumero(c.texto))(celdas.importe._otras||=[]).push({texto:c.texto,x0:c.x0,x1:c.x1,conf:c.conf});
+     conflictos.push(campo);
+    }
    }else celdas[campo]={...c};
   }
   return {celdas,conflictos,partida,textoEstimado};
  };
  const altoFila=pagina.lineas[cab.indice].alto;
+ // Título de la descripción centrado y descripciones alineadas a la izquierda, mucho antes del límite a medio camino entre
+ // títulos (fallo real 2026-11-18, presupuesto: «DF-47 NARROW», «REJILLA 31-1», «INJERTO CON» tomados como código). Inicio
+ // real de la columna: donde empieza el texto tras un código en la mayoría de las filas (≥ 3 filas y ≥ 60 % dentro de un alto).
+ // Solo mueve el límite hacia la izquierda y nunca dentro del título de la referencia. Las palabras con su caja del OCR deciden.
+ {
+  const iRef=cols.findIndex(c=>c.campo==="referencia"),iDesc=cols.findIndex(c=>c.campo==="descripcion");
+  if(iRef>=0&&iDesc===iRef+1){
+   const inicios=[];
+   for(const l of pagina.lineas.slice(cab.hasta+1,cab.hasta+80)){
+    const pal=l.celdas.flatMap(c=>palabrasConPosicion(c)).sort((a,b)=>a.x0-b.x0);
+    if(pal.length<2||!pareceCodigoFila(pal[0].texto)||columnaDe(pal[0],cols)?.campo!=="referencia")continue;
+    if(pal[1].x0-pal[0].x1>1.5*(l.alto||altoFila)&&!pareceNumero(pal[1].texto))inicios.push(pal[1].x0);
+   }
+   if(inicios.length>=3){
+    const orden=[...inicios].sort((a,b)=>a-b),med=orden[Math.floor(orden.length/2)];
+    const cerca=inicios.filter(x=>Math.abs(x-med)<=altoFila).length;
+    const limite=med-0.5*altoFila;
+    if(cerca>=0.6*inicios.length&&limite<cols[iDesc].ini&&limite>cols[iRef].x1){cols[iRef].fin=limite;cols[iDesc].ini=limite;}
+   }
+  }
+ }
  // Lo que queda claramente a la izquierda de la primera columna no pertenece a la tabla.
  const xMinTabla=Math.min(...cab.columnas.map(c=>c.x0))-3*altoFila;
  // Texto vertical del margen (foto real, 2026-11-23: trozos «585» y «255» leídos justo antes del código, que se quedaban
@@ -601,7 +738,19 @@ function leerTablaPagina(pagina){
   return xCodigo!=null&&c.x1<xIniTabla-0.5*altoFila&&c.x1<xCodigo-1.5*altoFila&&String(c.texto).trim().length<=4;
  }
  let actual=null,fin=false,anotacion=false,yAnterior=pagina.lineas[cab.hasta].y;
- for(const linea of pagina.lineas.slice(cab.hasta+1)){
+ const resto=pagina.lineas.slice(cab.hasta+1);
+ // «OBSERVACIONES» como fila DENTRO de la tabla (fallo real 2026-11-18, presupuesto: «OBSERVACIONES  DEFINIR COLOR …» entre
+ // dos artículos; la tabla acababa ahí y se perdían 12 líneas). No es el pie si la fila no lleva ninguna cifra y la siguiente
+ // impresa, a distancia de fila, es un artículo completo: código con forma de código, cantidad y precio o importe.
+ const observacionEnTabla=(linea,k)=>{
+  if(!/^OBSERVACION(ES)?\b/.test(clave(linea.celdas[0]?.texto||""))||!sinCifras(asignar(linea).celdas))return false;
+  const sig=resto.slice(k+1).find(l=>!esManuscrita(l));
+  if(!sig||sig.y-linea.y>2.5*Math.max(linea.alto,altoFila))return false;
+  const c=asignar(sig).celdas;
+  return !!(c.referencia&&pareceCodigoFila(c.referencia.texto)&&c.cantidad&&pareceNumero(c.cantidad.texto)&&
+   ((c.precio&&pareceNumero(c.precio.texto))||(c.importe&&pareceNumero(c.importe.texto))));
+ };
+ for(const [k,linea] of resto.entries()){
   if(fin){
    // Red de seguridad: algo con forma de artículo después del final de la tabla.
    const {celdas}=asignar(linea);
@@ -614,7 +763,17 @@ function leerTablaPagina(pagina){
   const primera=clave(linea.celdas[0]?.texto||"");
   // Fin de tabla: rótulo de pie o un hueco vertical grande tras la última fila.
   const separacion=filas.length?linea.y-yAnterior:0;
-  if(RE_PIE.test(primera)||linea.celdas.some(c=>RE_PIE_CUALQUIERA.test(clave(c.texto)))||separacion>3.2*altoFila+16){
+  if(filas.length&&observacionEnTabla(linea,k)){
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Observación dentro de la tabla (no es un artículo)"});
+   yAnterior=linea.y;continue;
+  }
+  // Duración de un alquiler bajo su línea (fallo real 2026-11-20, factura de alquiler: «Total 00010 Días  Ref.Contrato: …»): no es
+  // el total del documento ni un artículo; la tabla sigue.
+  if(filas.length&&/^TOTAL\s+\d+\s+(DIAS?|HORAS?|SEMANAS?|MESES|MES|JORNADAS?)\b/.test(clave(linea.texto||""))){
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Duración del alquiler (no es el total ni un artículo)"});
+   yAnterior=linea.y;continue;
+  }
+  if(RE_PIE.test(primera)||/^PESO (BRUTO|NETO|TOTAL)\b/.test(clave(linea.texto||""))||linea.celdas.some(c=>RE_PIE_CUALQUIERA.test(clave(c.texto)))||separacion>3.2*altoFila+16){
    fin=true;pie.push(linea);
    if(!RE_PIE.test(primera)){
     const {celdas}=asignar(linea);
@@ -625,11 +784,11 @@ function leerTablaPagina(pagina){
   }
   // Renglón que solo es ruido del margen: se registra y no es una fila.
   if(linea.celdas.length&&linea.celdas.every(ruidoMargen)){
-   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Texto del margen, fuera de la tabla"});
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Texto del margen, fuera de la tabla"});
    continue;
   }
   if(evaluarCabecera(linea.celdas).valida){ // cabecera repetida: se registra, nunca se pierde en silencio
-   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Cabecera de tabla repetida"});
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Cabecera de tabla repetida"});
    yAnterior=linea.y;continue;
   }
   // Manuscritos sobre el escaneo: el OCR los lee como palabras de confianza muy baja.
@@ -638,13 +797,13 @@ function leerTablaPagina(pagina){
    // Renglón de texto débil (tachado, rodeado a bolígrafo) justo bajo una línea y dentro de la
    // columna de descripción: puede ser su continuación. Se añade, pero la descripción queda en revisión.
    const desc=cols.find(x=>x.campo==="descripcion");
-   // Si a su altura hay una anotación («Retirado por: VICTOR …»), es parte de ella, no de la descripción.
+   // Si a su altura hay una anotación («Retirado por: NOMBRE …»), es parte de ella, no de la descripción.
    const junto=pagina.lineas.some(l=>l!==linea&&Math.abs(l.y-linea.y)<=1.2*Math.max(linea.alto,l.alto)&&RE_ANOTACION.test(clave(l.texto)));
    if(actual&&desc&&!junto&&linea.celdas.every(c=>c.x0>=desc.ini&&c.x1<=desc.fin)&&linea.y-yAnterior<=2*Math.max(linea.alto,altoFila)){
     actual.continuacionesDudosas=[...(actual.continuacionesDudosas||[]),linea.texto];
     yAnterior=linea.y;continue;
    }
-   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Texto de baja confianza OCR (posible manuscrito o sello)"});
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Texto de baja confianza OCR (posible manuscrito o sello)"});
    continue;
   }
   const {celdas,conflictos,partida,textoEstimado}=asignar(linea);
@@ -656,8 +815,14 @@ function leerTablaPagina(pagina){
   // Un código terminado en «:» («Entrega en:») nunca es un artículo, aunque la dirección
   // deje una cifra en la columna de cantidad («18 SECTOR 1»); sí lo sería si tuviera precio o importe.
   const refRotulo=/:$/.test(String(celdas.referencia?.texto||"").trim());
+  // Rótulos de reparto entre las líneas («ZONA PISCINA», «PLANTA 2», «SALA …»; usuario 2026-11-18: «se ve claramente que no
+  // es nada, más bien una distribución»): sin cantidad ni cifras, no son artículos. Admite una viñeta leída como letra («AZONA»).
+  if(!tieneCantidad&&!tieneImportes&&RE_ROTULO_REPARTO.test(textoLinea)){
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Rótulo de reparto (zona, planta…), no es un artículo"});
+   yAnterior=linea.y;continue;
+  }
   if((!tieneCantidad&&RE_ANOTACION.test(textoLinea))||(refRotulo&&!tieneImportes)){
-   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Anotación del proveedor, no es un artículo"});
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Anotación del proveedor, no es un artículo"});
    yAnterior=linea.y;anotacion=true;continue;
   }
   // Toda línea con referencia, cantidad o importe es una fila: si falta un dato
@@ -669,13 +834,19 @@ function leerTablaPagina(pagina){
    (Object.entries(celdas).every(([k,c])=>!NUMERICAS.has(k)||!pareceNumero(c.texto))||
     (!tieneCantidad&&Object.values(celdas).every(c=>c.conf!=null&&c.conf<90)));
   if(soloRuido){
-   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Texto sin artículo ni cifras válidas (posible manuscrito o marca)"});
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Texto sin artículo ni cifras válidas (posible manuscrito o marca)"});
+   continue;
+  }
+  // Palabras en la columna de la cantidad, sin código ni descripción (fallo real 2026-11-18: la firma digital impresa «NOMBRE
+  // APELLIDO - DNI» junto a la tabla daba una línea con cantidad «NOMBRE-» y el DNI como precio): no es un artículo.
+  if(!tieneRef&&!celdas.descripcion&&celdas.cantidad&&!tieneCantidad&&/[A-Za-zÁÉÍÓÚÑáéíóúñ]{3,}/.test(celdas.cantidad.texto)){
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Texto en la columna de la cantidad sin código ni descripción (posible firma o sello)"});
    continue;
   }
   // Segundo renglón de una anotación («Retirado por: JUAN» / «PÉREZ»).
   const soloTextoLinea=Object.keys(celdas).every(k=>["descripcion","referencia","otra","unidad"].includes(k));
   if(anotacion&&!tieneCantidad&&!tieneImportes&&(soloTextoLinea||!tieneRef)&&linea.y-yAnterior<=2*Math.max(linea.alto,altoFila)){
-   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Continuación de una anotación del proveedor"});
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Continuación de una anotación del proveedor"});
    yAnterior=linea.y;continue;
   }
   anotacion=false;
@@ -691,7 +862,22 @@ function leerTablaPagina(pagina){
   }
   const soloPalabra=tieneRef&&!tieneCantidad&&!tieneImportes&&!celdas.descripcion&&!/\d/.test(celdas.referencia.texto);
   if(soloPalabra){
-   ignoradas.push({pagina:pagina.numero,texto:linea.texto,motivo:"Palabra suelta en la columna de código (posible obra o anotación)",anotacion:true});
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Palabra suelta en la columna de código (posible obra o anotación)",anotacion:true});
+   yAnterior=linea.y;continue;
+  }
+  // Descripción en dos renglones con las cifras en el SEGUNDO (fallo real 2026-11-13: «código  DESCRIPCIÓN … (CAJA» /
+  // «4)  1,00  precio  dto  importe»): la fila anterior tiene código y descripción y ninguna cifra, y esta tiene cantidad y
+  // nada con forma de código, pegada debajo. Es la misma línea: su texto sigue la descripción y sus cifras son las de la línea.
+  if(actual&&tieneCantidad&&actual.celdas.referencia&&actual.celdas.descripcion&&!actual.continuacionRef&&sinCifras(actual.celdas)&&
+    pareceCodigoFila(actual.celdas.referencia.texto)&&!pareceCodigoFila(celdas.referencia?.texto)&&
+    // Lo de la columna del código empieza a la derecha del código de arriba (texto sangrado, no otro código corto: «R-2»).
+    (!celdas.referencia||celdas.referencia.x0>actual.celdas.referencia.x1)&&
+    linea.y-yAnterior<=1.8*Math.max(linea.alto,altoFila)&&!RE_ANOTACION.test(textoLinea)){
+   const texto=[celdas.referencia?.texto,celdas.descripcion?.texto].filter(Boolean).join(" ").trim();
+   if(texto)actual.continuaciones.push(texto);
+   for(const [k,c] of Object.entries(celdas))if(!["referencia","descripcion"].includes(k))actual.celdas[k]=c;
+   actual.conflictos=[...actual.conflictos,...conflictos];actual.partida=actual.partida||partida;actual.textoEstimado=actual.textoEstimado||textoEstimado;
+   actual.cifrasEnSegundoRenglon=true;
    yAnterior=linea.y;continue;
   }
   if(tieneCantidad||tieneRef||tieneImportes){
@@ -725,7 +911,7 @@ function leerTablaPagina(pagina){
  }
  const precio=cols.find(c=>c.campo==="precio");
  const precioPor=precio&&/1000|MIL/.test(precio.clave)?1000:precio&&/100/.test(precio.clave)?100:1;
- return {cabecera:cab.columnas.map(c=>c.campo),filas,ignoradas,pie,indiceCabecera:cab.indice,precioPor,dudosasTrasFin};
+ return {cabecera:cab.columnas.map(c=>c.campo),filas,ignoradas,pie,indiceCabecera:cab.indice,precioPor,dudosasTrasFin,cabeceraPerfil:!!cab.de_perfil};
 }
 
 function valorPie(lineas,re,opcionesNumero){
@@ -753,10 +939,10 @@ function valorPie(lineas,re,opcionesNumero){
 const ETIQ_TOTALES={
  base:/^(BASE IMPONIBLE|BASE|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES)\b/,
  pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA)\b/,
- cuota:/^(CUOTA ?[IL1]VA|TOTAL ?[IL1]VA|IMPORTE IVA|I V A|IVA)\b/,
+ cuota:/^(CUOTA ?[IL1]VA|TOTAL ?[IL1]VA|IMPORTE ?I ?V ?A|I V A|IVA)\b/,
  total:/^(TOTAL A PAGAR|TOTAL ALBARAN|IMPORTE TOTAL|TOTAL EUR|TOTAL)\b/
 };
-const EXCLUIR_TOTAL=/^TOTAL ?(LINEAS|[IL1]VA|RE|NETO|BRUTO)\b/;
+const EXCLUIR_TOTAL=/^TOTAL ?(L ?[IÍ1L]? ?N ?E ?A ?S|[IL1] ?[IÍ1L]? ?N ?E ?A ?S|[IL1]VA|RE|NETO|BRUTO)\b/;
 function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={}){
  const out=[];
  lineas.forEach((linea,li)=>{let saltar=-1;linea.celdas.forEach((celda0,ci)=>{
@@ -771,7 +957,8 @@ function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={})
    }
   }
   const k=clave(celda.texto);const m=k.match(re);
-  if(!m||(excluir&&excluir.test(k)))return;
+  // La exclusión mira también la palabra siguiente («Total» «Iíneas:» del OCR no es el total).
+  if(!m||(excluir&&(excluir.test(k)||(sig&&excluir.test(clave(celda0.texto+" "+sig.texto))))))return;
   saltar=ci+usadas;
   const resto=celda.texto.slice(m[0].length).replace(/^[\s:€]+/,"").trim();
   const textos=[resto,...linea.celdas.slice(ci+1+usadas,ci+4+usadas).map(c=>c.texto)];
@@ -877,6 +1064,49 @@ function importeEnColumnaDescuento(f,opcionesNumero,precioPor){
  f.descuento={...descuento,caja,conf_ocr:f.descuento.conf_ocr,notas:[...(descuento.notas||[]),nota]};
 }
 /*
+ * ¿Cuadra la línea? También un abono con la cantidad negativa y el importe impreso en positivo (fallo real 2026-11-20, proveedor
+ * escaneado: «-1 × precio − 50 % = importe» con el importe sin signo): el mismo valor con otro signo. Solo para las resoluciones de abajo; el cuadre general no cambia.
+ */
+function cuadraAunConSigno(f,precioPor){
+ if(cuadre(f,precioPor).estado==="VERIFICADO")return true;
+ return f.cantidad?.estado==="OK"&&f.cantidad.valor<0&&f.importe?.estado==="OK"&&f.importe.valor>0&&
+  cuadre({...f,cantidad:{...f.cantidad,valor:-f.cantidad.valor}},precioPor).estado==="VERIFICADO";
+}
+/*
+ * Descuentos caídos en la columna del importe (fallo real 2026-11-20, albarán escaneado: «55+7» leído «55» y el «7» junto al importe;
+ * «52» junto al importe con el descuento vacío): con enteros de 1 o 2 cifras a la izquierda y una cifra con decimales a la derecha,
+ * se prueba que los enteros sean descuentos (en cascada tras los leídos) y la última el importe. Solo si la línea cuadra; si no,
+ * «varias cifras en la misma columna» como siempre.
+ */
+function descuentoEnColumnaImporte(f,celda,opcionesNumero,precioPor){
+ if(!celda?._otras?.length||!["OK","VACIO"].includes(f.descuento.estado))return false;
+ const cel=[celda,...celda._otras].sort((a,b)=>a.x0-b.x0),textos=cel.map(c=>String(c.texto||"").trim());
+ const ints=textos.slice(0,-1),ultimo=textos[textos.length-1];
+ if(!ints.length||!ints.every(t=>/^\d{1,2}$/.test(t)&&+t>0)||!/[.,]\d{2,4}$/.test(ultimo))return false;
+ const importe=N().numero(ultimo,opcionesNumero);
+ if(importe.estado!=="OK")return false;
+ const previos=f.descuento.estado==="OK"?String(f.descuento.literal||"").trim():"";
+ const descuento=campoDescuento({texto:[previos,...ints].filter(Boolean).join(" ")},opcionesNumero);
+ if(descuento.estado!=="OK")return false;
+ if(!cuadraAunConSigno({...f,importe:{...importe,estado:"OK"},descuento},precioPor))return false;
+ const nota="Descuento «"+ints.join(" ")+"» leído en la columna del importe («"+textos.join(" ")+"»): el cuadre de la línea lo confirma";
+ const conf=Math.min(...cel.map(c=>c.conf??100));
+ f.importe={...importe,caja:f.importe.caja,conf_ocr:conf,notas:[...(importe.notas||[]),nota]};
+ f.descuento={...descuento,caja:f.descuento.caja,conf_ocr:f.descuento.conf_ocr,notas:[...(descuento.notas||[]),nota]};
+ return true;
+}
+/*
+ * Descuento con un punto detrás («50.», fallo real 2026-11-20): el punto no es un separador decimal (no hay cifras detrás). Se
+ * acepta como el entero solo si la línea cuadra con él.
+ */
+function descuentoConPunto(f,opcionesNumero,precioPor){
+ const lit=String(f.descuento.literal||"").trim();
+ if(f.descuento.estado!=="AMBIGUO"||!/^\d{1,2}\.$/.test(lit))return;
+ const descuento=campoDescuento({texto:lit.slice(0,-1)},opcionesNumero);
+ if(descuento.estado!=="OK"||!cuadraAunConSigno({...f,descuento},precioPor))return;
+ f.descuento={...descuento,literal:lit,caja:f.descuento.caja,conf_ocr:f.descuento.conf_ocr,notas:[...(descuento.notas||[]),"Descuento «"+lit+"»: el punto final no es decimal; el cuadre de la línea lo confirma"]};
+}
+/*
  * Cantidad ilegible (tapada por una firma o un sello) con precio, descuento e importe
  * válidos: se calcula qué cantidad haría cuadrar la línea y se ofrece al revisor como
  * sugerencia. NUNCA se asigna como valor: la cantidad queda vacía y la línea en revisión.
@@ -904,10 +1134,13 @@ function cuadre(f,precioPor){
   return {estado:"INCOMPLETO",detalle:"Falta un valor válido de cantidad, precio, descuento o importe"};
  const factor=f.descuento.estado==="OK"?f.descuento.factor:1;
  const decImporte=f.importe.decimales||2;
- const tol=Math.max(0.011,1.1*10**-decImporte);
+ // Con 3 o 4 decimales impresos la tolerancia es la de esos decimales (0,011 aceptaba un importe con la última cifra mal leída).
+ const tol=decImporte>2?1.1*10**-decImporte:0.011;
+ // Abono con la cantidad negativa y el importe impreso en positivo (fallo real 2026-11-20): se compara el valor.
+ const qv=f.cantidad.valor<0&&f.importe.valor>0?-f.cantidad.valor:f.cantidad.valor;
  const cumple=por=>{
-  const bruto=f.cantidad.valor*f.precio.valor/por;
-  const q=f.cantidad.valor,p=f.precio.valor/por;
+  const bruto=qv*f.precio.valor/por;
+  const q=qv,p=f.precio.valor/por;
   // Variantes de redondeo habituales: sobre el bruto o sobre el precio neto unitario.
   const variantes=[bruto*factor,redondear(bruto)*factor,redondear(redondear(bruto)*factor),
    q*redondear(p*factor,4),q*redondear(p*factor,2),redondear(q*redondear(p*factor,4))];
@@ -926,12 +1159,15 @@ function cuadre(f,precioPor){
  * Se prueban solo esas hipótesis sobre cantidad, precio e importe leídos por OCR y se
  * aceptan si UNA única combinación hace cuadrar la línea. Si no, nada cambia.
  */
-function hipotesisOCR(campo,opcionesNumero){
+function hipotesisOCR(campo,opcionesNumero,{digitoInicial=false}={}){
  const lit=String(campo?.literal||"").replace(/\s+/g,"");
  const out=[];
  if(["OK","VERIFICADO"].includes(campo?.estado))out.push({valor:campo.valor,reparado:null});
  if(campo?.conf_ocr==null||!lit)return out;
  const pon=t=>{const n=N().numero(t,{...opcionesNumero,formatoConfirmado:true});if(n.estado==="OK"&&!out.some(o=>o.valor===n.valor))out.push({valor:n.valor,reparado:t,decimales:n.decimales});};
+ // Importe con la primera cifra perdida («11,4068» leído «1,4068»: unos finos pegados al borde). Solo con 4 o más cifras
+ // leídas, que el cuadre tiene que reproducir todas; la cifra perdida la decide el cuadre y solo si una única la explica.
+ if(digitoInicial&&/^\d{1,3},\d{2,4}$/.test(lit)&&lit.replace(/\D/g,"").length>=4)for(let d=1;d<=9;d++)pon(d+lit);
  if(/^\d+\.\d{2,4}$/.test(lit)&&!/^\d{1,3}\.\d{3}$/.test(lit))pon(lit.replace(".",","));
  if(/^\d{1,3}(\.\d{3})*\.\d{2,4}$/.test(lit))pon(lit.replace(/\.(\d{2,4})$/,",$1"));
  if(/^\d{3,}$/.test(lit))for(const d of [opcionesNumero.decimales,2,4].filter((x,i,a)=>x&&a.indexOf(x)===i))
@@ -940,7 +1176,7 @@ function hipotesisOCR(campo,opcionesNumero){
 }
 function repararSeparadoresOCR(f,opcionesNumero,precioPor){
  const campos=["cantidad","precio","importe"];
- const opciones=campos.map(k=>hipotesisOCR(f[k],opcionesNumero));
+ const opciones=campos.map(k=>hipotesisOCR(f[k],opcionesNumero,{digitoInicial:k==="importe"}));
  if(opciones.some(o=>!o.length)||!opciones.some(o=>o.some(x=>x.reparado)))return;
  const validas=[];
  for(const q of opciones[0])for(const p of opciones[1])for(const i of opciones[2]){
@@ -955,9 +1191,11 @@ function repararSeparadoresOCR(f,opcionesNumero,precioPor){
   const k=campos[j];
   if(!h.reparado)return;
   f[k]={...f[k],valor:h.valor,estado:"OK",motivos:[],decimales:h.decimales??f[k].decimales,
-   notas:[...(f[k].notas||[]),"Separador decimal del OCR corregido («"+f[k].literal+"» → «"+h.reparado+"») y confirmado por el cuadre"]};
+   notas:[...(f[k].notas||[]),(h.reparado.replace(/\D/g,"").length>String(f[k].literal).replace(/\D/g,"").length?"Primera cifra perdida por el OCR":"Separador decimal del OCR corregido")+
+    " («"+f[k].literal+"» → «"+h.reparado+"») y confirmado por el cuadre"]};
  });
- f.cuadre=cuadre(f,precioPor);
+ // Cuadra tras reparar la lectura: al comparar lecturas OCR, vale menos que una que cuadra tal cual (escaneado.js, puntuar).
+ f.cuadre={...cuadre(f,precioPor),reparado:true};
 }
 
 /*
@@ -1008,10 +1246,17 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   cruda.partida=true;
  }
  if(c.descuento2)f.notas.push("Dos columnas de descuento aplicadas en cascada");
+ // «NETO» (sin descuento) de la columna del descuento leído al final de la descripción (prueba real
+ // 2026-10-28): no es parte de la descripción; el cuadre de la línea decide.
+ if(f.descuento.estado==="VACIO"&&!f.descuento.literal&&/\sNETO$/.test(f.descripcion.literal||"")&&(c.precio||c.importe)){
+  f.descripcion={...f.descripcion,literal:f.descripcion.literal.replace(/\s+NETO$/,""),valor:f.descripcion.literal.replace(/\s+NETO$/,""),
+   notas:[...(f.descripcion.notas||[]),"«NETO» de la columna del descuento separado de la descripción"]};
+  f.descuento={...campoDescuento({texto:"NETO"},opcionesNumero),caja:null,conf_ocr:null,notas:["«NETO» impreso: precio neto, sin descuento"]};
+ }
  if(cruda.continuaciones.length){
   f.descripcion.literal=[f.descripcion.literal,...cruda.continuaciones].filter(Boolean).join(" ");
   f.descripcion.valor=f.descripcion.literal||null;f.descripcion.estado=f.descripcion.literal?"OK":"VACIO";
-  f.notas.push("Descripción en "+(cruda.continuaciones.length+1)+" renglones");
+  f.notas.push("Descripción en "+(cruda.continuaciones.length+1)+" renglones"+(cruda.cifrasEnSegundoRenglon?"; las cifras van en el último":""));
  }
  if(cruda.continuacionRef?.length){
   f.referencia={...f.referencia,literal:[f.referencia.literal,...cruda.continuacionRef].join(" "),
@@ -1029,11 +1274,24 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   f.descripcion.texto_previo=cruda.textoPrevio;
   f.descripcion.motivos=[...(f.descripcion.motivos||[]),"Texto justo encima de la línea: «"+cruda.textoPrevio+"» (¿primer renglón de la descripción o anotación?)"];
  }
+ const importeResuelto=cruda.conflictos.includes("importe")&&descuentoEnColumnaImporte(f,cruda.celdas?.importe,opcionesNumero,precioPor);
  for(const campo of cruda.conflictos){
+  if(campo==="importe"&&importeResuelto)continue;
   f[campo]={...f[campo],valor:null,estado:"AMBIGUO",motivos:[...(f[campo].motivos||[]),"Varias cifras en la misma columna"]};
  }
  importeEnColumnaDescuento(f,opcionesNumero,precioPor);
+ descuentoConPunto(f,opcionesNumero,precioPor);
  f.cuadre=cuadre(f,precioPor);
+ // Descuento sin título (asignar, _sinTitulo): solo si con él la línea cuadra con su importe; si no, como antes, dos cifras en
+ // la columna del precio y ninguna se acepta.
+ if(cruda.celdas.descuento?._sinTitulo){
+  if(f.cuadre.estado==="VERIFICADO")f.notas.push("Descuento sin título junto al precio: aceptado porque la línea cuadra con su importe");
+  else{
+   f.descuento=campoDescuento(undefined,opcionesNumero);
+   f.precio={...f.precio,valor:null,estado:"AMBIGUO",motivos:[...(f.precio.motivos||[]),"Varias cifras en la misma columna"]};
+   f.cuadre=cuadre(f,precioPor);
+  }
+ }
  if(f.cuadre.estado!=="VERIFICADO")repararSeparadoresOCR(f,opcionesNumero,precioPor);
  sugerirCantidad(f,precioPor);
  const numericos=["cantidad","precio","descuento","importe","subtotal"];
@@ -1123,6 +1381,13 @@ function confianzaCampo(c,{obligatorio=false}={}){
  // Sin verificación independiente, solo una lectura OCR muy segura se considera fiable.
  return ocr>=90?0.95:ocr>=80?0.85:ocr>=60?0.75:0.6;
 }
+// ¿La cantidad de la línea es un entero de 3 o más cifras («400») y alguna otra línea la imprime con decimales («2,00»)?
+function comaPerdida(l,lineas){
+ const cifra=x=>(String(x?.literal??"").trim().match(/^-?[\d.,]+/)||[""])[0];
+ const propia=cifra(l.cantidad);
+ if(!/^-?\d{3,}$/.test(propia))return false;
+ return lineas.some(o=>o!==l&&/^-?\d+[.,]\d{1,3}$/.test(cifra(o.cantidad)));
+}
 function aplicarConfianza(salida,perfil){
  const r2=x=>Math.round(x*100)/100;
  const p=salida.proveedor;
@@ -1136,6 +1401,13 @@ function aplicarConfianza(salida,perfil){
    cantidad:confianzaCampo(l.cantidad,{obligatorio:true}),
    precio:confianzaCampo(l.precio),descuento:confianzaCampo(l.descuento),importe:confianzaCampo(l.importe)
   };
+  // OCR: cantidad entera de 3 o más cifras, sin cuadre que la confirme, entre cantidades impresas con decimales («2,00»):
+  // la coma puede no haberse leído (fallo real 2026-11-12, Isolana sin precios: «4,00 UN» leído «400 UN» y aceptado).
+  if(salida.tipo_pdf!=="DIGITAL"&&l.cantidad?.estado==="OK"&&partes.cantidad>=0.9&&comaPerdida(l,salida.lineas)){
+   partes.cantidad=0.5;
+   const m="Cantidad sin decimales entre cantidades con decimales: la coma puede no haberse leído";
+   if(!(l.cantidad.motivos||[]).includes(m)){l.cantidad.motivos=[...(l.cantidad.motivos||[]),m];l.motivos=[...(l.motivos||[]),"Cantidad: "+m];}
+  }
   // OCR, línea con cifras pero sin cuadre: una cifra vacía puede estar impresa y no leída.
   if(salida.tipo_pdf!=="DIGITAL"&&l.cuadre?.estado==="INCOMPLETO")
    for(const k of ["precio","descuento","importe"])if(l[k]?.estado==="VACIO")partes[k]=Math.min(partes[k]??1,0.5);
@@ -1149,6 +1421,14 @@ function aplicarConfianza(salida,perfil){
   if(salida.tipo_pdf!=="DIGITAL"&&/[A-Z]/i.test(ref)&&/\d/.test(ref)&&/[O0S5I1lB8Z2G6]/.test(ref)&&partes.referencia>0.85&&!l.referencia.validado_catalogo&&!l.referencia.validado_confirmada&&!confirmadoVision){
    partes.referencia=0.85;
    const m="Código alfanumérico con caracteres que el OCR confunde (O/0, S/5, I/1, B/8, Z/2, G/6): requiere validación";
+   if(!(l.referencia.motivos||[]).includes(m))l.referencia.motivos=[...(l.referencia.motivos||[]),m];
+  }
+  // Perfil con formato de código: un código que no lo tiene no se acepta por sí solo (fallo real 2026-11-13: la anotación
+  // «OBRA *** NOMBRE 1,00» aceptada como artículo «OBRA»). El catálogo o una confirmación sí pueden validarlo.
+  const refFormato=perfil?.formato_referencia?new RegExp(perfil.formato_referencia):null;
+  if(refFormato&&ref&&!refFormato.test(ref.trim())&&partes.referencia>0.5&&!l.referencia.validado_catalogo&&!l.referencia.validado_confirmada){
+   partes.referencia=0.5;
+   const m="El código no tiene el formato de código del proveedor";
    if(!(l.referencia.motivos||[]).includes(m))l.referencia.motivos=[...(l.referencia.motivos||[]),m];
   }
   for(const [k,v] of Object.entries(partes))if(l[k]&&v!==null)l[k].confianza=r2(v);
@@ -1201,7 +1481,9 @@ function extraerDePaginas(paginas,opciones={}){
  const tablas=digitales.map(p=>({p,t:leerTablaPagina(p)}));
  const primera=tablas[0];
  salida.proveedor=identificarProveedor(digitales,registro,primera.t?primera.p.lineas[primera.t.indiceCabecera].y:null);
- const perfil=salida.proveedor.id?registro.proveedores.find(p=>p.id===salida.proveedor.id):null;
+ const idPerfil=salida.proveedor.id||opciones.proveedorId;
+ const perfil=idPerfil?registro.proveedores.find(p=>p.id===idPerfil):null;
+ if(perfil?.columnas)for(const x of tablas)x.t=leerTablaPagina(x.p,perfil);
  const opcionesFecha={hoy:opciones.hoy,orden:perfil?.orden_fecha||"DMY"};
  const zona=primera.t?primera.p.lineas.slice(0,primera.t.indiceCabecera):primera.p.lineas;
  salida.numero=leerNumero(zona);
@@ -1215,9 +1497,37 @@ function extraerDePaginas(paginas,opciones={}){
   if(h.length===1)salida.numero={literal:h[0].texto,valor:h[0].texto,estado:"OK",motivos:[],notas:["Número tras la etiqueta propia del proveedor «"+h[0].etiqueta+"»"],
    caja:caja(h[0].celda),conf_ocr:h[0].celda?.conf??null};
  }
+ // Confirmación de pedido (opciones.numeroDePedido, usuario 2026-11-17; real: «PRESUPUESTO XXXX 2600000»): el número tras
+ // «PRESUPUESTO», «PEDIDO», «OFERTA» o «CONFIRMACIÓN»; solo si hay uno y lleva cifras. Nunca en los albaranes (su «Nº PEDIDO» no
+ // es el número del albarán).
+ if(opciones.numeroDePedido&&salida.numero.estado!=="OK"){
+  const h=[...new Map(valoresEtiquetados(primera.p.lineas,/^(PRESUPUESTO|PEDIDO|OFERTA|CONFIRMACION( DE)? PEDIDO|N(º|O)? ?(DE )?(PEDIDO|PRESUPUESTO|OFERTA))(\b|$)/i,/$^/,t=>/\d{3,}/.test(t),
+   // Fallo real 2026-11-18: a la derecha de «PRESUPUESTO», en otra columna, el código postal de DAFRICA; el número iba debajo.
+   {huecoDerecha:8,unirDerecha:true}).map(x=>[x.texto,x])).values()];
+  if(h.length===1)salida.numero={literal:h[0].texto,valor:h[0].texto,estado:"OK",motivos:[],notas:["Número del pedido tras «"+h[0].etiqueta+"»"],
+   caja:caja(h[0].celda),conf_ocr:h[0].celda?.conf??null};
+ }
+ // Factura de proveedor (opciones.numeroDeFactura, usuario 2026-11-20; real: casilla «NÚMERO» con «A | 000123» debajo y, en las
+ // líneas, «ALBARAN Nº …» de cada albarán facturado): el número de la factura tras «NÚMERO», «Nº FACTURA» o «FACTURA», aunque el
+ // lector haya tomado otro (los «ALBARÁN Nº» de una factura son los albaranes que cita, no su número). Solo si hay uno.
+ if(opciones.numeroDeFactura){
+  const h=[...new Map(valoresEtiquetados(primera.p.lineas,/^(N(º|O)? ?(DE )?FACTURA|NUM(ERO)? (DE )?FACTURA|FACTURA( N(º|O)?)?|NUMERO|NUM)(\b|$)/i,
+   /ALBARAN|PEDIDO|CLIENTE|PROVEEDOR|RECTIFICA|PAGINA|CUENTA|IBAN|TELEF|OBRA|CIF|NIF/,
+   // Forma de número de documento: serie de letras opcional y cifras («A 000123», «FV26-001234»); nunca una fecha ni una dirección.
+   t=>/^[A-Z]{0,4}[ \/-]?\d[\d.\/ -]{2,}$/i.test(t.trim())&&!/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(t.trim()),{huecoDerecha:8,unirDerecha:true}).map(x=>[x.texto,x])).values()];
+  // El título «FACTURA» encima de la casilla «NÚMERO» da las mismas cifras sin la serie («000123» y «A 000123»): si todas las
+  // lecturas son las mismas cifras, vale la más completa.
+  const cifras=t=>t.replace(/\D/g,"");
+  if(h.length>1&&h.every(x=>cifras(x.texto)===cifras(h[0].texto)))h.sort((a,b)=>b.texto.length-a.texto.length).splice(1);
+  if(h.length===1)salida.numero={literal:h[0].texto,valor:h[0].texto,estado:"OK",motivos:[],notas:["Número de la factura tras «"+h[0].etiqueta+"»"],
+   caja:caja(h[0].celda),conf_ocr:h[0].celda?.conf??null};
+ }
+ // El formato de número del perfil es el de sus ALBARANES: no vale para el número de una factura ni de una confirmación de
+ // pedido (fallo real 2026-11-20: «A 000123» de una factura quedaba en revisión por no tener la forma de sus albaranes).
+ const perfilNumero=opciones.numeroDeFactura||opciones.numeroDePedido?null:perfil;
  // Número sin etiqueta o tras una serie («L26-01234 01/10/2026», «ALBARÁN AB26 001234»): con el
  // formato propio del proveedor se busca en la primera página; solo se acepta si hay uno solo.
- if(perfil?.formato_numero&&!(salida.numero.estado==="OK"&&new RegExp(perfil.formato_numero).test(salida.numero.valor))){
+ if(perfilNumero?.formato_numero&&!(salida.numero.estado==="OK"&&new RegExp(perfil.formato_numero).test(salida.numero.valor))){
   const r=numeroPorFormato(primera.p,perfil,salida.numero,opcionesFecha);
   if(r){
    salida.numero=r.numero;
@@ -1226,9 +1536,10 @@ function extraerDePaginas(paginas,opciones={}){
  }
  // Formato de número propio del proveedor (comprobado en sus albaranes reales): un número que
  // no lo cumple («26101234» por «26/01234») no se acepta.
- if(perfil?.formato_numero&&salida.numero.estado==="OK"&&!new RegExp(perfil.formato_numero).test(salida.numero.valor)){
+ if(perfilNumero?.formato_numero&&salida.numero.estado==="OK"&&!new RegExp(perfilNumero.formato_numero).test(salida.numero.valor)){
   salida.numero={...salida.numero,estado:"REVISAR",motivos:[...salida.numero.motivos,"No tiene el formato de número habitual del proveedor"]};
  }
+ separadorDelNumero(salida.numero,perfilNumero);
  const sinEtiqueta=f=>f.motivos.some(m=>/sin etiqueta/i.test(m));
  if((salida.fecha.estado==="VACIO"||sinEtiqueta(salida.fecha))&&primera.t){
   const f=leerFecha(primera.p.lineas,opcionesFecha);
@@ -1260,6 +1571,8 @@ function extraerDePaginas(paginas,opciones={}){
    const v=restituirGlifos(fila.descripcion.valor,perfil);
    if(v!==fila.descripcion.valor){fila.descripcion={...fila.descripcion,valor:v,notas:[...(fila.descripcion.notas||[]),"Símbolo restituido según el formato del proveedor (el OCR no lo reconoce)"]};}
   }
+  // Posición de la línea en su página (para saber bajo qué «ALBARÁN Nº» de una factura va; 2026-11-23).
+  if(cruda.y!=null&&fila.y==null)fila.y=cruda.y;
   salida.lineas.push(fila);
  }
  // Fila sin código pegada debajo de otra y en la columna de descripción («LATON 2» separado de
@@ -1299,12 +1612,23 @@ function extraerDePaginas(paginas,opciones={}){
  salida.pie={total_lineas:totalLineas,suma_lineas_impresa:sumaLineasImpresa,base_imponible:base};
  // Geometría de las tablas (para relecturas por zonas en documentos escaneados).
  salida.tablas=tablas.map(x=>x.t?{pagina:x.p.numero,y_cabecera:x.p.lineas[x.t.indiceCabecera].y-x.p.lineas[x.t.indiceCabecera].alto,
-  y_fin:x.t.pie.length?x.t.pie[0].y:(x.p.lineas.at(-1)?.y??x.p.alto),ancho:x.p.ancho,alto:x.p.alto}:{pagina:x.p.numero,y_cabecera:null});
+  y_fin:x.t.pie.length?x.t.pie[0].y:(x.p.lineas.at(-1)?.y??x.p.alto),ancho:x.p.ancho,alto:x.p.alto,...(x.t.cabeceraPerfil?{cabecera_perfil:true}:{})}:{pagina:x.p.numero,y_cabecera:null});
  // Tipo de documento impreso: «ABONO» o «DEVOLUCIÓN» (sello o título) frente a albarán.
- const textoDoc=clave(paginas.flatMap(p=>p.lineas.map(l=>l.texto)).join(" "));
- const tipoImpreso=/\bABONO\b/.test(textoDoc)?"ABONO":/\bDEVOLUCION\b/.test(textoDoc)?"DEVOLUCION":null;
+ // Solo como título o sello (renglón corto: «*ABONO*», «ALBARÁN RECTIFICATIVO»), nunca dentro de una frase
+ // de las condiciones («No se admitirá su devolución»: prueba real 2026-10-28).
+ const renglones=paginas.flatMap(p=>p.lineas.map(l=>clave(l.texto))).filter(t=>t.split(/\s+/).filter(Boolean).length<=4);
+ const titulo=re=>renglones.some(t=>re.test(t));
+ const tipoImpreso=titulo(/\bABONO\b/)?"ABONO":titulo(/\bRECTIFICATIV[OA]\b/)?"RECTIFICATIVO":titulo(/\bDEVOLUCION\b/)?"DEVOLUCION":null;
+ // Clase de documento por su título impreso (usuario, 2026-11-17: «¿cómo diferencia un albarán de un pedido?»): «ALBARÁN» frente
+ // a «PEDIDO», «CONFIRMACIÓN DE PEDIDO», «OFERTA», «PRESUPUESTO» o «PROFORMA» como renglón propio (nunca «Su pedido: …» ni una
+ // columna con más texto). Solo cuenta si sale uno y no el otro; si no, no se sabe (null).
+ // «ALBARÁN» al principio de un renglón, aunque siga el número y la fecha («ALBARÁN Nº 600.111 FECHA …»).
+ const empieza=re=>paginas.some(p=>p.lineas.some(l=>re.test(clave(l.texto))));
+ const tituloAlbaran=empieza(/^\W*ALBARAN(ES)?\b/i)||empieza(/^\W*NOTA DE ENTREGA\b/i);
+ const tituloPedido=titulo(/^\W*(CONFIRMACION( DE)? (PEDIDO|ORDEN)|PEDIDO( DE (CLIENTE|COMPRA|VENTA|PROVEEDOR))?|OFERTA|PRESUPUESTO|(FACTURA )?PROFORMA)(\W+N\W*\S*)?\W*$/i);
+ const claseImpresa=tituloPedido&&!tituloAlbaran?"PEDIDO":tituloAlbaran&&!tituloPedido?"ALBARAN":null;
  Object.defineProperty(salida,"_ctx",{enumerable:false,writable:true,value:{
-  perfil,totalLineas,base,tipoImpreso,hayTabla:tablas.some(x=>x.t),columnas:primera.t?.cabecera||[],opcionesNumero,precioPor,
+  perfil,perfilNumero,totalLineas,base,tipoImpreso,claseImpresa,hayTabla:tablas.some(x=>x.t),columnas:primera.t?.cabecera||[],opcionesNumero,precioPor,
   // Cifras impresas en el pie (para completar totales cuya etiqueta no se ha leído).
   cifrasPie:pie.flatMap(l=>l.celdas.flatMap(c=>String(c.texto).split(/\s+/).map(t=>t.replace(/[€%]/g,"").trim()).filter(t=>/\d/.test(t))
    .map(t=>({literal:t,...N().numero(t,opcionesNumero),caja:caja(c),conf:c.conf??null})).filter(x=>x.estado==="OK"))),
@@ -1353,11 +1677,42 @@ function completarTotales(salida,ctx){
  }
 }
 
+/*
+ * «600,111» (ficticio) con el formato del proveedor «ddd.ddd»: las mismas cifras con su separador impreso. Se acepta
+ * el número con el separador del formato (las cifras no cambian) y queda anotado. Cualquier otra
+ * diferencia no se corrige.
+ */
+function separadorDelNumero(numero,perfil){
+ if(!perfil?.formato_numero||!numero||numero.estado!=="REVISAR"||!/,/.test(String(numero.valor||"")))return;
+ const re=new RegExp(perfil.formato_numero),v=String(numero.valor).replace(/,/g,".");
+ if(!perfil.formato_numero.includes("\\.")||!re.test(v))return;
+ numero.valor=v;numero.estado="OK";
+ numero.motivos=numero.motivos.filter(m=>!/formato de número habitual/.test(m));
+ numero.notas=[...(numero.notas||[]),"Impreso con coma («"+numero.literal+"»): mismas cifras con el separador del formato del proveedor"];
+ numero.resolucion={metodo:"formato_proveedor",evidencias:["Formato "+perfil.formato_numero,"Mismas cifras impresas: «"+numero.literal+"»"]};
+}
+
 /* Validaciones de documento, confianza y estado. Se puede repetir tras combinar lecturas. */
 function finalizar(salida){
  const ctx=salida._ctx,incidencias=[...ctx.incidenciasBase];
+ // Formato de número del proveedor, también tras combinar lecturas OCR (prueba real 2026-10-28: «0.01»,
+ // la casilla del descuento junto al título «ALBARÁN» llegó a número aceptado desde otra lectura).
+ const perfilNum=ctx.perfilNumero;
+ if(perfilNum?.formato_numero&&salida.numero?.estado==="OK"&&!new RegExp(perfilNum.formato_numero).test(salida.numero.valor)){
+  const n={...salida.numero,estado:"REVISAR",motivos:[...(salida.numero.motivos||[])]};
+  separadorDelNumero(n,perfilNum);
+  if(n.estado!=="OK")n.motivos.push("No tiene el formato de número habitual del proveedor");
+  salida.numero=n;
+ }
+ // Albarán sin ningún precio: un total impreso sin base ni IVA que lo cuadren no es fiable (prueba real
+ // 2026-10-28: totales sin respaldo en albaranes sin precios). Nunca se acepta un importe así.
+ const sinPrecios=salida.lineas.length>0&&salida.lineas.every(l=>l.precio?.valor==null&&l.importe?.valor==null);
+ if(sinPrecios&&salida.totales?.total&&salida.totales.total.valor!=null&&salida.totales.validacion?.estado!=="OK"){
+  salida.totales.total={...salida.totales.total,estado:"REVISAR",motivos:[...(salida.totales.total.motivos||[]),"Albarán sin precios: total sin base ni IVA que lo respalden"]};
+ }
  // Tipo: impreso («ABONO») o deducido de importes y cantidades negativos (devolución).
  const negativos=salida.lineas.length>0&&salida.lineas.every(l=>l.cantidad.valor<0||l.importe.valor<0);
+ salida.clase_impresa=ctx.claseImpresa||null;
  salida.tipo_documento=ctx.tipoImpreso?{valor:"ABONO",evidencia:"Impreso «"+ctx.tipoImpreso+"» en el documento"}:
   negativos?{valor:"ABONO",evidencia:"Todas las líneas tienen cantidad o importe negativo"}:{valor:"ALBARAN",evidencia:null};
  salida.validaciones=[];salida.incidencias=incidencias;
@@ -1392,6 +1747,13 @@ function finalizar(salida){
    t.total={...t.total,estado:"REVISAR",motivos:[...(t.total.motivos||[]),"No coincide con la suma de líneas a ningún tipo de IVA (¿líneas sin leer u otros cargos?)"]};
    v("total_con_lineas","FALLO","Suma de líneas "+suma+" sin tipo de IVA que dé el total «"+t.total.literal+"»");
   }
+ }
+ // Cuota de IVA que no es base × % (prueba real 2026-10-28: el «21» de la columna «I.V.A.» leído como
+ // cuota en lugar del importe de «Importe I.V.A.»): nunca se acepta.
+ const ac=x=>["OK","VERIFICADO"].includes(x?.estado)&&x.valor!=null;
+ if(t&&ac(t.base_imponible)&&ac(t.iva_porcentaje)&&ac(t.cuota_iva)&&Math.abs(redondear(t.base_imponible.valor*t.iva_porcentaje.valor/100)-t.cuota_iva.valor)>0.021){
+  t.cuota_iva={...t.cuota_iva,estado:"REVISAR",motivos:[...(t.cuota_iva.motivos||[]),"No es base × IVA ("+t.base_imponible.literal+" × "+t.iva_porcentaje.literal+" %)"]};
+  v("cuota_iva","FALLO","Cuota «"+t.cuota_iva.literal+"» ≠ base × IVA");
  }
  if(ctx.dudosas.length)v("fin_de_tabla","FALLO","Posibles artículos después del final detectado de la tabla: "+ctx.dudosas.map(t=>"«"+t+"»").join("; "));
  for(const x of salida.validaciones_extra||[])salida.validaciones.push(x);

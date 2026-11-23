@@ -14,7 +14,7 @@
  else{root.DafricaAlbaranes=root.DafricaAlbaranes||{};root.DafricaAlbaranes.etiquetas=api;}
 })(typeof globalThis!=="undefined"?globalThis:this,function(){
 const PREFIJO="DAFRICA-OBRA:";
-const RE=/^DAFRICA-OBRA:(PRY\d{5})$/;
+const RE=/^DAFRICA-OBRA:(PRY(?:MP)?\d{5})$/;
 const contenido=codigo=>PREFIJO+codigo;
 
 /* QR de obra de cada página (imagen en grises reducida a la mitad: un QR de 2,5 cm sobra). */
@@ -60,7 +60,7 @@ function aplicar(r,hallazgos){
  */
 const esc=t=>String(t??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function hojaEtiquetas({codigo,nombre="",copias=21},qrcode){
- if(!/^PRY\d{5}$/.test(codigo))throw Error("Código de obra no válido (PRY y 5 cifras)");
+ if(!/^PRY(MP)?\d{5}$/.test(codigo))throw Error("Código de obra no válido (PRY o PRYMP y 5 cifras)");
  const q=qrcode(0,"M");q.addData(contenido(codigo));q.make();
  const svg=q.createSvgTag({cellSize:4,margin:2,scalable:true});
  const una='<div class="e"><div class="q">'+svg+'</div><div class="t"><b>'+esc(codigo)+'</b><span>'+esc(nombre).slice(0,60)+'</span></div></div>';

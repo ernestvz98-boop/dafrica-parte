@@ -151,3 +151,33 @@ test("«Página k» no une páginas con números de albarán distintos, ni salta
  assert.equal(continua(p1,pp2,{...p2,numero:null,pagina:{k:5,n:null}}),false);
  assert.equal(agruparPaginas([{n:1,firma:p1},{n:2,firma:p2}]).length,2);
 });
+
+// Fallo real 2026-10-30 (datos ficticios): dos albaranes seguidos sin leer número, CIF ni total se unían en uno.
+test("separación: una página con fecha propia no continúa la anterior aunque no se leyera nada más",()=>{
+ const base={nif:null,numero:null,pagina:null,sigue:false,totales:false,vacia:false,fecha:null};
+ const p1={...base,fecha:"2026-10-20"};
+ assert.equal(continua(p1,p1,{...base,fecha:"2026-10-22"}),false);
+ assert.equal(continua(p1,p1,{...base,fecha:"2026-10-20"}),false);
+ assert.equal(continua(p1,p1,{...base,pagina:{k:1,n:null}}),false);
+ // Sin fecha, ni número, ni CIF, tras una página sin total: sigue siendo continuación.
+ assert.equal(continua(p1,p1,base),true);
+ assert.equal(continua({...p1,totales:true},{...p1,totales:true},base),false);
+});
+
+// Confirmación de pedido de varias páginas (usuario, 2026-11-17: «un pedido de dos páginas lo dividió en dos»): con
+// unSoloDocumento, todas las páginas del archivo son un documento, aunque sus números no casen o vengan al revés.
+test("unSoloDocumento: todas las páginas del archivo en un solo documento",async()=>{
+ const pags=[digital(albaran("600.112"),1),digital(albaran("600.111"),2)];
+ assert.deepEqual((await leerPdf(fuenteDe(pags),opciones)).documentos.map(d=>d.paginas),[[1],[2]]);
+ assert.deepEqual((await leerPdf(fuenteDe(pags),{...opciones,unSoloDocumento:true})).documentos.map(d=>d.paginas),[[1,2]]);
+});
+// Fallo real 2026-11-18: presupuesto escaneado con «Pág: 2» delante de «Pág: 1»; las líneas salían en el orden del archivo.
+test("unSoloDocumento con las páginas al revés: las líneas en el orden impreso («Página k»)",async()=>{
+ const pag=(k,ref)=>[...albaran("600.111",ref),...fila(800,["Página",450],[k+" de 2",490])];
+ const r=await leerPdf(fuenteDe([digital(pag(2,"1300000002"),1),digital(pag(1,"1300000001"),2)]),{...opciones,unSoloDocumento:true});
+ assert.deepEqual(r.documentos[0].paginas,[1,2]);
+ assert.deepEqual(r.documentos[0].resultado.lineas.map(l=>l.referencia.valor),["1300000001","1300000002"]);
+ // Sin número de página en alguna, el orden del archivo.
+ const s=await leerPdf(fuenteDe([digital(albaran("600.111","1300000002"),1),digital(pag(1,"1300000001"),2)]),{...opciones,unSoloDocumento:true});
+ assert.deepEqual(s.documentos[0].resultado.lineas.map(l=>l.referencia.valor),["1300000002","1300000001"]);
+});

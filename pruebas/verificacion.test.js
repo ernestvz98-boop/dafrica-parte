@@ -90,3 +90,14 @@ test('CIF impreso ilegible y proveedor por nombre registrado: se completa si la 
   r=doc();verificar(r,c);assert.equal(r.proveedor.nif,null);assert.notEqual(r.proveedor.estado,'OK');
  }
 });
+// Fallo real 2026-11-18: el CIF del proveedor con dos lecturas OCR válidas (B… / E…). Solo una en el catálogo completo: esa.
+test('CIF con dos lecturas OCR: se resuelve si solo una está en el catálogo completo; si están las dos, no',()=>{
+ const otro=(NIF[0]==='E'?'B':'E')+NIF.slice(1);
+ const ambiguo=()=>{const r=documento();r.proveedor={...r.proveedor,nif:null,id:null,estado:'AMBIGUO',lecturas_nif:[otro,NIF],motivos:['Lecturas OCR válidas distintas: '+otro+' | '+NIF]};return r;};
+ const r=ambiguo();verificar(r,catalogo());
+ assert.equal(r.proveedor.estado,'OK');assert.equal(r.proveedor.account_id,1);assert.equal(r.proveedor.nif,NIF);
+ const c=catalogo();c.proveedores.push({id:2,nif:otro,nombre:'Otro ficticio'});
+ const d=ambiguo();verificar(d,c);assert.equal(d.proveedor.estado,'AMBIGUO');assert.equal(d.proveedor.account_id,undefined);
+ const i=catalogo();i.proveedores_completo=false;
+ const e=ambiguo();verificar(e,i);assert.equal(e.proveedor.estado,'AMBIGUO');
+});

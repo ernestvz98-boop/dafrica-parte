@@ -74,3 +74,19 @@ test("los artículos borrados no cuentan y un mapeo a un artículo borrado va a 
  const r=resolverArticulo({referencia:"S9",descripcion:"x"},SALTOKI,{...datos,mapeos:[{account_id:227500,referencia_canonica:"S9",item_id:8}]});
  assert.equal(r.estado,ESTADOS.REVISION);
 });
+
+// Referencia de STEL con el prefijo del proveedor (2026-10-29). Códigos ficticios.
+test("referencia con el prefijo del proveedor delante: existente si es uno; si son varios, revisión; sin separador, no",()=>{
+ const prov={account_id:9001};
+ const cat=[art(10,"X9999025 - 1000000001","PIEZA FICTICIA UNO"),art(11,"X9999- 1000000002","PIEZA FICTICIA DOS"),
+  art(12,"X9999 1000000003","PIEZA TRES"),art(13,"X99991000000003","PIEZA TRES BIS")];
+ const datos={catalogo:cat,catalogo_completo:true,mapeos:[]};
+ assert.deepEqual([resolverArticulo({referencia:"1000000001",descripcion:"OTRA"},prov,datos)].map(r=>[r.estado,r.item_id,r.via]),[[ESTADOS.EXISTENTE,10,"referencia_prefijo"]]);
+ assert.equal(resolverArticulo({referencia:"1000000002",descripcion:"OTRA"},prov,datos).item_id,11);
+ // «X99991000000003» (sin separador) no cuenta: solo «X9999 1000000003».
+ assert.equal(resolverArticulo({referencia:"1000000003",descripcion:"OTRA"},prov,datos).item_id,12);
+ const dos={...datos,catalogo:[...cat,art(14,"Y88 1000000001","PIEZA FICTICIA UNO BIS")]};
+ assert.equal(resolverArticulo({referencia:"1000000001",descripcion:"OTRA"},prov,dos).estado,ESTADOS.REVISION);
+ // Código corto: no se busca con prefijo.
+ assert.notEqual(resolverArticulo({referencia:"12345",descripcion:"OTRA"},prov,{...datos,catalogo:[art(15,"X99 12345","CORTO")]}).via,"referencia_prefijo");
+});

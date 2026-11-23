@@ -29,6 +29,14 @@ const N=()=>req?req("./normalizar.js"):root.DafricaAlbaranes.normalizar;
 const ESTADOS={EXISTENTE:"existente",MAPEADO:"mapeado",CREADO:"creado_automaticamente",REVISION:"revision_articulo",CREAR:"crear"};
 
 const refCanon=v=>N().canon(v);
+// «PREFIJO + separador + código del papel»: prefijo de 1-3 letras y cifras, separado por espacio o guion (sin separador no
+// vale: se podría partir de varias formas); código del papel de 6 caracteres o más.
+function conPrefijo(stel,papel){
+ const r=refCanon(papel);
+ if(!r||r.length<6)return false;
+ const m=String(stel??"").trim().toUpperCase().match(/^([A-Z]{1,3}\d{2,10})(\s*-\s*|\s+)(.+)$/);
+ return !!m&&refCanon(m[3])===r;
+}
 const refSinCeros=v=>refCanon(v).replace(/^0+(?=\d)/,"");
 const UNIDADES=[[/\b(METROS?|MTS?|MT)\b/g,"M"],[/\b(MILIMETROS?|MMS)\b/g,"MM"],[/\b(CENTIMETROS?|CMS)\b/g,"CM"],
  [/\b(UNIDADES|UNIDAD|UDS|UNDS|UN|U)\b/g,"UD"],[/\b(KILOS?|KGS)\b/g,"KG"],[/\b(LITROS?|LTS?|LT)\b/g,"L"]];
@@ -79,6 +87,10 @@ function resolverArticulo(linea,proveedor,datos){
  }
  // 2. Referencia exacta.
  if(ref){const r=elegir(catalogo.filter(p=>refCanon(p.reference)===ref),cat,"referencia",ESTADOS.EXISTENTE);if(r)return r;}
+ // 2b. La misma referencia con el prefijo del proveedor delante: en el STEL de DAFRICA los artículos de un proveedor
+ // llevan su prefijo («X9999025 - 1609999045» para el «1609999045» del papel; comprobado el 2026-10-29). Solo si es
+ // UNO (si son varios, revisión); igual que el robot (robot-stel/procesar-cola.js, mismaReferencia).
+ if(ref){const r=elegir(catalogo.filter(p=>conPrefijo(p.reference,linea.referencia)),cat,"referencia_prefijo",ESTADOS.EXISTENTE);if(r)return r;}
  // 3. Código de barras.
  const bc=refCanon(linea.barcode);
  if(bc){const r=elegir(catalogo.filter(p=>refCanon(p.barcode)===bc),cat,"codigo_barras",ESTADOS.EXISTENTE);if(r)return r;}

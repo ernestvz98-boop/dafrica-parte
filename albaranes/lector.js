@@ -34,6 +34,7 @@ function firmaPagina(resultado,pagina){
  return {
   nif:resultado?.proveedor?.nif||null,
   numero:num&&num.estado!=="VACIO"&&num.valor?M("normalizar").canon(num.valor):null,
+  fecha:resultado?.fecha?.valor||null,
   pagina:m?{k:+m[1],n:+m[2]}:(m2=>m2?{k:+m2[1],n:null}:null)(texto.match(RE_PAGINA_SOLA)),
   sigue:RE_SIGUE.test(texto),
   totales:resultado?.totales?.total?.estado&&resultado.totales.total.estado!=="VACIO",
@@ -56,7 +57,9 @@ function continua(primera,ultima,f){
  if(f.pagina&&f.pagina.k===1)return false;
  if(f.nif&&primera.nif&&f.nif!==primera.nif)return false;
  if(f.numero&&primera.numero)return f.numero===primera.numero;
- if(!f.numero&&!f.nif)return ultima.sigue||!ultima.totales;
+ // Sin número ni CIF leídos, solo continúa una página sin cabecera propia: con fecha impresa es otro albarán aunque no se
+ // haya leído ni el número (fallo real 2026-10-30: dos albaranes del mismo proveedor, sin leer su total, unidos en uno).
+ if(!f.numero&&!f.nif)return !f.fecha&&(ultima.sigue||!ultima.totales);
  // Misma cabecera de proveedor sin número propio tras «SUMA Y SIGUE»: continuación anunciada.
  if(!f.numero&&f.nif===primera.nif&&ultima.sigue)return true;
  return false;
@@ -99,6 +102,39 @@ const textoError=e=>e?.message||(typeof e==="string"?e:(()=>{try{return JSON.str
  * opciones: {registro, hoy, tamLote (páginas por bloque de progreso), alProgresar(info),
  *            cancelado() → true para detener, vision (motor de manuscritos, opcional)}
  */
+/*
+ * Coherencia del lote (evidencia permitida: «coherencia del lote»). Proveedores con números correlativos en
+ * el tiempo: un número aceptado que va contra el orden de las fechas de la MAYORÍA de sus otros albaranes del
+ * lote (menor que uno de fecha anterior o mayor que uno de fecha posterior, más allá de la tolerancia de su
+ * perfil) es una lectura dudosa. Prueba
+ * real 2026-10-28: la primera cifra del número mal leída (cien mil menos), aceptada con tres lecturas OCR iguales. Solo marca para
+ * revisión; nunca cambia el número.
+ */
+function numerosFueraDeSecuencia(documentos,registro){
+ const perfiles=new Map((registro?.proveedores||[]).filter(p=>p.numeros_correlativos).map(p=>[p.id,p]));
+ const n=v=>Number(String(v||"").replace(/\D/g,""));
+ const datos=documentos.filter(d=>{const r=d.resultado;return r&&perfiles.has(r.proveedor?.id)&&r.numero?.estado==="OK"&&r.fecha?.estado==="OK"&&n(r.numero.valor)>0;})
+  .map(d=>({d,prov:d.resultado.proveedor.id,num:n(d.resultado.numero.valor),fecha:String(d.resultado.fecha.valor)}));
+ // Se quita cada vez el albarán con más cruces (el que rompe el orden de más albaranes); si los que quedan
+ // con cruces se cruzan solo entre sí uno a uno, todos van a revisión (no se sabe cuál está mal).
+ const tol=prov=>Number(perfiles.get(prov)?.numeros_correlativos?.tolerancia)||0;
+ const choca=(x,y)=>x.prov===y.prov&&x.fecha!==y.fecha&&((y.fecha<x.fecha&&y.num-x.num>tol(x.prov))||(y.fecha>x.fecha&&x.num-y.num>tol(x.prov)));
+ const fuera=[];let activos=datos.slice();
+ for(;;){
+  const cruces=activos.map(x=>({x,n:activos.filter(y=>y!==x&&choca(x,y)).length}));
+  const max=Math.max(0,...cruces.map(c=>c.n));
+  if(!max)break;
+  const peores=cruces.filter(c=>c.n===max).map(c=>c.x);
+  for(const x of max===1?cruces.filter(c=>c.n>0).map(c=>c.x):peores){
+   const de=datos.filter(y=>y.prov===x.prov&&y.fecha!==x.fecha).length;
+   x.d._secuencia="se cruza con "+activos.filter(y=>y!==x&&choca(x,y)).length+" de "+de+" albaranes de otras fechas";fuera.push(x.d);
+  }
+  if(max===1)break;
+  activos=activos.filter(x=>!peores.includes(x));
+ }
+ return fuera;
+}
+
 async function leerPdf(fuente,opciones={}){
  const {alProgresar=null,cancelado=()=>false,tamLote=5}=opciones;
  const total=fuente.numPaginas;
@@ -111,6 +147,12 @@ async function leerPdf(fuente,opciones={}){
   const g0=grupo;grupo=[];
   const paginas=g0.map(x=>x.n),blancas=g0.filter(x=>x.blanca&&x!==g0[0]).map(x=>x.n);
   const g=g0.filter(x=>!blancas.includes(x.n));
+  // Un solo documento con las páginas escaneadas al revés (fallo real 2026-11-18: «Pág: 2» antes que «Pág: 1»): se leen en el
+  // orden impreso, solo si cada página lleva su número y juntas son 1, 2, …, n.
+  if(opciones.unSoloDocumento&&g.length>1){
+   const ks=g.map(x=>x.firma?.pagina?.k);
+   if(ks.every(Number.isInteger)&&[...ks].sort((a,b)=>a-b).every((k,i)=>k===i+1))g.sort((a,b)=>a.firma.pagina.k-b.firma.pagina.k);
+  }
   try{
    let resultado;
    if(g.length===1)resultado=g[0].resultado;
@@ -159,13 +201,25 @@ async function leerPdf(fuente,opciones={}){
   firma.vacia=await enBlanco(texto,esOcr(texto)?await fuente.ocr(n):null);
   const ilegible=!firma.vacia&&!(resultado?.lineas||[]).length&&!resultado?.numero?.valor&&!resultado?.proveedor?.nif;
   const x={n,texto,resultado,firma,blanca:firma.vacia};
-  if(grupo.length&&!ilegible&&continua(grupo[0].firma,grupo.at(-1).firma,firma))grupo.push(x);
+  // Confirmación de pedido (opciones.unSoloDocumento, usuario 2026-11-17: «un pedido de dos páginas lo dividió en dos»; real: un
+  // presupuesto escaneado con las páginas al revés y sin número de albarán): todas las páginas del archivo son el mismo documento.
+  if(grupo.length&&(opciones.unSoloDocumento||(!ilegible&&continua(grupo[0].firma,grupo.at(-1).firma,firma))))grupo.push(x);
   else{await cerrar();grupo=[x];}
  }
  await cerrar();
  // Anotaciones manuscritas: la coherencia del lote se aplica con todos los albaranes leídos.
  const conObra=documentos.filter(d=>d.resultado?.manuscritos);
  if(conObra.length)M("manuscritos").coherenciaLote(conObra.map(d=>d.resultado.manuscritos),{catalogoObras:opciones.catalogoObras||null});
+ // Quién recoge: el mismo DNI con un nombre mal leído en un albarán del lote (el nombre con una letra de menos en uno, bien en cinco).
+ if(conObra.length)M("manuscritos").coherenciaRecoge(conObra.map(d=>d.resultado.manuscritos));
+ // Números correlativos de un proveedor (perfil numeros_correlativos): fuera del orden de las fechas del lote.
+ for(const d of numerosFueraDeSecuencia(documentos,opciones.registro)){
+  const r=d.resultado;
+  r.numero={...r.numero,estado:"REVISAR",motivos:[...(r.numero.motivos||[]),"Número fuera de la secuencia del proveedor en este lote ("+d._secuencia+"): comprueba el papel"]};
+  delete d._secuencia;
+  if(r._ctx)M("extraer").finalizar(r);
+  d.estado_documento=estadoDocumento(r);
+ }
  // Cada página del PDF está en exactamente un documento (o queda sin procesar si se canceló).
  const vistas=documentos.flatMap(d=>d.paginas);
  const resumen={
@@ -183,5 +237,5 @@ async function leerPdf(fuente,opciones={}){
  return {documentos,errores,resumen};
 }
 
-return {leerPdf,agruparPaginas,firmaPagina,continua,estadoDocumento};
+return {leerPdf,agruparPaginas,firmaPagina,continua,estadoDocumento,_numerosFueraDeSecuencia:numerosFueraDeSecuencia};
 });

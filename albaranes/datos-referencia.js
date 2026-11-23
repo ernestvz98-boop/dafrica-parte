@@ -49,13 +49,15 @@ function columnas(filas){
 }
 const limpio=v=>String(v??"").replace(/\s+/g," ").trim();
 
-/* Obras: código PRY + 5 cifras (también «PRY 00123» o «pry-00123») y nombre. */
+/* Obras: código PRY + 5 cifras (también «PRY 00123» o «pry-00123») o PRYMP + cifras (petición del usuario,
+   2026-10-28: se importa tal cual, nunca se convierte en otro PRY), y nombre. */
+const RE_OBRA=/^(PRY\d{5}|PRYMP\d{2,8})$/;
 function filasObras(filas){
  const c=columnas(filas);if(!c)return {error:"No encuentro las columnas de código y nombre de la obra",filas:[]};
  const vistos=new Map(),descartadas=[];
  for(const f of filas.slice(c.fila+1)){
   const cod=String(f[c.codigo]??"").toUpperCase().replace(/[^A-Z0-9]/g,""),nombre=limpio(f[c.nombre]).slice(0,150);
-  if(!/^PRY\d{5}$/.test(cod)||nombre.length<2){descartadas.push(cod||"(vacío)");continue;}
+  if(!RE_OBRA.test(cod)||nombre.length<2){descartadas.push(cod||"(vacío)");continue;}
   if(vistos.has(cod)&&vistos.get(cod)!==nombre){vistos.set(cod,null);continue;}
   vistos.set(cod,nombre);
  }

@@ -32,10 +32,23 @@ function puntuar(r){
  if(r.numero?.estado==="OK")s+=2;
  if(r.fecha?.estado==="OK")s+=2;
  // Una fila repartida por posición estimada vale menos que la misma fila con celdas separadas.
- for(const l of r.lineas||[])s+=(l.cuadre?.estado==="VERIFICADO"?3:l.estado==="OK"?1:-1)-(l.columnas_estimadas?0.5:0);
+ // Una línea que solo cuadra tras reparar la lectura (separador, primera cifra perdida) vale menos que la que cuadra tal cual.
+ for(const l of r.lineas||[])s+=(l.cuadre?.estado==="VERIFICADO"?(l.cuadre.reparado?2.5:3):l.estado==="OK"?1:-1)-(l.columnas_estimadas?0.5:0);
  for(const v of r.validaciones||[])if(v.estado==="FALLO")s-=2;
  if(r.totales?.validacion?.estado==="OK")s+=2;
  return s;
+}
+/*
+ * Código de barras EAN-13 / EAN-8 con su dígito de control correcto (fallo real 2026-11-17: referencias EAN bien leídas quedaban
+ * en revisión porque las relecturas daban cifras distintas). El dígito de control es una comprobación independiente del OCR: una
+ * cifra mal leída casi nunca la cumple.
+ */
+function eanValido(t){
+ const s=String(t??"").trim();
+ if(!/^(\d{8}|\d{13})$/.test(s))return false;
+ const d=s.split("").map(Number),n=d.length;let suma=0;
+ for(let i=0;i<n-1;i++)suma+=d[i]*((n===13?i%2:(i+1)%2)?3:1);
+ return (10-suma%10)%10===d[n-1];
 }
 const claveLinea=l=>M("normalizar").canon(l.referencia?.literal||"")+"|"+M("normalizar").canon(l.descripcion?.literal||"").slice(0,24);
 function similitud(a,b){
@@ -70,7 +83,9 @@ function combinarCabecera(principal,lecturas){
   const distintos=[...new Set(validos.map(x=>x.v))];
   if(distintos.length>1){
    principal[k]={...principal[k],valor:null,nif:k==="proveedor"?null:principal[k]?.nif,estado:"AMBIGUO",
-    motivos:["Lecturas OCR válidas distintas: "+distintos.join(" | ")],lecturas:validos.length};
+    motivos:["Lecturas OCR válidas distintas: "+distintos.join(" | ")],lecturas:validos.length,
+    // El CIF lo puede resolver después el catálogo completo de STEL si solo una de estas lecturas existe (verificacion.js).
+    ...(k==="proveedor"?{lecturas_nif:distintos}:{})};
    continue;
   }
   if(distintos.length===1){
@@ -112,7 +127,19 @@ function combinarLineas(principal,lecturas){
      M("normalizar").canon(l.descripcion?.literal)===M("normalizar").canon(o.descripcion?.literal)&&
      ["cantidad","precio","importe"].every(k=>l[k]?.valor!=null&&l[k].valor===o[k]?.valor);
    };
-   const verificada=alternativas.find(o=>o.cuadre?.estado==="VERIFICADO"&&
+   // Solo de la MISMA fila física: misma página y misma altura (fallo real 2026-11-18: un presupuesto con la misma referencia en
+   // dos páginas y cantidades distintas; la fila sin cuadre tomaba las cifras de la otra página, «3 × 35,11» en vez de «4 × 35,11»).
+   // La altura se compara en la MISMA casilla de las dos lecturas (foto real 2026-11-23: en una foto inclinada las cifras de la
+   // derecha quedan más altas que el código de la izquierda; comparar el código de una con la cantidad de la otra descartaba la
+   // fila buena). Sin ninguna casilla con posición en las dos, no es la misma fila.
+   const mismaFila=o=>{
+    if(l.pagina!==o.pagina)return false;
+    const k=["cantidad","referencia","descripcion","precio","importe"].find(c=>l[c]?.caja&&o[c]?.caja);
+    if(!k)return false;
+    const ya=l[k].caja,yb=o[k].caja;
+    return Math.abs(ya[1]-yb[1])<=0.6*Math.min(ya[3],yb[3]);
+   };
+   const verificada=alternativas.find(o=>o.cuadre?.estado==="VERIFICADO"&&mismaFila(o)&&
     (!M("normalizar").canon(l.referencia?.literal)||M("normalizar").canon(o.referencia?.literal)===M("normalizar").canon(l.referencia?.literal)||mismaFilaParaDescuento(o)));
    if(verificada){
     for(const k of ["cantidad","precio","descuento","subtotal","importe","cuadre"])l[k]=verificada[k];
@@ -574,6 +601,21 @@ async function segundaFase(principal,paginas,lecturas,opciones){
     continue;
    }
    const r=await resolverCampo(pg,campo,[c.caja],{perfil,opcionesFecha,literal:c.literal});
+   // EAN con su dígito de control (eanValido) cuando las relecturas NO lo resuelven (no hay unanimidad o se contradicen): si
+   // ninguna otra lectura también cumple el dígito de control, la lectura es la buena. Si la relectura lo resuelve, como siempre.
+   if(campo==="referencia"&&(!r||r.conflicto)&&eanValido(c.valor)){
+    const otros=[...(r?.conflicto||[]),...(c.alternativas_ocr||[])].map(x=>String(x??"").trim()).filter(x=>x&&x!==String(c.valor).trim()&&eanValido(x));
+    if(!otros.length){
+     const p=pendientes.findIndex(x=>x.l===l&&x.campo===campo);if(p>=0)pendientes.splice(p,1);
+     l[campo]={...c,motivos:(c.motivos||[]).filter(t=>!/^Relecturas fiables distintas|confunde/.test(t)),
+      notas:[...(c.notas||[]),"Código de barras EAN con su dígito de control correcto"],
+      resolucion:{metodo:"ean_digito_control",confianza:0.93,lectura_inicial:c.literal,
+       evidencias:["Código de barras EAN-"+String(c.valor).length+" con su dígito de control correcto",
+        ...(r?.conflicto?.length?["Ninguna de las relecturas distintas («"+r.conflicto.join(" | ")+"») cumple el dígito de control"]:[])]}};
+     resueltos.push("linea "+l.fila+" "+campo+" (EAN)");
+     continue;
+    }
+   }
    // Sin resolver: candidato a la comprobación por un segundo motor (visión del recorte).
    if(!r||r.conflicto)pendientes.push({l,campo,pg,candidatos:[c.valor??c.literal,...(r?.conflicto||[]),...(campo==="referencia"?c.alternativas_ocr||[]:[])].filter(Boolean)});
    // Código con S/5, Z/2, B/8 o G/6 (sin O/0 ni I/1/l): las relecturas del OCR confunden igual esos
@@ -584,6 +626,16 @@ async function segundaFase(principal,paginas,lecturas,opciones){
    if(r.conflicto){l[campo]={...c,motivos:[...(c.motivos||[]),"Relecturas fiables distintas: "+r.conflicto.join(" | ")]};continue;}
    // Una referencia no cambia de número de palabras (la relectura no debe arrastrar la celda vecina).
    if(campo==="referencia"&&r.valor.split(/\s+/).length!==String(c.literal).split(/\s+/).length)continue;
+   // Una descripción releída no gana cifras de importe ni «NETO» (prueba real 2026-10-28: la relectura
+   // arrastró cantidad, precio y «NETO» de las columnas de cantidad, precio y descuento).
+   if(campo==="descripcion"){
+    const antes=new Set(String(c.literal).split(/\s+/));
+    const nuevas=r.valor.split(/\s+/).filter(t=>!antes.has(t));
+    if(nuevas.some(t=>/^\d{1,3}(\.\d{3})*,\d{2,4}$|^NETO$/i.test(t))){
+     const m="La relectura de la descripción arrastra cifras de otras columnas («"+r.valor+"»): no se confirma";
+     l[campo]={...c,estado:"REVISAR",motivos:[...(c.motivos||[]),m]};l.motivos=[...(l.motivos||[]),m];l.estado="REVISAR";continue;
+    }
+   }
    const corregido=N.canon(r.valor)!==N.canon(c.literal);
    l[campo]={...c,literal:r.valor,valor:r.valor,
     notas:[...(c.notas||[]),...(corregido?["Corregido por relectura dirigida (lectura inicial «"+c.literal+"»)"]:[])],
@@ -695,9 +747,14 @@ async function extraerEscaneado(paginas,opciones={}){
  // los títulos (posición incluida) a la lectura que no la tiene y se vuelve a extraer.
  const {leerTablaPagina}=M("extraer");
  // titulosDe(numeroPagina) → línea de títulos (o null); se insertan en las lecturas sin cabecera.
+ // Una cabecera sacada de las posiciones del perfil del proveedor (sin títulos leídos) no impide probar los títulos leídos en
+ // otra lectura (foto real 2026-11-23: el papel fotografiado no está en las posiciones de un escaneo; con el perfil, 6 filas y
+ // ninguna cuadrada; con los títulos de otra lectura, 7 y 2 cuadradas). Quedan las dos lecturas y gana la mejor puntuada.
+ const titulosLeidos=r=>r.tablas?.[0]?.y_cabecera!=null&&!r.tablas[0].cabecera_perfil;
  const trasladar=(titulosDe,etiqueta)=>{
   for(const r of [...lecturas]){
-   if(r.tablas?.[0]?.y_cabecera!=null||r._solo_cabecera||!r._pags)continue;
+   if(titulosLeidos(r)||r._solo_cabecera||!r._pags)continue;
+   const dePerfil=r.tablas?.[0]?.y_cabecera!=null;
    const pags=r._pags.map(pg=>{
     const titulos=titulosDe(pg.numero);
     if(!titulos)return pg;
@@ -706,10 +763,10 @@ async function extraerEscaneado(paginas,opciones={}){
    });
    const r2=extraerDePaginas(pags,opciones);r2._lectura=r._lectura+"+cabecera_"+etiqueta;
    Object.defineProperty(r2,"_pags",{value:pags,enumerable:false});
-   if(r2.tablas?.[0]?.y_cabecera!=null)lecturas.push(r2);
+   if(dePerfil?titulosLeidos(r2):r2.tablas?.[0]?.y_cabecera!=null)lecturas.push(r2);
   }
  };
- const conCabecera=lecturas.find(r=>r.tablas?.[0]?.y_cabecera!=null);
+ const conCabecera=lecturas.find(titulosLeidos);
  if(conCabecera)trasladar(n=>{
   const origen=conCabecera._pags.find(x=>x.numero===n),t=origen&&leerTablaPagina(origen);
   return t?origen.lineas[t.indiceCabecera]:null;
@@ -839,6 +896,27 @@ async function extraerEscaneado(paginas,opciones={}){
    }
   }
  }
+ // Tabla sin cifras: con líneas y sin cantidades ni importes, el OCR de la página entera ha perdido el lado derecho (fallo real
+ // 2026-10-30: marca de agua y rayas verticales; recortado, se lee bien). Se relee ese lado y se junta con el izquierdo.
+ const sinCifras=l=>l.cantidad?.valor==null&&l.importe?.valor==null;
+ if(principal.lineas.length&&2*principal.lineas.filter(sinCifras).length>=principal.lineas.length){
+  const pags=[];
+  for(const p of paginas){
+   const g=principal.tablas?.find(x=>x.pagina===p.numero&&x.y_cabecera!=null),k=p.dpi/72,datos={numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi};
+   const base=await p.ocr({psm:LECTURAS[0].psm});
+   if(!g){pags.push(paginaDesdePalabras(base,datos));continue;}
+   // Por debajo de los títulos: esa fila se queda como la leyó la página entera.
+   const x0=Math.floor(p.anchoPx*0.47),y0=Math.max(0,Math.floor((g.y_cabecera+12)*k)),y1=Math.min(p.altoPx,Math.ceil((g.y_fin+14)*k));
+   const derecha=(await p.ocr({psm:6,region:[x0,y0,p.anchoPx-x0,y1-y0]})).map(w=>({...w,x0:w.x0+x0,x1:w.x1+x0,y0:w.y0+y0,y1:w.y1+y0}));
+   pags.push(paginaDesdePalabras([...base.filter(w=>(w.x0+w.x1)/2<x0||w.y1<y0||w.y0>y1),...derecha],datos));
+  }
+  // El proveedor puede venir de otra lectura (su CIF, en vertical, solo sale en alguna).
+  const r=extraerDePaginas(pags,{...opciones,proveedorId:lecturas.map(x=>x.proveedor?.id).find(Boolean)});r._lectura="tabla_lado_derecho";
+  Object.defineProperty(r,"_pags",{value:pags,enumerable:false});
+  lecturas.push(r);
+  const conCifras=x=>x.lineas.filter(l=>!sinCifras(l)).length;
+  if(conCifras(r)>conCifras(principal))principal=r;
+ }
  for(const r of lecturas)resumen.push({lectura:r._lectura,puntuacion:puntuar(r),lineas:r.lineas.length,
   proveedor:r.proveedor?.nif||null,numero:r.numero?.valor||null,fecha:r.fecha?.valor||null,
   lineas_cuadran:r.lineas.filter(l=>l.cuadre?.estado==="VERIFICADO").length,totales:r.totales?.validacion?.estado||null});
@@ -891,5 +969,5 @@ async function leerCabeceras(paginas,opciones={}){
  }
  return out;
 }
-return {extraerEscaneado,leerCabeceras,coincidenciaVision,cifrasPorCasillas,LECTURAS};
+return {eanValido,extraerEscaneado,leerCabeceras,coincidenciaVision,cifrasPorCasillas,combinarLineas,LECTURAS};
 });

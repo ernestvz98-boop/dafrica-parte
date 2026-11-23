@@ -3,6 +3,32 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-23 · Lector unificado con la aplicación de administración (DAFRICA SAT 0.3.15)
+
+- La web (DAFRICA Control y la app SAT) y la aplicación de escritorio DAFRICA Administración usaban dos copias de `albaranes/`
+  separadas desde la Fase 2 (26/10). La de la aplicación llevaba las mejoras medidas desde entonces con su banco privado de
+  albaranes reales; la web, los arreglos de hoy para fotos. Ahora las dos son el MISMO código (fusión a tres bandas desde el
+  punto común; un solo conflicto, la lista de exportaciones de `escaneado.js`).
+- Lo que llega a la web, entre otras cosas: PDF individual de cada albarán para la cola (`archivo-pdf.js` con pdf-lib), documentos
+  sin identificar guardados en revisión, artículos aprendidos de las revisiones, abonos y albaranes sin obra, obras «PRYMP»,
+  descuentos caídos en la columna del importe, filas con las cifras en el segundo renglón, títulos partidos («IMPORTE | NETO»),
+  columnas por perfil de proveedor, EAN con dígito de control, cantidades «400» por «4,00» a revisión, IVA impreso, quién recoge
+  y notas a mano para el título, lector de confirmaciones de pedido y de facturas. `control-29.js` es el de la aplicación (cola
+  con PDF individual, artículos aprendidos). `supabase/functions/compras-catalogo-lectura/handler.mjs` es la copia de la v7 ya
+  desplegada (obras PRYMP). Pruebas traídas con el lector (12 ficheros) y `index.html` con versión nueva de los scripts.
+- Fallo al juntarlas, con la foto real del técnico (privada): 10 filas y 3 cuadradas (antes 7 y 7). Dos mejoras de la aplicación
+  pensadas para escaneos no valían para una foto: (1) columnas del perfil del proveedor (posiciones de un escaneo A4) usadas sin
+  títulos: ahora solo si casan con los títulos leídos (`perfilCasaConTitulos`), y una cabecera sacada del perfil no impide probar
+  los títulos de otra lectura (`cabecera_perfil`, `trasladar`); (2) «misma fila física» al tomar cifras de otra lectura comparaba
+  alturas de casillas distintas (foto inclinada): ahora la misma casilla. Resultado: 7 de 7 cuadradas, iguales al papel, como
+  antes. Regresión: `pruebas/foto-perfil.test.js` (ficticia).
+- Datos reales que la copia de la aplicación tenía en comentarios y pruebas, cambiados por ficticios antes de subirla aquí.
+- Verificación: `npm test` 448 (aplicación: 487); prueba de fuerza de obras con el catálogo real: 0 falsas aceptadas, igual que
+  antes; banco privado de líneas (7 lotes, 86 albaranes, 201 líneas con verdad): de 9 campos mal aceptados a 0, ningún campo
+  empeora (ref 164 → 172 bien, cantidad 184 → 190, precio 183 → 194, descuento 179 → 194; albaranes con todo bien 44 → 48 de
+  65), e idéntico a la aplicación antes de unificar. Foto real del técnico por la app SAT: 7 de 7 filas cuadradas, como antes.
+- Producción: nada publicado ni desplegado; `main` solo con permiso del usuario.
+
 ## 2026-11-23 · Lector: cifras perdidas por el OCR de página, releídas casilla a casilla con cuadre
 
 - Fallo real: foto de un albarán de proveedor (7 filas) hecha por el técnico de SAT. El OCR de la página entera no sacaba

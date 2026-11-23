@@ -475,3 +475,120 @@ test("pedido PAP validado con STEL: mismo proveedor y con los artículos del alb
  // STEL no responde: sin validar (nunca «no existe»).
  r=base(["PAP90001"]);assert.equal(await M.validarPedido(r,async()=>null),false);assert.equal(r.manuscritos.pedido.estado,"AMBIGUO");
 });
+
+test("S/Referencia impresa: solo lo leído con fiabilidad, también con la etiqueta pegada (usuario, 2026-11-11)", ()=>{
+ const {suReferencia}=require("../albaranes/manuscritos.js");
+ assert.equal(suReferencia([{texto:"S/REF:CENTRO FICTICIO para PRY00001",celdas:[{texto:"S/REF:CENTRO",conf:92},{texto:"FICTICIO",conf:90},{texto:"para",conf:40},{texto:"PRY00001",conf:30}]}]),"CENTRO FICTICIO");
+ assert.equal(suReferencia([{texto:"Su Pedido OBRA FICTICIA"}]),"OBRA FICTICIA");
+ assert.equal(suReferencia([{texto:"Ref. cliente: NAVE 9"}]),"NAVE 9");
+ assert.equal(suReferencia([{texto:"OBRA: ALMACEN"}]),null);
+ assert.equal(suReferencia([{texto:"S/REF:",celdas:[{texto:"S/REF:",conf:95}]}]),null);
+});
+
+test("anotación a mano con número (tipo ANOTACION del OCR local): se recoge con su página, sin darla por leída",async()=>{
+ const g=lienzo();escribir(g,300,400);
+ const pagina={numero:1,anchoPx:2480,altoPx:3508,gris:()=>g,recortePng:()=>"data:image/png;base64,AAAA"};
+ const resultado={_pags:[{numero:1,lineas:[]}],lineas_ignoradas:[],proveedor:{id:"A"}};
+ const vision=async recortes=>recortes.map((_,i)=>({indice:i,texto_literal:"cis fic 202611234",tachado:false,tipo:"ANOTACION",lecturas:[]}));
+ const m=await leerManuscritos([pagina],resultado,vision);
+ assert.deepEqual(m.anotaciones,[{pagina:1,lectura:"cis fic 202611234"}]);
+ assert.notEqual(m.obra.estado,"OK");
+});
+
+// Fallo real 2026-11-18: «Su referencia: PEDIDO: PAP01234» impreso; el lector solo buscaba el PAP escrito a mano. Ficticio.
+test("pedido impreso: con lo escrito igual o sin escribir, validado; con otro escrito, en revisión; poca confianza o dos, nada",()=>{
+ const M=require("../albaranes/manuscritos.js");
+ const lin=(...cs)=>[{texto:cs.map(c=>c[0]).join(" "),celdas:cs.map(([texto,conf])=>({texto,conf}))}];
+ const imp=M.pedidoImpreso(lin(["PEDIDO:",95],["PAP09999",96]));
+ assert.equal(imp.valor,"PAP09999");
+ const dudoso=M.pedidoImpreso(lin(["PEDIDO:",95],["PAP09999",48]));assert.equal(dudoso.fiable,false);
+ assert.equal(M.conPedidoImpreso({valor:null,estado:"VACIO",motivos:[],resolucion:{}},dudoso).estado,"REVISAR");
+ assert.equal(M.pedidoImpreso(lin(["PAP09999",20])),null);
+ assert.equal(M.pedidoImpreso([...lin(["PAP09999",96]),...lin(["PAP09998",96])]),null);
+ const vacio={valor:null,estado:"VACIO",motivos:[],resolucion:{}};
+ assert.equal(M.conPedidoImpreso(vacio,imp).estado,"OK");
+ const escrito={valor:"PAP09999",estado:"REVISAR",motivos:["x"],resolucion:{alternativas:["PAP09999"],evidencias:[]}};
+ const ok=M.conPedidoImpreso(escrito,imp);assert.equal(ok.estado,"OK");assert.equal(ok.valor,"PAP09999");
+ const otro=M.conPedidoImpreso({...escrito,valor:"PAP09990",resolucion:{alternativas:["PAP09990"]}},imp);
+ assert.equal(otro.estado,"AMBIGUO");assert.equal(otro.valor,null);
+ assert.equal(M.conPedidoImpreso(escrito,null),escrito);
+});
+
+// Proyectos PRYMP (usuario, 2026-11-20): el código de obra escrito a mano también puede ser «PRYMP» y 5 cifras. Ficticio.
+test("obra PRYMP escrita a mano: formato válido y validada con el catálogo y su nombre como las PRY",()=>{
+ const M=require("../albaranes/manuscritos.js");
+ assert.equal(M.FORMATOS.obra.test("PRYMP90001"),true);assert.equal(M.FORMATOS.obra.test("PRY90001"),true);assert.equal(M.FORMATOS.obra.test("PRYMP9001"),false);
+ const r=M.validarCodigos([{indice:0,texto_literal:"PRYMP90001",tachado:false,tipo:"PRY",lecturas:[{codigo:"PRYMP90001",confianza:0.97}]}],
+  {catalogoObras:[{codigo:"PRYMP90001",nombre:"ABRIGO FICTICIO"}],catalogoObrasCompleto:true,obraImpresa:["ABRIGO FICTICIO"]});
+ assert.equal(r.obra.estado,"OK");assert.equal(r.obra.valor,"PRYMP90001");
+});
+
+// Quién recoge, impreso (usuario, 2026-11-20: «si un DNI o un nombre» en el título). Nombres y DNI ficticios (letra de control válida).
+test("quienRecoge: nombre y DNI impresos; lo escrito a mano, un DNI con letra mala o el NIF del proveedor no", ()=>{
+ const {quienRecoge,dniValido}=require("../albaranes/manuscritos.js");
+ const l=(texto,conf=95)=>({texto,celdas:texto.split(" ").map(t=>({texto:t,conf}))});
+ assert.equal(dniValido("12345678-Z"),"12345678Z");assert.equal(dniValido("12345678A"),null);assert.equal(dniValido("X1234567L"),"X1234567L");
+ assert.equal(quienRecoge([l("Retirado por: JUAN FICTICIO DNI 12345678Z")]),"JUAN FICTICIO · DNI 12345678Z");
+ assert.equal(quienRecoge([l("Recogido por: PEDRO EJEMPLO"),l("Fecha 01/10/2026")]),"PEDRO EJEMPLO");
+ assert.equal(quienRecoge([l("D.N.I.: X1234567L")]),"DNI X1234567L");
+ // Escrito a mano (confianza baja): nada.
+ assert.equal(quienRecoge([{texto:"Retirado por: Juan",celdas:[{texto:"Retirado",conf:95},{texto:"por:",conf:95},{texto:"Juan",conf:40}]}]),null);
+ assert.equal(quienRecoge([l("Retirado por: JUAN DNI 12345678A")]),"JUAN");
+ assert.equal(quienRecoge([l("DNI 12345678Z")],["12345678Z"]),null);
+ assert.equal(quienRecoge([l("CIF B00000000 TRANSPORTE PROPIO")]),null);
+});
+
+// Fallo real 2026-11-23 (escaneado): «Retirado por:NOMBRE DNI NIF:DNI» con confianza OCR muy baja en «por:NOMBRE» y el DNI pegado a
+// «NIF:»; y la casilla S/REF vacía impresa como «S REF». Datos ficticios (DNI con letra de control válida).
+test("quienRecoge: el DNI válido de la línea respalda el nombre aunque el OCR dude; S/REF vacía no es referencia", ()=>{
+ const {quienRecoge,suReferencia}=require("../albaranes/manuscritos.js");
+ const L=(...c)=>({texto:c.map(x=>x[0]).join(" "),celdas:c.map(([texto,conf])=>({texto,conf}))});
+ assert.equal(quienRecoge([L(["Retirado",97],["por:",11],["PEDRO",11],["12345678Z",89],["NIF:12345678Z",88])]),"PEDRO · DNI 12345678Z");
+ assert.equal(quienRecoge([L(["Retirado",97],["por: PEDRO",0],["NIF:12345678Z",91])]),"PEDRO · DNI 12345678Z");
+ // Sin DNI válido, un nombre dudoso no entra; el DNI con la letra mal, tampoco.
+ assert.equal(quienRecoge([L(["Retirado",97],["por:",11],["PEDRO",11],["NIF:12345678A",88])]),null);
+ // El NIF de otra línea sin «retirado» ni «DNI» (p. ej. del cliente) no es quien recoge.
+ assert.equal(quienRecoge([L(["CLIENTE",95],["NIF:12345678Z",95])]),null);
+ assert.equal(suReferencia([L(["S/REF:S",92],["REF",97])]),null);
+ assert.equal(suReferencia([L(["S/REF:S/REF",92])]),null);
+ assert.equal(suReferencia([L(["S/REF:S",92],["REF",97]),L(["S/REF:OBRA",92],["FICTICIA",96])]),"OBRA FICTICIA");
+});
+test("coherenciaRecoge: el mismo DNI con un nombre mal leído en un solo albarán del lote toma el mayoritario", ()=>{
+ const {coherenciaRecoge}=require("../albaranes/manuscritos.js");
+ const l=["PEDRO","PEDRO","PEDRO","PEDR"].map(n=>({recoge:n+" · DNI 12345678Z"})).concat([{recoge:"ANA · DNI X1234567L"},{recoge:null}]);
+ coherenciaRecoge(l);
+ assert.deepEqual(l.map(x=>x.recoge),["PEDRO · DNI 12345678Z","PEDRO · DNI 12345678Z","PEDRO · DNI 12345678Z","PEDRO · DNI 12345678Z","ANA · DNI X1234567L",null]);
+ // Empate o diferencia de uno: no se cambia.
+ const e=[{recoge:"PEDRO · DNI 12345678Z"},{recoge:"PEDR · DNI 12345678Z"}];coherenciaRecoge(e);
+ assert.equal(e[1].recoge,"PEDR · DNI 12345678Z");
+});
+// Notas libres a mano para el título (usuario, 2026-11-23). Lecturas reales del modelo ante firmas y texto impreso (inventadas en
+// inglés) y notas ficticias.
+test("notaPlausible y enZonaDeFirma: fuera las frases inventadas, los signos sueltos y lo que está en la casilla de firma", ()=>{
+ const {notaPlausible,enZonaDeFirma}=require("../albaranes/manuscritos.js");
+ for(const t of ["the establishment of the province's","MR. Fitzmontainefsonferencecondenue and an extra time","0- 0. 0. 0. 1,0003.","·","THE FEDEROUS S. FACceeded into the entire"])
+  assert.equal(notaPlausible(t),false,t);
+ for(const t of ["FALTA 1 CAJA","Pedro","TLF 600 000 000","devolver 2 codos"])assert.equal(notaPlausible(t),true,t);
+ const lin=[{texto:"Recibí de conformidad el cliente",y:600,alto:8,celdas:[{texto:"Recibí",x0:200,x1:230},{texto:"cliente",x0:320,x1:350}]}];
+ assert.equal(enZonaDeFirma([300,620,120,40],lin),true,"debajo de «Recibí»");
+ assert.equal(enZonaDeFirma([100,300,120,30],lin),false,"en mitad de la tabla");
+ assert.equal(enZonaDeFirma([60,620,100,40],[{texto:"Por Proveedor",y:600,alto:8,celdas:[{texto:"Por",x0:70,x1:85},{texto:"Proveedor",x0:88,x1:130}]}]),true,"casilla «Por <empresa>»");
+});
+// Notas a mano por tipo (usuario, 2026-11-23: «nombre, referencia, número, matrícula o descripción»). Las malas son lecturas reales
+// del modelo en 40 albaranes (texto impreso mal detectado o frases inventadas); las buenas, ficticias.
+test("clasificarNota: solo matrícula, número, referencia, nombre o descripción, y nada que ya esté impreso", ()=>{
+ const {clasificarNota}=require("../albaranes/manuscritos.js");
+ const ctx={impreso:["SALTOKI","PONFERRADA","TOTAL","LINEAS","DIRECCION","ENVIO","RAZON","SOCIAL","COMPONENTES","FRIGORIFICOS","VENTAJAS","CLIENTES"],vocabulario:["CODO","MULTICAPA","TUBO"]};
+ for(const t of ["spouse","1961 Total lineas","MRF0","W. 200m","O\"35 Grundfosky 5eara","SSATON 0","0 0","SALTON","ITV","isation","ISATOKI","tops","0 1","SALTOKI 12",
+  "ITVEC","ITV expansion","MAN Government","Direccion de envio","Components Frigorificos","Razon Social","Isaltoki 10","Ventaias parati","y paratus clientes","42 000","I 950 )",
+  "0Sentinel coverage","ITVIII","1953- Nelson Tennessee","MissINESS Miss Texas since November 1892","800 fatalities ( 12247. 1.2. 1.2. 2","III Metalleness 121.60.4.60 1VA.21,0096"])
+  assert.equal(clasificarNota(t,ctx),null,t);
+ assert.deepEqual(clasificarNota("1234 BCD",ctx),{tipo:"MATRICULA",texto:"1234BCD"});
+ assert.deepEqual(clasificarNota("600 123 456",ctx),{tipo:"NUMERO",texto:"600 123 456"});
+ assert.deepEqual(clasificarNota("pedido 2026",ctx),null,"una palabra suelta con un número no es nada claro");
+ assert.deepEqual(clasificarNota("PAP09996",ctx),{tipo:"REFERENCIA",texto:"PAP09996"});
+ assert.deepEqual(clasificarNota("Pedro",ctx),{tipo:"NOMBRE",texto:"PEDRO"});
+ assert.deepEqual(clasificarNota("Juan Ficticio",ctx),{tipo:"NOMBRE",texto:"JUAN FICTICIO"});
+ assert.deepEqual(clasificarNota("falta 2 codos",ctx),{tipo:"DESCRIPCION",texto:"FALTA 2 CODOS"});
+ assert.deepEqual(clasificarNota("devolver tubo multicapa",ctx),{tipo:"DESCRIPCION",texto:"DEVOLVER TUBO MULTICAPA"});
+});

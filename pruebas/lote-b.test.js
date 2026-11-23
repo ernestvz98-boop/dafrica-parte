@@ -473,3 +473,341 @@ test("fila siguiente con código y texto pegado («1300000002 CODO»): sí es ot
   assert.ok(q.lineas[0].descripcion.confianza>=0.9,cod);
  }
 });
+
+/* --------------- Lote real del 2026-10-30 (cifras y nombres ficticios) --------------- */
+const COLUMNAS=[["referencia",55,110],["descripcion",111,395],["cantidad",396,445],["precio",446,500],["descuento",501,540],["importe",541,595]];
+test("sin la fila de títulos, la tabla se lee con las columnas del perfil; sin perfil, no se inventa ninguna",()=>{
+ const cuerpo=[...cabeceraDoc(),...etiquetas(),...filaPrecio(218),...filaPrecio(232,"1300000002")];
+ const reg=registroCon({columnas:COLUMNAS,formato_referencia:"^\\d{10}$"});
+ const r=leer(cuerpo,{registro:reg});
+ assert.equal(r.lineas.length,2);
+ assert.deepEqual([r.lineas[0].cantidad.valor,r.lineas[0].precio.valor],[2,10]);
+ assert.equal(leer(cuerpo).lineas.length,0);
+ // Con títulos completos, las columnas del perfil no se usan.
+ assert.equal(leer([...cabeceraDoc(),...etiquetas(),...titulos(),...filaPrecio(218)],{registro:reg}).lineas.length,1);
+});
+test("tabla sin cifras: se relee el lado derecho y se junta con el izquierdo; la lectura sin cifras no se queda",async()=>{
+ const izquierda=(y,ref)=>fila(y,[ref,60],["TUBO",120],["MULTICAPA",150]);
+ const derecha=y=>fila(y,["2,00",420],["10,000",462],["50",510],["10,00",550]);
+ const comun=[...cabeceraDoc(),...etiquetas(),...titulos(),...izquierda(218,"1300000001"),...izquierda(232,"1300000002")];
+ const conCifras=[...derecha(218),...derecha(232)];
+ const motor=[{numero:1,anchoPx:595,altoPx:842,dpi:72,
+  async ocr({region=null}={}){
+   if(!region)return comun;
+   const [x,y,ww,h]=region;
+   // Solo el recorte del lado derecho ve las cifras (fallo real: marca de agua y rayas verticales).
+   const ps=x>200?[...comun,...conCifras]:comun;
+   return ps.filter(p=>p.x0>=x&&p.x1<=x+ww&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+  }}];
+ const r=await extraerEscaneado(motor,{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas.length,2);
+ assert.deepEqual(r.lineas.map(l=>[l.cantidad.valor,l.importe.valor]),[[2,10],[2,10]]);
+});
+test("«P.V.P.» y «PRECIO NETO» en la misma tabla: el precio de la línea es el neto",()=>{
+ const r=leer([...cabeceraDoc(),...etiquetas(),
+  ...fila(200,["CÓDIGO",60],["DESCRIPCION",120],["CANTIDAD",330],["P.V.P.",400],["PRECIO NETO",450,95,{ancho:60}],["IMPORTE",545]),
+  ...fila(218,["1300000001",60],["TUBO",120],["4",345],["0,939",400],["0,376",465],["1,50",550])]);
+ assert.equal(r.lineas[0].precio.valor,0.376);
+ assert.equal(r.lineas[0].cuadre.estado,"VERIFICADO");
+});
+// Fallo real (2026-11-12, escaneado con las columnas del perfil): la descripción empieza unos puntos antes del límite de la
+// columna del código y su primera palabra se leía como parte del código («1300000001 TUBO»), aceptado sin serlo.
+test("código con el formato del proveedor: la palabra con letras que sigue es de la descripción, no del código",()=>{
+ const reg=registroCon({columnas:COLUMNAS,formato_referencia:"^\\d{10}$"});
+ // El código termina en 105 y la descripción empieza en 107 o 108: el límite de la columna del perfil está en 110,5.
+ for(const x of [107,108]){
+  const filaCorrida=(y,ref)=>fila(y,[ref,55],["TUBO",x],["MULTICAPA",x+30],["2,00",420],["10,000",462],["50",510],["10,00",560]);
+  const r=leer([...cabeceraDoc(),...etiquetas(),...filaCorrida(218,"1300000001"),...filaCorrida(232,"1300000002")],{registro:reg});
+  assert.deepEqual(r.lineas.map(l=>[l.referencia.valor,l.descripcion.valor]),[["1300000001","TUBO MULTICAPA"],["1300000002","TUBO MULTICAPA"]],"x="+x);
+ }
+ // Si el código junto con esa palabra también tiene el formato («AB12» + «CD34», partido por el OCR), no se corta.
+ const alfa=registroCon({columnas:COLUMNAS,formato_referencia:"^[A-Z]{2}\\d{2}([A-Z]{2}\\d{2})?$"});
+ const r2=leer([...cabeceraDoc(),...etiquetas(),...fila(218,["AB12",80],["CD34",107],["TUBO",140],["2,00",420],["10,000",462],["50",510],["10,00",560])],{registro:alfa});
+ assert.equal(r2.lineas.length,1);
+ assert.equal(r2.lineas[0].descripcion.valor,"TUBO");
+});
+// Fallo real (2026-11-12, albarán escaneado sin precios): «4,00 UN» leído «400 UN» y la cantidad aceptada (nada la cuadra).
+test("cantidad entera de 3 cifras entre cantidades con decimales: en revisión (la coma puede no haberse leído)",()=>{
+ const sinPrecio=(y,ref,cant)=>fila(y,[ref,60],["CALZO",120],["FICTICIO",150],[cant,420],["UN",445]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...sinPrecio(218,"1300000001","2,00"),...sinPrecio(232,"1300000002","400")]);
+ assert.equal(r.lineas.length,2);
+ assert.ok(r.lineas[0].cantidad.confianza>=0.9);
+ assert.equal(r.lineas[1].cantidad.valor,400,"no se cambia el valor");
+ assert.ok(r.lineas[1].cantidad.confianza<0.9,"en revisión");
+ // Todas enteras: nada que sospechar.
+ const q=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...sinPrecio(218,"1300000001","2"),...sinPrecio(232,"1300000002","400")]);
+ assert.ok(q.lineas.every(l=>l.cantidad.confianza>=0.9));
+ // Con precio e importe que cuadran, la cantidad queda verificada aunque sea entera.
+ const c=leer([...cabeceraDoc(),...etiquetas(),...titulos(),...filaPrecio(218),...fila(232,["1300000002",60],["TUBO",120],["400",420],["1,000",462],["50",510],["200,00",555])]);
+ assert.ok(c.lineas[1].cantidad.confianza>=0.9);
+});
+// Fallo real (2026-11-13): descripción en dos renglones con las cifras en el segundo («… (CAJA» / «4)  1,00  4,2000 …»).
+test("descripción en dos renglones con las cifras en el segundo: una sola línea",()=>{
+ const tit=()=>fila(200,["ARTÍCULO",30],["DESCRIPCIÓN",160],["CANTIDAD",290],["PRECIO",340],["DTO.",400],["TOTAL",450]);
+ const base=[...cabeceraDoc(),...etiquetas(),...tit(),...fila(218,["1300000001",25],["TUBO",120],["MULTICAPA",145],["2,00",300],["10,0000",340],["50,00",400],["10,00",455])];
+ const r=leer([...base,...fila(230,["1300000002",25],["PILA",120],["FICTICIA",145],["(CAJA",190]),
+  ...fila(242,["4)",120],["1,00",300],["4,2000",340],["25,00",400],["3,15",455])]);
+ assert.deepEqual(r.lineas.map(l=>[l.referencia.valor,l.descripcion.valor,l.cantidad.valor,l.precio.valor,l.importe.valor]),
+  [["1300000001","TUBO MULTICAPA",2,10,10],["1300000002","PILA FICTICIA (CAJA 4)",1,4.2,3.15]]);
+ assert.ok(r.lineas[1].confianza>=0.9);
+ // La fila de abajo con forma de código es otro artículo: no se une.
+ const otro=leer([...base,...fila(230,["1300000002",25],["PILA",120],["FICTICIA",145]),
+  ...fila(242,["1300000003",25],["CODO",120],["1,00",300],["4,2000",340],["25,00",400],["3,15",455])]);
+ assert.equal(otro.lineas.length,3);
+ // Si la fila de arriba ya tiene cifras, la de abajo no es su continuación.
+ const conCifras=leer([...base,...fila(242,["4)",120],["1,00",300],["4,2000",340],["25,00",400],["3,15",455])]);
+ assert.equal(conCifras.lineas[0].cantidad.valor,2);
+ assert.equal(conCifras.lineas[0].descripcion.valor,"TUBO MULTICAPA");
+});
+// Fallo real (2026-11-13): «4,00 × 2,8517 = 11,4068» con el importe leído «1,4068» (la primera cifra perdida).
+test("importe con la primera cifra perdida: solo si una única cifra hace cuadrar la línea",()=>{
+ const linea=(imp,cant="4,00",precio="2,8517")=>leer([...cabeceraDoc(),...etiquetas(),...titulos(),...fila(218,["1300000001",60],["TUBO",120],["MULTICAPA",150],[cant,420],[precio,462],[imp,555])]).lineas[0];
+ const l=linea("1,4068");
+ assert.equal(l.importe.valor,11.4068);
+ assert.equal(l.cuadre.estado,"VERIFICADO");
+ assert.ok(l.cantidad.confianza>=0.9&&l.precio.confianza>=0.9);
+ assert.match(l.importe.notas.join(" "),/Primera cifra perdida/);
+ // Con menos de 4 cifras leídas, no se repara.
+ const corta=linea("1,20","3,00","4,00");
+ assert.notEqual(corta.importe.valor,12);
+ assert.notEqual(corta.cuadre.estado,"VERIFICADO");
+ // Si ninguna cifra delante cuadra, nada cambia.
+ const nada=linea("1,5000");
+ assert.equal(nada.importe.valor,1.5);
+ assert.notEqual(nada.cuadre.estado,"VERIFICADO");
+});
+// Fallo real (2026-11-13): «OBRA *** NOMBRE 1,00», la obra impresa como fila con cantidad, aceptada como artículo «OBRA».
+test("perfil con formato de código: un código sin ese formato no se acepta solo; la fila «OBRA … 1,00» no es un artículo",()=>{
+ const tit=()=>fila(200,["ARTÍCULO",30],["DESCRIPCIÓN",160],["CANTIDAD",290],["PRECIO",340],["DTO.",400],["TOTAL",450]);
+ const filas=[...fila(218,["OBRA",25],["***",120],["NOMBRE",135],["FICTICIO",175],["1,00",300]),
+  ...fila(232,["4700012345",25],["TUBO",120],["MULTICAPA",145],["2,00",300],["10,0000",340],["50,00",400],["10,00",455])];
+ const formato="^(?=.*\\d)[0-9A-Z]{5,12}$";
+ const conAnotacion=leer([...cabeceraDoc(),...etiquetas(),...tit(),...filas],{registro:registroCon({formato_referencia:formato,anotaciones_no_articulo:["OBRA"]})});
+ assert.deepEqual(conAnotacion.lineas.map(l=>l.referencia.valor),["4700012345"]);
+ // Sin la anotación en el perfil, la fila queda, pero su código no tiene el formato: nunca aceptada.
+ const sin=leer([...cabeceraDoc(),...etiquetas(),...tit(),...filas],{registro:registroCon({formato_referencia:formato})});
+ const obra=sin.lineas.find(l=>l.referencia.valor==="OBRA");
+ assert.ok(obra&&obra.referencia.confianza<0.9&&obra.confianza<0.9);
+ assert.ok(sin.lineas.find(l=>l.referencia.valor==="4700012345").referencia.confianza>=0.9);
+});
+
+/* --------------- Descuento sin título bajo el del precio (2026-11-17) --------------- */
+// Fallo real: «PRECIO 7,63 50,00» con el importe 3,81 y sin columna de descuento; las dos cifras en la columna del precio
+// dejaban precio y descuento sin leer. Cifras ficticias.
+test("descuento sin título junto al precio: se acepta solo si la línea cuadra con su importe",()=>{
+ const tit=fila(200,["ARTÍCULO",60],["DESCRIPCIÓN",120],["CANTIDAD",380],["PRECIO",440],["IMPORTE",545]);
+ const bien=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX0001",60],["SPRAY",120],["FICTICIO",155],["1,00",395],["8,40",440],["50,00",480],["4,20",555])]);
+ const l=bien.lineas[0];
+ assert.equal(l.precio.valor,8.4);assert.deepEqual(l.descuento.porcentajes,[50]);assert.equal(l.cuadre.estado,"VERIFICADO");
+ // Si con la segunda cifra como descuento no cuadra, ninguna se acepta (como antes).
+ const mal=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX0001",60],["SPRAY",120],["FICTICIO",155],["1,00",395],["8,40",440],["50,00",480],["7,00",555])]);
+ const m=mal.lineas[0];
+ assert.equal(m.precio.valor,null);assert.equal(m.precio.estado,"AMBIGUO");
+ assert.ok(!["OK","VERIFICADO"].includes(m.descuento.estado)||!(m.descuento.porcentajes||[]).length);
+});
+
+// Código de barras EAN con su dígito de control (fallo real 2026-11-17: EAN bien leídos quedaban en revisión). EAN ficticios
+// de los de ejemplo de la norma.
+test("eanValido: EAN-13 y EAN-8 con su dígito de control; una cifra cambiada no vale",()=>{
+ const {eanValido}=require("../albaranes/escaneado.js");
+ for(const x of ["4006381333931","5901234123457","96385074"])assert.equal(eanValido(x),true,x);
+ for(const x of ["4006381333932","5901234123458","96385075","123","40063813339311","ABC1234567890"])assert.equal(eanValido(x),false,x);
+});
+
+// Clase de documento por el título impreso (usuario, 2026-11-17). Palabras ficticias.
+test("clase impresa: «ALBARÁN» o un título de pedido como renglón propio; «Su pedido: …» no cuenta",()=>{
+ const tit=fila(200,["CÓDIGO",60],["CONCEPTO",120],["CANTIDAD",400],["PRECIO",460],["IMPORTE",545]);
+ const lin=fila(218,["1300000001",60],["TUBO",120],["2,00",420],["10,00",462],["20,00",560]);
+ assert.equal(leer([...cabeceraDoc(),...etiquetas(),...tit,...lin]).clase_impresa,"ALBARAN");
+ const ped=leer([...cabeceraDoc(),...fila(100,["CONFIRMACIÓN",60],["DE",140],["PEDIDO",160]),...fila(120,["Nº",60],["600111",80],["15/10/26",340]),...tit,...lin]);
+ assert.equal(ped.clase_impresa,"PEDIDO");
+ const suPedido=leer([...cabeceraDoc(),...fila(100,["SU",60],["PEDIDO:",80],["OBRA",130]),...fila(120,["Nº",60],["600111",80],["15/10/26",340]),...tit,...lin]);
+ assert.equal(suPedido.clase_impresa,null);
+});
+
+// Número de una confirmación de pedido tras «PRESUPUESTO» (usuario, 2026-11-17); nunca en un albarán. Palabras ficticias.
+test("numeroDePedido: el número tras «PRESUPUESTO» solo leyendo pedidos",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",400],["PRECIO",460],["IMPORTE",545]);
+ const lin=fila(218,["KC100",60],["REGULADOR",120],["1,00",420],["10,00",462],["10,00",560]);
+ const pal=[...cabeceraDoc(),...fila(120,["PRESUPUESTO",60],["2600001",140]),...fila(130,["FECHA",300],["15/10/26",340]),...tit,...lin];
+ assert.equal(extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY,numeroDePedido:true}).numero.valor,"2600001");
+ assert.notEqual(extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY}).numero.valor,"2600001");
+});
+
+/* --------------- Confirmación de pedido escaneada (fallos reales 2026-11-18; datos ficticios) --------------- */
+test("título «PRECIO UNID.»: la cifra bajo «UNID.» es el precio",()=>{
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",380],["PRECIO UNID.",430],["DTO",500],["IMPORTE NETO",530]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX0001",60],["REGULADOR",120],["1,00",395],["34,76",455],["58%",505],["14,60",560])]);
+ assert.equal(r.lineas[0].precio.valor,34.76);
+ assert.equal(r.lineas[0].cuadre.estado,"VERIFICADO");
+});
+test("«OBSERVACIONES» entre dos artículos no termina la tabla; al final de la tabla, sí",()=>{
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",380],["PRECIO",440],["IMPORTE",545]);
+ const art=(y,ref)=>fila(y,[ref,60],["REGULADOR",120],["2,00",395],["10,00",440],["20,00",555]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...art(218,"EX0001"),...fila(232,["OBSERVACIONES",60],["DEFINIR",160],["COLOR",200]),...art(246,"EX0002"),...art(260,"EX0003")]);
+ assert.deepEqual(r.lineas.map(l=>l.referencia.valor),["EX0001","EX0002","EX0003"]);
+ // Sin un artículo detrás, «OBSERVACIONES» es el pie: lo que sigue no son líneas.
+ const pie=leer([...cabeceraDoc(),...etiquetas(),...tit,...art(218,"EX0001"),...fila(232,["OBSERVACIONES",60],["ENTREGA",160],["EN",200],["OBRA",220]),...fila(246,["TOTAL",380],["20,00",555])]);
+ assert.deepEqual(pie.lineas.map(l=>l.referencia.valor),["EX0001"]);
+});
+test("numeroDePedido: el número va debajo de «PRESUPUESTO»; una cifra en otra columna a la derecha no lo es",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",400],["PRECIO",460],["IMPORTE",545]);
+ const lin=fila(218,["EX0001",60],["REGULADOR",120],["1,00",420],["10,00",462],["10,00",560]);
+ const pal=[...cabeceraDoc(),...fila(120,["PRESUPUESTO",60],["99999",330],["VILLAFICTICIA",360]),...fila(132,["2600001",70]),
+  ...fila(150,["FECHA",300],["15/10/26",340]),...tit,...lin];
+ assert.equal(extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY,numeroDePedido:true}).numero.valor,"2600001");
+});
+test("cifras de otra lectura OCR: solo de la misma fila física (la misma referencia en otra página no vale)",async()=>{
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",380],["PRECIO",440],["IMPORTE",545]);
+ // Página 1: «EX0001 4,00 10,00» con el importe ilegible; la lectura psm 6 de esa página no ve la fila.
+ // Solo la lectura principal (psm 4) ve además «EX0009», que cuadra (por eso es la principal).
+ const p1=psm=>[...cabeceraDoc(),...etiquetas(),...tit,...(psm===4?[...fila(218,["EX0009",60],["TUERCA",120],["1,00",395],["5,00",440],["5,00",555]),...fila(232,["EX0001",60],["REGULADOR",120],["4,00",395],["10,00",440])]:[])];
+ // Página 2: «EX0001 3,00 10,00 30,00», leída igual por todas.
+ const p2=()=>[...tit,...fila(218,["EX0001",60],["REGULADOR",120],["3,00",395],["10,00",440],["30,00",555])];
+ const motor=[p1,p2].map((f,i)=>({numero:i+1,anchoPx:595,altoPx:842,dpi:72,
+  async ocr({psm=4,region=null}={}){
+   const ps=f(psm);
+   if(!region)return ps;
+   const [x,y,ww,h]=region;
+   return ps.filter(p=>p.x0>=x&&p.x1<=x+ww&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+  }}));
+ const r=await extraerEscaneado(motor,{registro:registroCon(),hoy:HOY});
+ const l=r.lineas.find(x=>x.pagina===1&&x.referencia?.valor==="EX0001");
+ assert.ok(l,"falta la línea de la página 1: "+JSON.stringify(r.lineas.map(x=>[x.pagina,x.referencia?.valor,x.cantidad?.valor,x.cuadre?.estado])));
+ assert.equal(l.cantidad.valor,4,JSON.stringify(r.lineas.map(x=>[x.pagina,x.referencia?.valor,x.cantidad?.valor,x.cuadre?.estado,x.notas])));
+ assert.notEqual(l.cuadre.estado,"VERIFICADO");
+});
+test("títulos partidos en dos celdas («IMPORTE» | «NETO», «PRECIO» | «UNID.»): una sola columna",()=>{
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",360],["PRECIO",410],["UNID.",440],["DTO",490],["IMPORTE",515],["NETO",552]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX0001",60],["REGULADOR",120],["1,00",375],["34,76",445],["58%",493],["14,60",560])]);
+ assert.equal(r.lineas[0].precio.valor,34.76);
+ assert.equal(r.lineas[0].importe.valor,14.6);
+ assert.equal(r.lineas[0].cuadre.estado,"VERIFICADO");
+});
+test("firma digital junto a la tabla («NOMBRE - DNI»): palabras en la columna de la cantidad sin código ni descripción, no es una línea",()=>{
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",380],["PRECIO",440],["IMPORTE",545]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX0001",60],["REGULADOR",120],["2,00",395],["10,00",440],["20,00",555]),
+  ...fila(240,["FICTICIO-",380],["12345678",440])]);
+ assert.deepEqual(r.lineas.map(l=>l.referencia.valor),["EX0001"]);
+});
+test("numeroDePedido: serie y número en dos celdas debajo de «PRESUPUESTO» («SERIE» | «2600001»)",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",400],["PRECIO",460],["IMPORTE",545]);
+ const lin=fila(218,["EX0001",60],["REGULADOR",120],["1,00",420],["10,00",462],["10,00",560]);
+ const pal=[...cabeceraDoc(),...fila(120,["PRESUPUESTO",60],["99999",330],["VILLAFICTICIA",360]),...fila(132,["SERIE",60],["2600001",100]),
+  ...fila(150,["FECHA",300],["15/10/26",340]),...tit,...lin];
+ assert.equal(extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY,numeroDePedido:true}).numero.valor,"SERIE 2600001");
+});
+// Usuario 2026-11-18: las zonas del presupuesto («ZONA …») son el reparto, no productos. Textos ficticios.
+test("rótulos de zona entre las líneas (también con la viñeta leída «A»): no son artículos",()=>{
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",120],["CANTIDAD",380],["PRECIO",440],["IMPORTE",545]);
+ const art=(y,ref)=>fila(y,[ref,60],["REGULADOR",120],["2,00",395],["10,00",440],["20,00",555]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(214,["ZONA",120],["VESTUARIOS",145]),...art(228,"EX0001"),
+  ...fila(242,["AZONA",60],["DE",92],["ACCESO",120]),...art(256,"EX0002"),...fila(270,["ZONA",60],["ACCESO",88],["PISCINAS",120],["DUCHAS",160]),...art(284,"EX0003")]);
+ assert.deepEqual(r.lineas.map(l=>l.referencia.valor),["EX0001","EX0002","EX0003"]);
+ assert.ok(r.lineas.every(l=>!/ZONA/.test(l.descripcion.valor||"")));
+});
+// Fallo real 2026-11-18: título «CONCEPTOS» centrado y descripciones alineadas mucho más a la izquierda; sin código, el principio
+// de la descripción se tomaba como código. Textos ficticios.
+test("descripciones alineadas a la izquierda del título centrado: el principio de la descripción no es código",()=>{
+ const tit=fila(200,["REFERENCIA",60],["CONCEPTOS",250],["CANTIDAD",400],["PRECIO",460],["IMPORTE",545]);
+ const art=(y,ref,d1,d2)=>fila(y,...(ref?[[ref,60]]:[]),[d1,140],[d2,185],["2,00",415],["10,00",462],["20,00",560]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...art(218,"EX0001","REGULADOR","FICTICIO"),...art(232,"EX0002","TOBERA","FICTICIA"),
+  ...art(246,null,"DF-99","ESTRECHO"),...art(260,"EX0003","REJILLA","FICTICIA"),...art(274,"EX0004","BOCA","FICTICIA")]);
+ const l=r.lineas.find(x=>/ESTRECHO/.test(x.descripcion.valor||x.descripcion.literal||""));
+ assert.ok(l,JSON.stringify(r.lineas.map(x=>[x.referencia.literal,x.descripcion.literal])));
+ assert.ok(!l.referencia.valor,"sin código: "+l.referencia.valor);
+ assert.match(l.descripcion.literal,/^DF-99 ESTRECHO/);
+ assert.deepEqual(r.lineas.filter(x=>x.referencia.valor).map(x=>x.referencia.valor),["EX0001","EX0002","EX0003","EX0004"]);
+});
+// Fallo real 2026-11-18: tabla «Nº | Descripción | Cantidad | Un.» sin precios y con el código («MODELOX») bajo «Nº». Ficticio.
+test("tabla «Nº | Descripción | Cantidad | Un.»: se lee, con el código bajo «Nº» si son códigos con letras",()=>{
+ const tit=fila(200,["Nº",60],["Descripción",160],["Cantidad",400],["Un.",450]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["MODELOX",60],["CAMARA",160],["FICTICIA",200],["1",420],["Unidad",450])]);
+ assert.equal(r.lineas.length,1);
+ assert.equal(r.lineas[0].cantidad.valor,1);
+ assert.equal(r.lineas[0].referencia.literal,"MODELOX");
+ // Con números de línea bajo «Nº», no es el código.
+ const n=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["1",60],["CAMARA",160],["FICTICIA",200],["1",420],["Unidad",450])]);
+ assert.equal(n.lineas.length,1);assert.notEqual(n.lineas[0].referencia.literal,"1");
+});
+// Fallo real 2026-11-18: código de modelo solo de letras a la izquierda (título «Nº» perdido) y renglones de peso tras la tabla.
+test("código solo de letras que también está en su descripción: es el código; «Peso bruto/neto» termina la tabla",()=>{
+ const tit=fila(200,["Descripción",160],["Cantidad",400],["Un.",450]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["MODELOX",60],["CAMARA",160],["MODELOX",200],["105",240],["1",420],["Unidad",450]),
+  ...fila(240,["Peso",60],["bruto",88],["(Kg)",118],["0,00",160]),...fila(254,["Peso",60],["neto",88],["(Kg)",118],["0,00",160])]);
+ assert.deepEqual(r.lineas.map(l=>l.referencia.literal),["MODELOX"]);
+ // Una palabra sin cifras que no está en su descripción no es un código.
+ const p=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["PALABRA",60],["CAMARA",160],["FICTICIA",200],["1",420],["Unidad",450])]);
+ assert.notEqual(p.lineas[0]?.referencia.literal,"PALABRA");
+});
+
+/* --------------- Factura de proveedor (usuario 2026-11-20; datos ficticios) --------------- */
+test("factura: títulos «DESCRIPCIÓN EQUIPOS ALQUILADOS» y «PRECIO DIA»; número bajo «NÚMERO» (serie y número), no los «ALBARÁN Nº» de las líneas",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const tit=fila(200,["CÓDIGO",45],["CANTIDAD",95],["DESCRIPCIÓN EQUIPOS ALQUILADOS",140],["PRECIO DIA",425],["IMPORTE",517]);
+ const pal=[...cabeceraDoc(),...fila(100,["FECHA",400],["NÚMERO",470]),...fila(112,["15/10/26",400],["A",478],["009999",488]),...tit,
+  ...fila(214,["ALBARAN",140],["Nº",180],["111.111",200]),...fila(228,["EX00001",45],["1,00",111],["MORDAZA",140],["10,000",442],["10,00",547]),
+  ...fila(242,["ALBARAN",140],["Nº",180],["222.222",200]),...fila(256,["EX00002",45],["2,00",111],["TALADRO",140],["5,000",442],["10,00",547])];
+ const r=extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ assert.equal(r.numero.valor,"A 009999");
+ assert.deepEqual(r.lineas.map(l=>[l.referencia.valor,l.cantidad.valor,l.precio.valor]),[["EX00001",1,10],["EX00002",2,5]]);
+ assert.notEqual(extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY}).numero.valor,"A 009999");
+});
+test("factura: el título «FACTURA» encima de «NÚMERO» da las cifras sin la serie; vale la lectura completa. Una dirección no es número",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const tit=fila(200,["CÓDIGO",45],["CANTIDAD",95],["DESCRIPCIÓN",140],["PRECIO",425],["IMPORTE",517]);
+ const lin=fila(228,["EX00001",45],["1,00",111],["MORDAZA",140],["10,000",442],["10,00",547]);
+ const pal=[...cabeceraDoc(),...fila(86,["FACTURA",488]),...fila(100,["FECHA",400],["NÚMERO",470]),...fila(112,["15/10/26",400],["A",478],["009999",488]),...tit,...lin];
+ assert.equal(extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY,numeroDeFactura:true}).numero.valor,"A 009999");
+ const dir=[...cabeceraDoc(),...fila(100,["FACTURA",60]),...fila(112,["24999",60],["VILLAFICTICIA",100]),...tit,...lin];
+ assert.notEqual(extraerDePaginas([pagina(dir)],{registro:registroCon(),hoy:HOY,numeroDeFactura:true}).numero.valor,"24999 VILLAFICTICIA");
+});
+test("factura digital: «1,00 RTH» en un solo texto (cantidad y principio de la descripción): 1 a la cantidad, «RTH» a la descripción",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js"),{agruparLineas}=require("../albaranes/texto-pdf.js");
+ // Texto de PDF digital (sin cajas por palabra): [texto, x0, x1, y].
+ const fr=(t,x0,x1,y,alto=7)=>({texto:t,crudo:t,x0,x1,y,alto});
+ const fs_=[fr("PROVEEDOR FICTICIO, S.L.",28,140,40),fr("CIF ${NIF}",28,90,52),fr("ALBARÁN Nº 600.111",300,380,82),fr("FECHA 15/10/26",400,460,82),
+  fr("CÓDIGO",43,72,223),fr("CANTIDAD",93,131,223),fr("DESCRIPCIÓN EQUIPOS ALQUILADOS",139,270,223),fr("PRECIO DIA",425,467,223),fr("IMPORTE",517,551,223),
+  fr("EX00001",40,88,258),fr("1,00 RTH",111,148,258),fr("MORDAZA FICTICIA",152,230,258),fr("10,000",442,470,258),fr("NETO",496,516,258),fr("10,00",547,571,258)];
+ const pag={numero:1,ancho:595,alto:842,tipo:"DIGITAL",lineas:agruparLineas(fs_)};
+ const r=extraerDePaginas([pag],{registro:registroCon(),hoy:HOY});
+ assert.equal(r.lineas.length,1);
+ assert.equal(r.lineas[0].cantidad.valor,1);
+ assert.match(r.lineas[0].descripcion.valor,/^RTH MORDAZA/);
+ assert.equal(r.lineas[0].importe.valor,10);
+});
+test("factura de alquiler: «Total 00010 Días» bajo cada línea no termina la tabla; renglones sin código ni cifras no son artículos",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js"),{agruparLineas}=require("../albaranes/texto-pdf.js");
+ const fr=(t,x0,x1,y,alto=7)=>({texto:t,crudo:t,x0,x1,y,alto});
+ const art=(y,ref,precio)=>[fr(ref,40,88,y),fr("1,00 RTH",111,148,y),fr("MORDAZA FICTICIA",152,230,y),fr(precio,442,470,y),fr("NETO",496,516,y),fr(precio.replace(/0$/,""),547,571,y),
+  fr("Total",133,157,y+12),fr("00010",162,186,y+12),fr("Días",191,210,y+12),fr("Ref.Contrato:",277,340,y+12),fr("009999",344,373,y+12)];
+ const fs_=[fr("PROVEEDOR FICTICIO, S.L.",28,140,40),fr("CIF ${NIF}",28,90,52),fr("FECHA 15/10/26",400,460,82),
+  fr("CÓDIGO",43,72,223),fr("CANTIDAD",93,131,223),fr("DESCRIPCIÓN EQUIPOS ALQUILADOS",139,270,223),fr("PRECIO DIA",425,467,223),fr("IMPORTE",517,551,223),
+  ...art(258,"EX00001","10,000"),fr("1,00 FICTICIA 1",111,176,282),...art(306,"EX00002","20,000"),fr("TOTAL",482,504,626),fr("30,00",540,570,640)];
+ const r=extraerDePaginas([{numero:1,ancho:595,alto:842,tipo:"DIGITAL",lineas:agruparLineas(fs_)}],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ assert.deepEqual(r.lineas.filter(l=>l.referencia?.valor).map(l=>[l.referencia.valor,l.importe.valor]),[["EX00001",10],["EX00002",20]]);
+});
+
+/* --------------- Descuentos en la columna del importe y abonos (fallos reales 2026-11-20; datos ficticios) --------------- */
+test("descuento en cascada con su segunda cifra caída en la columna del importe («55» | «7  83,70»): el cuadre lo confirma",()=>{
+ const tit=fila(200,["CÓDIGO",60],["CONCEPTO",120],["CANTIDAD",380],["PRECIO",430],["DTO%",480],["IMPORTE",540]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX00001",60],["CODO",120],["FICTICIO",145],["10,00",395],["20,000",430],["55",485],["7",527],["83,70",548])]);
+ assert.deepEqual(r.lineas[0].descuento.porcentajes,[55,7]);
+ assert.equal(r.lineas[0].importe.valor,83.7);
+ assert.equal(r.lineas[0].cuadre.estado,"VERIFICADO");
+ // Si con esas cifras la línea no cuadra, sigue en duda (nunca se inventa).
+ const mal=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX00001",60],["CODO",120],["FICTICIO",145],["10,00",395],["20,000",430],["55",485],["9",527],["83,70",548])]);
+ assert.equal(mal.lineas[0].importe.estado,"AMBIGUO");
+});
+test("abono: cantidad negativa con el importe impreso en positivo cuadra; descuento «50.» con punto final, si cuadra",()=>{
+ const tit=fila(200,["CÓDIGO",60],["CONCEPTO",120],["CANTIDAD",380],["PRECIO",430],["DTO%",480],["IMPORTE",540]);
+ const r=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX00001",60],["MAQUINA",120],["FICTICIA",160],["-1,00",395],["400,000",430],["50.",485],["200,00",548])]);
+ assert.deepEqual(r.lineas[0].descuento.porcentajes,[50]);
+ assert.equal(r.lineas[0].cuadre.estado,"VERIFICADO");
+ const d=leer([...cabeceraDoc(),...etiquetas(),...tit,...fila(218,["EX00001",60],["MAQUINA",120],["FICTICIA",160],["-1,00",395],["50,000",430],["52",527],["24,00",548])]);
+ assert.deepEqual(d.lineas[0].descuento.porcentajes,[52]);
+ assert.equal(d.lineas[0].cuadre.estado,"VERIFICADO");
+});

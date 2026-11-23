@@ -58,10 +58,21 @@ export async function leerPaginas(fetcher,ruta,clave,{maxPaginas=200,simultaneas
 // Código PRY de un proyecto de STEL: en su referencia o, si no, un único «PRY…» en su nombre.
 const normPry=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 export function codigoProyecto(x){
- for(const k of ['reference','project-reference','code','full-reference']){const c=normPry(x?.[k]);if(/^PRY\d{5}$/.test(c))return c;}
- const t=String(x?.name||x?.title||'').toUpperCase().match(/(?:^|[^A-Z0-9])PRY\s*\d{5}(?=$|[^A-Z0-9])/g)||[];
+ // También los proyectos «PRYMP» y 5 cifras (usuario, 2026-11-20).
+ for(const k of ['reference','project-reference','code','full-reference']){const c=normPry(x?.[k]);if(/^PRY(MP)?\d{5}$/.test(c))return c;}
+ const t=String(x?.name||x?.title||'').toUpperCase().match(/(?:^|[^A-Z0-9])PRY\s*(?:MP\s*)?\d{5}(?=$|[^A-Z0-9])/g)||[];
  const cs=[...new Set(t.map(normPry))];
  return cs.length===1?cs[0]:'';
+}
+/*
+ * Nombre de un proveedor de STEL. Hay cuentas sin `name` ni `fiscal-name` en la API que la web de STEL sí muestra con nombre
+ * (fallo real 2026-11-11: una cuenta llegaba sin nombre y el robot no podía buscarla): se prueban los demás campos de nombre y,
+ * si no, cualquier otro terminado en «name» que no sea de una persona de contacto.
+ */
+export function nombreProveedor(x){
+ for(const k of ['name','legal-name','fiscal-name','commercial-name','trade-name','business-name','company-name']){const v=String(x?.[k]??'').trim();if(v)return v;}
+ for(const [k,v] of Object.entries(x||{}))if(/name$/i.test(k)&&!/contact|person|first|last|user|agent/i.test(k)&&typeof v==='string'&&v.trim())return v.trim();
+ return '';
 }
 export async function handler(req,{fetcher=fetch,env}={}){
  if(req.method==='OPTIONS')return new Response(null,{headers:cors});
@@ -97,7 +108,7 @@ export async function handler(req,{fetcher=fetch,env}={}){
    diagnostico:{proveedores:{paginas:s.paginas,motivo:s.motivo||null},obras:{paginas:o.paginas,motivo:o.motivo||null},articulos:{paginas:a.paginas,motivo:a.motivo||null}},
    obras:o.filas.filter(activo).map(x=>({id:x.id,codigo:codigoProyecto(x),nombre:String(x.name||x.title||'').slice(0,150)})).filter(x=>x.codigo),
    articulos_desde:desde||0,articulos_siguiente:a.siguiente,articulos_ids_inicio:a.ids_inicio,articulos_ids_final:a.ids_final,
-   proveedores:s.filas.filter(activo).map(x=>({id:x.id,nombre:String(x.name||x['fiscal-name']||''),nif:String(x['tax-identification-number']||'')})),
+   proveedores:s.filas.filter(activo).map(x=>({id:x.id,nombre:nombreProveedor(x),nif:String(x['tax-identification-number']||'')})),
    articulos:a.filas.filter(activo).map(x=>({id:x.id,referencia:String(x.reference||''),descripcion:String(x.name||'')}))});
  }catch{return json({error:'Consulta de catálogo no disponible',persistido:false},502);}
 }

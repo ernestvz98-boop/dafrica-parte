@@ -38,6 +38,17 @@
     p.notas=[...(p.notas||[]),'CIF impreso no legible: completado con el catálogo de STEL (huella del perfil, coincidencia única)'];
    }else motivos.push(c.length?'Huella del CIF repetida en el catálogo de proveedores':'Huella del CIF del perfil no encontrada en el catálogo de proveedores');
   }
+  // CIF con dos lecturas OCR válidas («B…» / «E…», fallo real 2026-11-18): si exactamente una existe en el catálogo COMPLETO de
+  // proveedores de STEL, y en una sola cuenta, es esa (catálogo de solo lectura con coincidencia única). Si no, sigue AMBIGUO.
+  if(catalogo.proveedores_completo&&p?.estado==='AMBIGUO'&&!p.nif&&(p.lecturas_nif||[]).length>1){
+   const norm=v=>M('nif').normalizar(v);
+   const enCatalogo=p.lecturas_nif.filter(v=>M('nif').validar(v).valido).map(v=>({v,cuentas:(catalogo.proveedores||[]).filter(s=>norm(s.nif)===norm(v))})).filter(x=>x.cuentas.length);
+   if(enCatalogo.length===1&&enCatalogo[0].cuentas.length===1){
+    const c=enCatalogo[0];
+    Object.assign(p,{nif:norm(c.v),estado:'NIF_NO_REGISTRADO',valor:norm(c.v),motivos:[],
+     notas:[...(p.notas||[]),'CIF con lecturas OCR distintas ('+p.lecturas_nif.join(' | ')+'): solo '+norm(c.v)+' está en el catálogo de STEL']});
+   }
+  }
   if(catalogo.proveedores_completo&&p?.nif&&M('nif').validar(p.nif).valido&&['OK','NIF_NO_REGISTRADO'].includes(p.estado)){
    const candidatos=(catalogo.proveedores||[]).filter(s=>M('nif').normalizar(s.nif)===M('nif').normalizar(p.nif));
    if(candidatos.length===1){

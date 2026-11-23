@@ -28,15 +28,31 @@ const NIF=()=>req?req("./nif.js"):root.DafricaAlbaranes.nif;
  */
 const REGISTRO={
  // La empresa receptora: nunca puede ser el emisor de un albarán de compra.
- empresa_propia:{nombres:["DAFRICA BIERZO","DAFRICA"],nifs:[],huellas_nif:["b34961e7941e7098c1fa1b2ccaeb123a8968344c606a5fb40039469e5dd68cbd"]},
+ // La segunda huella es de un tribunal de arbitraje citado en la letra pequeña de un proveedor: tampoco es nunca el emisor.
+ empresa_propia:{nombres:["DAFRICA BIERZO","DAFRICA"],nifs:[],huellas_nif:["b34961e7941e7098c1fa1b2ccaeb123a8968344c606a5fb40039469e5dd68cbd","c8d8bd5c675f4f739e12dc325688323344871a0c8f3586519d042b72221a1d08"]},
  proveedores:[
   {id:"SALTOKI",nombre:"SALTOKI PONFERRADA, S.L.",nifs:[],huellas_nif:["9cb616254545790202aef285a434d1c5e3c171eea3234b641006a2dedd99375b"],formato_numeros:"es",formato_confirmado:true,
    formato_numero:"^\\d{3}\\.\\d{3}$",formato_referencia:"^\\d{10}$",
+   // Columnas en puntos sobre una página de 595 de ancho (albaranes reales): si el OCR pierde la fila de títulos,
+   // la tabla se lee con estas posiciones en vez de descartarla.
+   columnas:[["referencia",55,110],["descripcion",111,415],["cantidad",416,455],["precio",456,506],["descuento",507,548],["importe",549,595]],
+   // Números correlativos en el tiempo (albaranes reales de 2026: unos 300 al día, con cruces de hasta
+   // ~150 entre fechas por sus distintos puestos): un número que rompe el orden de las fechas del lote en
+   // más de 2.000 es una lectura dudosa (p. ej. la primera cifra mal leída).
+   numeros_correlativos:{tolerancia:2000},
    // «PRENSAR Ø54X2»: el OCR lee el símbolo de diámetro como M, Y, W o «Y9».
    glifos_ocr:[["(\\bPRENSAR )(?:[MYWH]{1,2}9?)(?=\\d{2}X\\d)","$1Ø"]]},
+  // Sin etiqueta junto al número. Tabla con «P.V.P.» (tarifa) y «PRECIO NETO U» (el del albarán, ya con descuento).
+  {id:"MCASERO",nombre:"M.CASERO, S.A.",nombres:["MCASERO SA"],nifs:[],huellas_nif:["dbefd71a0404adeb90d637e2a79423fe4d4ef932b75d36cb37c23e03f5777f11"],formato_numeros:"es",formato_confirmado:true,
+   formato_numero:"^\\d{7}-P$",numero_sin_etiqueta:true,numeros_correlativos:{tolerancia:2000},
+   // Sus títulos llegan incompletos en el OCR: siempre estas columnas.
+   columnas_fijas:true,columnas:[["referencia",30,100],["descripcion",101,295],["cantidad",296,372],["otra",373,435],["precio",436,498],["importe",499,590]]},
   {id:"RODAVI",nombre:"RODAVI SUMINISTROS, S.L.",nifs:[],huellas_nif:["50518a3a925c0a7a9e8ec9587574b3e58c0ed7bd7a2c2d7805c1421100d1165c"],formato_numeros:"es",formato_confirmado:true,
-   formato_numero:"^\\d{6}$",formato_referencia:"^\\d{6,10}$",
-   anotaciones_no_articulo:["RETIRADO POR","RECOGIDO POR","PEDIDO POR"]},
+   // Códigos de 5 a 12 letras y cifras, con alguna cifra (2026-11-13, 3 albaranes reales: también los hay con letras, y el
+   // formato de solo cifras dejaba en revisión la descripción de la línea anterior a cada uno).
+   formato_numero:"^\\d{6}$",formato_referencia:"^(?=.*\\d)[0-9A-Z]{5,12}$",
+   // «OBRA *** NOMBRE 1,00»: la obra va como una fila con cantidad 1 y sin precio (albarán real 2026-11-13).
+   anotaciones_no_articulo:["RETIRADO POR","RECOGIDO POR","PEDIDO POR","OBRA"]},
   {id:"MADERAS_PEREIRA",nombre:"MADERAS PEREIRA REGUERAS, S.L.U.",nifs:[],huellas_nif:["9476058f5547f9a5855a6076ec17a0b6ca5200a6128ff64ac720f0df8a9cd502"],formato_numeros:"es",formato_confirmado:true,
    permite_sin_referencia:true,referencia_literal:true,formato_numero:"^\\d{2}/\\d{5}$"},
   // Número y fecha impresos sin etiqueta, juntos («L26-01234 01/10/2026»); sin precios.

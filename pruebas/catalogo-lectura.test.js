@@ -92,6 +92,8 @@ test('obras de STEL: solo código PRY y nombre; el código sale de la referencia
  const {codigoProyecto,handler}=await mod();
  assert.equal(codigoProyecto({reference:'PRY90123'}),'PRY90123');
  assert.equal(codigoProyecto({reference:'',name:'PRY 90124 Nave ficticia'}),'PRY90124');
+ // Proyectos PRYMP (usuario, 2026-11-20): «PRYMP» y 5 cifras.
+ assert.equal(codigoProyecto({reference:'PRYMP90001'}),'PRYMP90001');assert.equal(codigoProyecto({reference:'',name:'Obra ficticia (PRYMP90002)'}),'PRYMP90002');assert.equal(codigoProyecto({reference:'PRYMP9001'}),'');
  assert.equal(codigoProyecto({name:'PRY90125 y PRY90126'}),'');
  assert.equal(codigoProyecto({name:'Obra sin código'}),'');
  const env=k=>({SUPABASE_URL:'https://test.invalid',SUPABASE_ANON_KEY:'a',STEL_API_KEY:'c'})[k],rutas=[];
@@ -106,4 +108,11 @@ test('obras de STEL: solo código PRY y nombre; el código sale de la referencia
  assert.ok(!JSON.stringify(d).includes('budget'));
  // Nunca dos consultas a STEL a la vez: proveedores, obras y artículos en orden.
  assert.deepEqual([...new Set(rutas.map(x=>x.split('/').pop()))],['suppliers','projects','products']);
+});
+test('nombre de proveedor: si la API no trae name ni fiscal-name, otro campo de nombre (2026-11-11)',async()=>{
+ const {nombreProveedor}=await mod();
+ assert.equal(nombreProveedor({name:'FICTICIO SL','legal-name':'OTRO'}),'FICTICIO SL');
+ assert.equal(nombreProveedor({name:'','fiscal-name':'','legal-name':'CIA FICTICIA DE PRUEBAS, S.A.'}),'CIA FICTICIA DE PRUEBAS, S.A.');
+ assert.equal(nombreProveedor({name:'','contact-name':'Persona Ficticia','razon-name':'RAZON FICTICIA'}),'RAZON FICTICIA');
+ assert.equal(nombreProveedor({name:'','contact-name':'Persona Ficticia'}),'');
 });

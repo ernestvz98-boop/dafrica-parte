@@ -21,3 +21,9 @@ test("tarifa: solo código y descripción; la columna de precio nunca se toma",(
  // Si la única columna «código» es la de precio, no hay columnas reconocidas.
  assert.ok(D.filasTarifa([["Precio","Descripción"],["1","X"]],"perfil:X").error);
 });
+
+test("obras: también códigos PRYMP, tal cual (nunca se convierten en otro PRY)",()=>{
+ const r=D.filasObras([["Código","Nombre"],["PRYMP0012","MANTENIMIENTO FICTICIO"],["prymp 0013","OTRO FICTICIO"],["PRYM0012","MAL"],["PRY12345","OBRA FICTICIA"]]);
+ assert.deepEqual(r.filas,[{codigo:"PRYMP0012",nombre:"MANTENIMIENTO FICTICIO"},{codigo:"PRYMP0013",nombre:"OTRO FICTICIO"},{codigo:"PRY12345",nombre:"OBRA FICTICIA"}]);
+ assert.equal(r.descartadas,1);
+});

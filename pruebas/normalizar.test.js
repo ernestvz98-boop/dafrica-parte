@@ -63,4 +63,8 @@ test("NIF, NIE y CIF con control válido",()=>{
   assert.equal(NIF.validar(v).valido,false,v);
  const hallados=NIF.buscar("SUMINISTROS · CIF: B-24.123.457 · Tel 987000000 · NIF 12345678Z · falso B24123456");
  assert.deepEqual(hallados.map(h=>h.nif),["B24123457","12345678Z"]);
+ // Fallo real (2026-11-16): el prefijo de país pegado al CIF («ESB24123457») no se encontraba.
+ assert.deepEqual(NIF.buscar("Suministros Ficticios S.L.\nESB24123457\nAvda.").map(h=>h.nif),["B24123457"]);
+ assert.deepEqual(NIF.buscar("ES-B24123457 · ES 12345678Z").map(h=>h.nif),["B24123457","12345678Z"]);
+ assert.deepEqual(NIF.buscar("REFDESB24123457"),[],"dentro de una palabra no es un CIF");
 });

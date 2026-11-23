@@ -74,7 +74,7 @@ function detectarRegiones(gris,impresas=[],{dpi=75,maximo=8,todas=false}={}){
   const solapeV=Math.min(a.y1,b.y1)-Math.max(a.y0,b.y0);
   const altoMin=Math.min(a.y1-a.y0,b.y1-b.y0)+1;
   const dx=Math.max(0,Math.max(a.x0,b.x0)-Math.min(a.x1,b.x1));
-  // Hueco entre letras: 6 mm, o más si la escritura es grande («P R Y  0 0 1 1 1» espaciado).
+  // Hueco entre letras: 6 mm, o más si la escritura es grande («P R Y  0 9 9 9 9» espaciado).
   // Solo trazos de altura parecida (una firma o un círculo al lado no se unen al código).
   const ha=a.y1-a.y0+1,hb=b.y1-b.y0+1;
   return solapeV>0.3*altoMin&&Math.max(ha,hb)<=2.5*Math.min(ha,hb)+2&&dx<=Math.max(hueco,1.3*Math.max(ha,hb));
@@ -152,7 +152,7 @@ function agrupar(items,unir){
 
 /* ------------------------------ Validación ----------------------------- */
 const FORMATOS={
- obra:/^PRY\d{5}$/,
+ obra:/^PRY(MP)?\d{5}$/,
  // Serie del año (ABP26) + número: «ABP261234» se guarda como «ABP26-1234».
  stel:/^ABP\d{2}\d{4}$/,
  // Pedido a proveedor de STEL (2026-10-26): «PAP09001». Opcional: no todos los albaranes tienen pedido.
@@ -443,6 +443,203 @@ function coherenciaLote(docs,{catalogoObras=null}={}){
 
 /* Textos de obra impresos: «OBRA: …», «Referencia: OBRA …», «OBRA/DATOS» con su casilla, «SU PEDIDO: …». */
 const RE_OBRA=/^(?:.*\b(?:OBRA(?:\/DATOS)?|SU PEDIDO|S\/REF|REFERENCIA)\b\s*[:.]?)\s*(.+)$/i;
+/*
+ * «Su referencia» impresa del albarán («S/REF: FARMACIA HOSPITAL», «Su pedido: NAVE NORTE», «Ref. cliente: …»), para el título
+ * del albarán en STEL (usuario, 2026-11-11). Solo las palabras leídas con fiabilidad (confianza del OCR ≥ 70): lo escrito a
+ * mano encima o al lado no entra. La primera que se encuentre, hasta 40 caracteres.
+ */
+const RE_SU_REF=/(?:^|[^A-Z0-9])(S ?\/ ?REF(?:ERENCIA)?|SU REF(?:ERENCIA)?|REF\.? CLIENTE|SU PEDIDO)\b\s*[:.]?\s*/i;
+function suReferencia(lineas){
+ for(const l of lineas||[]){
+  const t=String(l.texto||""),m=t.match(RE_SU_REF);
+  if(!m)continue;
+  const desde=m.index+m[0].length;let pos=0;const fiables=[];
+  for(const c of l.celdas||[]){const x=String(c.texto||"");const i=t.indexOf(x,pos);if(i>=0)pos=i+x.length;
+   if(i<0||i+x.length<=desde)continue;
+   // Palabra con la etiqueta pegada («S/REF:FARMACIA»): solo lo que va detrás.
+   const parte=i<desde?x.slice(desde-i):x;
+   if((c.conf??100)<70)break;
+   if(parte)fiables.push(parte);}
+  const v=(l.celdas?fiables.join(" "):t.slice(desde)).replace(/\s+/g," ").trim().slice(0,40).trim();
+  // La casilla vacía impresa como su etiqueta («S/REF:S REF», «S/REF:S/REF», fallo real 2026-11-23) no es una referencia.
+  if(/^(S ?\/? ?REF(ERENCIA)?|SU ?REF(ERENCIA)?|S|REF)$/i.test(v.replace(/[.:]/g,"").trim()))continue;
+  if(/[A-Za-z0-9]{3}/.test(v))return v;
+ }
+ return null;
+}
+/*
+ * Quién recoge el material, IMPRESO en el albarán («Retirado por: NOMBRE», «Recogido por», «Entregado a», «DNI 12345678Z»), para el
+ * título del albarán en STEL (usuario, 2026-11-20: «si un DNI o un nombre»). Solo palabras impresas leídas con fiabilidad (confianza
+ * del OCR ≥ 90; lo escrito a mano no entra) y hasta la siguiente etiqueta. El DNI/NIE solo con su letra de control válida y nunca el
+ * NIF del proveedor (`excluir`). Devuelve «NOMBRE · DNI 12345678Z», solo uno de los dos o null.
+ */
+const RE_RECOGE=/(?:^|[^A-Z0-9])(RETIRADO POR|RETIRA|RECOGIDO POR|RECOGE|ENTREGADO A|RECIBIDO POR|RECIBE|CONDUCTOR|TRANSPORTISTA)\b\s*[:.]?\s*/i;
+const RE_FIN_RECOGE=/^(FECHA|FIRMA|DNI|D\.?N\.?I\.?|NIF|N\.?I\.?E\.?|MATRICULA|MATRÍCULA|HORA|TEL|TELEFONO|TELÉFONO|OBRA|PEDIDO|ALBARAN|ALBARÁN|S\/REF)\b/i;
+function dniValido(t){
+ const k=String(t||"").toUpperCase().replace(/[^0-9A-Z]/g,"");
+ const m=k.match(/^([XYZ]?)(\d{7,8})([A-Z])$/);if(!m)return null;
+ const n=Number(({X:"0",Y:"1",Z:"2"}[m[1]]||"")+m[2]);
+ return "TRWAGMYFPDXBNJZSQVHLCKE"[n%23]===m[3]&&(m[1]?m[2].length===7:m[2].length===8)?k:null;
+}
+/*
+ * ¿Parece texto una lectura libre a mano? (usuario, 2026-11-23: las notas a mano, tal cual, al título). El modelo está entrenado en
+ * inglés y ante una firma o un borrón inventa frases («the establishment of the province's», «MR. Fitzmontaine…»): fuera las que
+ * llevan palabras inglesas corrientes, palabras de más de 14 letras, casi todo signos o menos de 2 letras/cifras.
+ */
+const INGLES=new Set(["THE","OF","AND","TO","IN","IS","WAS","FOR","WITH","FROM","THAT","BY","ON","AT","AS","HIS","HER","BE","HAVE","HAS","MR","MRS","ARE","WERE","IT","AN","THIS","WHICH","WHO","WILL","WOULD","NOT","BUT","OR","HAD","BEEN","THEIR","THEY","SHE","HE","WE","YOU","OUR","INTO","OVER","UPON","SAID"]);
+function notaPlausible(t){
+ const s=String(t||"").replace(/\s+/g," ").trim();
+ if(s.length<2||s.length>60)return false;
+ const alnum=(s.match(/[A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]/g)||[]).length,letras=/[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(s);
+ // Sin letras, solo si es casi todo cifras (un teléfono, un número); «0- 0. 0. 0. 1,0003.» es una raya de tabla leída.
+ if(alnum<2||alnum/s.replace(/ /g,"").length<(letras?0.6:0.85))return false;
+ const palabras=s.toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"").split(/[^A-Z0-9]+/).filter(Boolean);
+ if(palabras.some(w=>INGLES.has(w)))return false;
+ return !palabras.some(w=>/^[A-Z]{15,}$/.test(w));
+}
+/*
+ * Qué es una nota a mano para el título (usuario, 2026-11-23: «cuando aparezca algún nombre, alguna referencia, algún número,
+ * matrícula o descripción»). Medido con 40 albaranes reales: casi todo lo que el detector toma por «a mano» es texto IMPRESO leído
+ * con poca confianza (el logo, «Total líneas», el anuncio del pie) o frases inventadas por el modelo. Solo se acepta lo que encaja
+ * claramente en un tipo y no está ya impreso en la página:
+ *  - MATRICULA: 4 cifras y 3 consonantes; - NUMERO: sin letras, 4+ cifras seguidas o 9+ en total (un teléfono, un pedido);
+ *  - REFERENCIA: un solo código de 4 a 15 caracteres con al menos 2 letras y 2 cifras;
+ *  - NOMBRE: 1 a 3 palabras de letras que empiezan por un nombre de pila corriente;
+ *  - DESCRIPCION: 2+ palabras con al menos 2 de 3+ letras, todas (las de 3+ letras) del vocabulario: las líneas de ese albarán o
+ *    palabras corrientes de obra.
+ * contexto: {impreso: palabras impresas de la página y el nombre del proveedor, vocabulario: palabras de las líneas del albarán}.
+ * Devuelve {tipo, texto} o null.
+ */
+const NOMBRES=new Set(("ANTONIO JOSE MANUEL FRANCISCO DAVID JUAN JAVIER DANIEL CARLOS JESUS ALEJANDRO MIGUEL RAFAEL PEDRO PABLO ANGEL SERGIO FERNANDO "+
+ "JORGE LUIS ALBERTO ALVARO ADRIAN DIEGO RAUL IVAN RUBEN ENRIQUE OSCAR RAMON ANDRES VICENTE SANTIAGO JOAQUIN VICTOR MARIO EDUARDO ROBERTO "+
+ "MARCOS IGNACIO HUGO JAIME RICARDO EMILIO GUILLERMO GABRIEL JULIO MARTIN SALVADOR TOMAS AGUSTIN GONZALO NICOLAS FELIX CRISTIAN JULIAN "+
+ "ISMAEL SAMUEL HECTOR JOAN AITOR ARTURO MARC MARIANO ALFONSO GERMAN NOEL CESAR ESTEBAN BORJA JONATHAN LORENZO ERNESTO ELOY FELIPE "+
+ "MARIA CARMEN ANA ISABEL LAURA CRISTINA MARTA DOLORES LUCIA PILAR ELENA SARA PAULA RAQUEL ROSA MANUELA MERCEDES BEATRIZ JULIA SILVIA "+
+ "PATRICIA IRENE NURIA ROCIO ANDREA ALBA SONIA MONICA ALICIA SANDRA ROSARIO MARINA SUSANA YOLANDA NATALIA MARGARITA INMACULADA CLAUDIA "+
+ "ESTHER EVA NOELIA VERONICA ANGELA EMMA BEGOÑA LORENA ALMUDENA AMPARO MIRIAM GLORIA INES CONSUELO ENCARNACION").split(" "));
+const PALABRAS_OBRA=new Set(("FALTA FALTAN FALTA DEVOLVER DEVOLUCION DEVUELTO PENDIENTE PENDIENTES ENTREGAR ENTREGADO ENTREGA RECOGER RECOGIDO RECOGE "+
+ "OBRA OBRAS CAJA CAJAS UNIDADES UNIDAD METROS METRO ROLLO ROLLOS SACO SACOS PALET PALETS BARRA BARRAS TUBO TUBOS CODO CODOS "+
+ "MANGUITO MANGUITOS VALVULA VALVULAS CABLE TORNILLOS TACOS BROCA BROCAS PARA CON SIN DEL LAS LOS UNA UNO DOS TRES CUATRO CINCO "+
+ "ROTO ROTA ROTOS CAMBIO CAMBIAR ABONO ABONAR CARGO CUENTA PAGADO CONTADO URGENTE MAÑANA LUNES MARTES MIERCOLES JUEVES VIERNES "+
+ "SABADO NAVE TALLER ALMACEN FURGONETA CAMION PORTAL PISO PLANTA SOTANO CUBIERTA BAÑO COCINA").split(" "));
+// Distancia de edición (letras cambiadas, de más o de menos).
+const distancia=(a,b)=>{const d=Array.from({length:a.length+1},(_,i)=>[i]);for(let j=1;j<=b.length;j++)d[0][j]=j;
+ for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return d[a.length][b.length];};
+const MATRICULA_NOTA=/\b(\d{4})\s?([BCDFGHJKLMNPRSTVWXYZ]{3})\b/;
+function clasificarNota(t,{impreso=[],vocabulario=[]}={}){
+ const s=String(t||"").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/["'#*_|]+/g," ").replace(/\s+/g," ").trim().replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g,"");
+ if(!notaPlausible(s))return null;
+ const pal=s.split(/[^A-Z0-9Ñ]+/).filter(Boolean);
+ // Ya impreso en la página (una palabra de 4+ letras igual o a una letra de una impresa): es texto impreso mal detectado.
+ const imp=new Set((impreso||[]).map(w=>String(w).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"")).filter(w=>w.length>=4));
+ const impresa=w=>w.length>=4&&/[A-Z]/.test(w)&&[...imp].some(x=>x===w||(Math.abs(x.length-w.length)<=1&&distancia(x,w)<=1)||(w.length>=5&&x.includes(w)));
+ if(pal.some(impresa))return null;
+ const m=s.match(MATRICULA_NOTA);
+ if(m)return {tipo:"MATRICULA",texto:m[1]+m[2]};
+ if(!/[A-Z]/.test(s)){const cifras=s.replace(/\D/g,"");return /\d{4}/.test(s)||cifras.length>=9?{tipo:"NUMERO",texto:s}:null;}
+ if(pal.length===1&&/^[A-Z0-9][A-Z0-9\/.-]{3,14}$/.test(s)&&(s.match(/\d/g)||[]).length>=2&&(s.match(/[A-Z]/g)||[]).length>=2)return {tipo:"REFERENCIA",texto:s};
+ if(pal.length<=3&&pal.every(w=>/^[A-ZÑ]{2,14}$/.test(w))&&NOMBRES.has(pal[0])&&!pal.some(w=>INGLES.has(w)))return {tipo:"NOMBRE",texto:pal.join(" ")};
+ const voc=new Set([...PALABRAS_OBRA,...(vocabulario||[]).map(w=>String(w).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,""))]);
+ const largas=pal.filter(w=>/^[A-ZÑ]{3,}$/.test(w));
+ if(pal.length>=2&&largas.length>=2&&largas.every(w=>voc.has(w))&&pal.every(w=>/^[A-ZÑ]+$/.test(w)||/^\d{1,4}$/.test(w)))return {tipo:"DESCRIPCION",texto:s};
+ return null;
+}
+/*
+ * ¿Está el recorte (caja en puntos de la página) en una casilla de firma? Junto o debajo de un rótulo «Recibí», «Conforme»,
+ * «Conformidad», «Firma», «Fdo.», «Sello» o «Por <empresa>» (la del proveedor): hasta 90 puntos por debajo y a sus lados.
+ */
+function enZonaDeFirma(caja,lineas){
+ const [x,y,w,h]=caja,cx=x+w/2,cy=y+h/2;
+ return (lineas||[]).some(l=>{
+  const t=String(l.texto||"");
+  const rotulo=/\b(RECIB[IÍ]|CONFORME|CONFORMIDAD|FIRMA|FDO|SELLO)\b/i.test(t)||(/^\W*POR\s+[A-ZÁÉÍÓÚÑ]/i.test(t)&&t.split(/\s+/).length<=3);
+  if(!rotulo)return false;
+  const x0=Math.min(...(l.celdas||[]).map(c=>c.x0)),x1=Math.max(...(l.celdas||[]).map(c=>c.x1));
+  return cy>=l.y-2*(l.alto||10)&&cy<=l.y+90&&cx>=x0-40&&cx<=x1+160;
+ });
+}
+/*
+ * Coherencia del lote para quién recoge (fallo real 2026-11-23: el mismo DNI en seis albaranes, cinco con el nombre bien y uno con una letra de menos):
+ * con el mismo DNI, un nombre que aparece en UN solo albarán y otro en al menos dos más, se usa el mayoritario. Con empate, nada
+ * cambia. Modifica `recoge` de cada manuscritos («NOMBRE · DNI x»).
+ */
+function coherenciaRecoge(lista){
+ const partes=m=>{const t=String(m?.recoge||""),k=t.match(/^(.*) · DNI ([0-9A-Z]+)$/);return k?{nombre:k[1],dni:k[2]}:null;};
+ const porDni=new Map();
+ for(const m of lista||[]){const p=partes(m);if(!p)continue;const c=porDni.get(p.dni)||new Map();c.set(p.nombre,(c.get(p.nombre)||0)+1);porDni.set(p.dni,c);}
+ for(const m of lista||[]){
+  const p=partes(m);if(!p)continue;
+  const orden=[...porDni.get(p.dni).entries()].sort((a,b)=>b[1]-a[1]);
+  if(orden.length>1&&orden[0][1]>=orden[1][1]+2&&orden[0][0]!==p.nombre&&(porDni.get(p.dni).get(p.nombre)||0)===1)m.recoge=orden[0][0]+" · DNI "+p.dni;
+ }
+ return lista;
+}
+// DNI/NIE al final de un texto («NIF:12345678Z», «12345678Z»), con su letra de control válida.
+function dniEn(t){
+ const k=String(t||"").toUpperCase().replace(/[^0-9A-Z]/g,""),m=k.match(/([XYZ]?\d{7,8}[A-Z])$/);
+ return m?dniValido(m[1])||dniValido(m[1].slice(1)):null;
+}
+/*
+ * Fallo real 2026-11-23 (albarán escaneado: «Retirado por:NOMBRE DNI NIF:DNI» impreso): el OCR leía bien el texto pero
+ * con confianza 0-15 en «por:NOMBRE» y el DNI pegado a «NIF:». La letra de control del DNI es la prueba: un DNI válido de la línea
+ * se acepta con confianza ≥ 40, y con él el nombre que va delante; sin DNI válido, el nombre solo con confianza ≥ 70.
+ */
+function quienRecoge(lineas,excluir=[]){
+ const fuera=new Set((excluir||[]).map(x=>String(x||"").toUpperCase().replace(/[^0-9A-Z]/g,"").replace(/^ES(?=[0-9A-Z]{9}$)/,"")));
+ let nombre=null,dni=null;
+ for(const l of lineas||[]){
+  const t=String(l.texto||"");
+  // DNI etiquetado o en la línea de quien recoge.
+  const etiquetada=/\bD\.?N\.?I\.?|\bN\.?I\.?E\.?\b|\bNIF\b/i.test(t)||RE_RECOGE.test(t);
+  const dniLinea=etiquetada?(l.celdas||[]).filter(c=>(c.conf??100)>=40).map(c=>dniEn(c.texto)).find(d=>d&&!fuera.has(d))||null:null;
+  if(!dni&&dniLinea&&(RE_RECOGE.test(t)||/\bD\.?N\.?I\.?|\bN\.?I\.?E\.?\b/i.test(t)))dni=dniLinea;
+  if(nombre)continue;
+  const m=t.match(RE_RECOGE);if(!m)continue;
+  const minimo=dniLinea?0:70;
+  const desde=m.index+m[0].length;let pos=0;const pal=[];
+  for(const c of l.celdas||[]){const x=String(c.texto||"");const i=t.indexOf(x,pos);if(i>=0)pos=i+x.length;
+   if(i<0||i+x.length<=desde)continue;
+   const parte=(i<desde?x.slice(desde-i):x).trim();
+   if((c.conf??100)<minimo||RE_FIN_RECOGE.test(parte)||dniEn(parte))break;
+   if(parte)pal.push(parte);}
+  const v=pal.join(" ").replace(/[:;,.\-]+$/,"").replace(/\s+/g," ").trim().slice(0,40).trim();
+  // Un nombre: letras (al menos 3) y sin cifras.
+  if(/[A-ZÁÉÍÓÚÑ]{3}/i.test(v)&&!/\d/.test(v))nombre=v.toUpperCase();
+ }
+ return [nombre,dni?"DNI "+dni:null].filter(Boolean).join(" · ")||null;
+}
+/*
+ * Pedido a proveedor IMPRESO por el proveedor («Su referencia: PEDIDO: PAP01234», fallo real 2026-11-18: el lector solo buscaba
+ * el escrito a mano). Solo palabras impresas leídas con fiabilidad (confianza OCR ≥ 90) con la forma «PAP» + 5 cifras; si hay
+ * dos distintos, ninguno.
+ */
+function pedidoImpreso(lineas){
+ const vistos=new Map();
+ for(const l of lineas||[])for(const c of l.celdas||[]){
+  if((c.conf??100)<30)continue;
+  for(const m of String(c.texto||"").toUpperCase().matchAll(/(?:^|[^A-Z0-9])(PAP\s?\d{5})(?![0-9])/g)){const v=m[1].replace(/\s/g,"");
+   const x=vistos.get(v);vistos.set(v,{literal:c.texto,conf:Math.max(x?.conf??0,c.conf??100)});}
+ }
+ if(vistos.size!==1)return null;
+ const [valor,x]=[...vistos.entries()][0];
+ return {valor,literal:x.literal,fiable:x.conf>=90};
+}
+// El pedido impreso decide el del albarán: con lo escrito a mano igual (o sin nada escrito), validado; si lo escrito dice otro
+// número, en revisión.
+function conPedidoImpreso(pedido,impreso){
+ if(!impreso)return pedido;
+ const escrito=pedido?.valor??null,alternativas=pedido?.resolucion?.alternativas||[];
+ const ev=["Impreso en el albarán: «"+impreso.literal+"»"];
+ // Impreso pero leído con poca confianza (fallo real 2026-11-18, «PAP…» con confianza 48): propuesto, sin validar; lo valida la
+ // consulta a STEL (mismo proveedor y sus artículos) o la persona en la revisión.
+ if(!impreso.fiable&&!escrito&&!alternativas.length)return {valor:impreso.valor,literal:impreso.literal,estado:"REVISAR",confianza:0.8,
+  motivos:["Pedido impreso leído con poca confianza: sin validar"],resolucion:{metodo:"pedido_impreso_dudoso",evidencias:ev,alternativas:[impreso.valor]}};
+ if(!escrito&&!alternativas.length)return {valor:impreso.valor,literal:impreso.literal,estado:"OK",confianza:0.95,motivos:[],resolucion:{metodo:"pedido_impreso",evidencias:ev,alternativas:[impreso.valor]}};
+ if(escrito===impreso.valor||(!escrito&&alternativas.includes(impreso.valor)))
+  return {...pedido,valor:impreso.valor,estado:"OK",confianza:0.97,motivos:[],resolucion:{...pedido.resolucion,metodo:"pedido_impreso_y_escrito",evidencias:[...ev,...(pedido.resolucion?.evidencias||[])],alternativas:[impreso.valor]}};
+ return {...pedido,valor:null,estado:"AMBIGUO",confianza:0,motivos:["El pedido impreso ("+impreso.valor+") y el escrito a mano ("+(escrito||alternativas.join(" / "))+") no coinciden"],
+  resolucion:{...pedido?.resolucion,alternativas:[...new Set([impreso.valor,...alternativas])]}};
+}
 function obrasImpresas(lineas){
  const out=[];
  for(const l of lineas||[]){
@@ -477,10 +674,14 @@ async function leerManuscritos(paginas,resultado,vision,ctx={}){
    const h=(z.y1-z.y0+1)*f,m=0.35*h,mx=2*h;
    const x0=Math.max(0,Math.floor(z.x0*f-mx)),y0=Math.max(0,Math.floor(z.y0*f-m));
    const x1=Math.min(p.anchoPx,Math.ceil((z.x1+1)*f+mx)),y1=Math.min(p.altoPx,Math.ceil((z.y1+1)*f+m));
-   recortes.push({pagina:p.numero,caja:[x0,y0,x1-x0,y1-y0],png:p.recortePng([x0,y0,x1-x0,y1-y0])});
+   // escala: píxeles del recorte por punto de la página (para situarlo frente al texto impreso: casillas de firma).
+   recortes.push({pagina:p.numero,caja:[x0,y0,x1-x0,y1-y0],escala:k*f,png:p.recortePng([x0,y0,x1-x0,y1-y0])});
   }
  }
- if(!recortes.length)return {obra:vacio([]),stel:vacio([]),pedido:vacio([]),obraImpresa:[],obraEscrita:[],recortes:[]};
+ const suRef=suReferencia((resultado._pags||[]).flatMap(p=>p.lineas));
+ const recoge=quienRecoge((resultado._pags||[]).flatMap(p=>p.lineas),[resultado.proveedor?.nif,...(resultado.proveedor?.candidatos||[]),resultado.proveedor?.nif_propio_detectado]);
+ const papImpreso=pedidoImpreso((resultado._pags||[]).flatMap(p=>p.lineas));
+ if(!recortes.length)return {obra:vacio([]),stel:vacio([]),pedido:conPedidoImpreso(vacio([]),papImpreso),obraImpresa:[],obraEscrita:[],recortes:[],suReferencia:suRef,recoge,anotaciones:[],notas:[]};
  for(let i=0;i<recortes.length;i+=8){
   const r=await vision(recortes.slice(i,i+8).map(x=>x.png));
   for(const x of r||[])if(Number.isInteger(x.indice)&&recortes[i+x.indice])lecturas.push({...x,indice:i+x.indice});
@@ -492,7 +693,21 @@ async function leerManuscritos(paginas,resultado,vision,ctx={}){
  const obraEscrita=lecturas.filter(l=>l.tipo==="OTRO"&&!l.tachado&&!normalizarPedido(l.texto_literal)&&palabrasObra(l.texto_literal).size).map(l=>l.texto_literal);
  const ctxValidar={...ctx,obraImpresa,obraEscrita,proveedorId:resultado.proveedor?.id,numero:resultado.numero?.valor,fecha:resultado.fecha?.valor};
  const v=validarCodigos(lecturas,ctxValidar);
- const salida={...v,obraImpresa,obraEscrita,recortes:recortes.map((x,i)=>({pagina:x.pagina,caja:x.caja,lectura:lecturas.find(l=>l.indice===i)||null}))};
+ // Anotación a mano que no es la obra («CS XXXX 2026/1234», usuario 2026-11-16): el OCR local solo avisa con su lectura
+ // libre; nunca se da por leída (el número no se lee con seguridad). La escribe la persona en la revisión.
+ const anotaciones=lecturas.filter(l=>l.tipo==="ANOTACION"&&!l.tachado&&String(l.texto_literal||"").trim())
+  .map(l=>({pagina:recortes[l.indice]?.pagina??null,lectura:String(l.texto_literal).trim().slice(0,60)}));
+ // Notas a mano para el título (usuario, 2026-11-23: nombre, referencia, número, matrícula o descripción; nunca las firmas): solo
+ // las que clasificarNota reconoce y no están impresas en la página. Nunca se usan como código ni deciden nada.
+ const todas=(resultado._pags||[]).flatMap(pg=>pg.lineas||[]);
+ const impreso=[...todas.flatMap(l=>String(l.texto||"").split(/[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/)),...String(resultado.proveedor?.nombre||"").split(/\s+/)].filter(Boolean);
+ const vocabulario=(resultado.lineas||[]).flatMap(l=>String(l.descripcion?.valor??l.descripcion?.literal??"").split(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]+/)).filter(w=>w.length>=3);
+ const notas=[...new Set(lecturas.filter(l=>l.tipo==="NOTA"&&!l.tachado).filter(l=>{
+  const r=recortes[l.indice];if(!r)return false;
+  const lineasPag=(resultado._pags||[]).filter(x=>x.numero===r.pagina).flatMap(pg=>pg.lineas);
+  return !enZonaDeFirma(r.caja.map(n=>n/(r.escala||1)),lineasPag);
+ }).map(l=>clasificarNota(l.texto_literal,{impreso,vocabulario})?.texto).filter(Boolean).map(t=>t.slice(0,40)))].slice(0,3);
+ const salida={...v,pedido:conPedidoImpreso(v.pedido,papImpreso),obraImpresa,obraEscrita,suReferencia:suRef,recoge,anotaciones,notas,recortes:recortes.map((x,i)=>({pagina:x.pagina,caja:x.caja,lectura:lecturas.find(l=>l.indice===i)||null}))};
  if(ctx.compararModelos)salida.comparacion=await compararModelos(recortes,v,ctxValidar,ctx.compararModelos);
  return salida;
 }
@@ -726,5 +941,5 @@ function textoPrevioObra(r,{catalogoObras=null}={}){
  return n;
 }
 
-return {textoPrevioObra,sinComprobar,revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,leerManuscritos,aplicarEstado,pendientes,validarStel,numeroContradice,fechaStel,FORMATOS,normalizarPedido,validarPedido};
+return {pedidoImpreso,conPedidoImpreso,textoPrevioObra,sinComprobar,revalidarObra,obraPorNombre,detectarRegiones,validarCodigos,coherenciaLote,claveObra,palabrasObra,obrasImpresas,suReferencia,quienRecoge,coherenciaRecoge,dniValido,notaPlausible,clasificarNota,enZonaDeFirma,leerManuscritos,aplicarEstado,pendientes,validarStel,numeroContradice,fechaStel,FORMATOS,normalizarPedido,validarPedido};
 });

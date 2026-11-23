@@ -36,7 +36,9 @@ function validar(entrada){
 }
 
 // Formatos impresos habituales: B24123457, B-24123457, B-24.123.457, ES B24123457, 12345678-Z.
-const PATRON=/(?:\bES[\s-]?)?(?:\b[ABCDEFGHJNPQRSUVW][\s.-]?\d{2}[.\s]?\d{3}[.\s]?\d{2}[\s.-]?[0-9A-J]\b|\b\d{8}[\s-]?[A-Z]\b|\b[XYZ][\s-]?\d{7}[\s-]?[A-Z]\b)/gi;
+// El prefijo de país va pegado a menudo («ESB24123457»): entonces no hay límite de palabra antes de la letra del CIF (fallo
+// real 2026-11-16: el CIF del proveedor impreso así no se encontraba y el albarán quedaba sin proveedor).
+const PATRON=/(?:\bES[\s-]?|\b)(?:[ABCDEFGHJNPQRSUVW][\s.-]?\d{2}[.\s]?\d{3}[.\s]?\d{2}[\s.-]?[0-9A-J]\b|\d{8}[\s-]?[A-Z]\b|[XYZ][\s-]?\d{7}[\s-]?[A-Z]\b)/gi;
 
 /* Devuelve los identificadores válidos encontrados en un texto, con su posición. */
 function buscar(texto){

@@ -333,3 +333,14 @@ test("signo corto de confianza ínfima entre palabras impresas de su línea: se 
  assert.ok(pag.lineas.find(l=>/M40/.test(l.texto)).celdas.some(c=>/M40/.test(c.texto)&&c.conf<30),"y su confianza baja llega a la casilla");
  assert.ok(!textos.some(t=>/\bok\b/.test(t)),"un trazo suelto, fuera de una línea impresa, sigue descartándose");
 });
+
+test("número a la derecha de «Albarán Nº» con el «Nº» mal leído («N?», «No»): se salta ese resto de la etiqueta (2026-11-12)",()=>{
+ for(const resto of ["N?","No","Nº","N°"]){
+  const r=leer([...cabeceraDoc(),
+   ...fila(150,["Albarán",62],[resto,104],["9000000012",167]),
+   ...fila(177,["ALBARANVENTA",60]),
+   ...fila(204,["Cliente",63],["número",95],["43000099999",180]),
+   ...cabeceraSaltoki(),...fila(240,["R-1",60],["TABLERO",120],["1,00",420],["10,000",462],["10,00",560])]);
+  assert.equal(r.numero.valor,"9000000012",resto);
+ }
+});
