@@ -45,6 +45,10 @@ test("parte rápido: para firmar hacen falta texto, cómo queda y las horas; lo 
   const c = contenidoRapido(base(), {textos: ["He cambiado el termostato."], organizar: organizarDictado, horaFin: "10:00",
     materialesAlbaran: [{id: "a", descripcion: "CODO", cantidad: 2, unidad: "ud", dudas: ["dudoso"]}], nuevoId});
   assert.deepEqual(c.materiales, [], "lo dudoso del albarán del proveedor no entra en lo firmado");
+  // Confirmado por el técnico: entra con sus precios (comprobado, estimado y lo leído) para la oficina.
+  const conf = contenidoRapido(base(), {textos: ["He cambiado el codo."], organizar: organizarDictado, horaFin: "10:00", nuevoId,
+    materialesAlbaran: [{id: "a", descripcion: "CODO", cantidad: 2, unidad: "ud", dudas: ["dudoso"], confirmado: true, precio_leido: 3, dto_leido: 20, precio_neto_estimado: 2.4, neto_estimado_como: "precio del papel − 20 %"}]});
+  assert.deepEqual([conf.materiales[0].precio_neto_estimado, conf.materiales[0].neto_estimado_como, conf.materiales[0].precio_leido, conf.materiales[0].comprobado], [2.4, "precio del papel − 20 %", 3, "TECNICO"]);
   c.materiales = [{id: "d", descripcion: "TERMOSTATO", referencia: "TER 01", cantidad: 1, unidad: "ud", dudas: ["Referencia dictada"], origen: "DICTADO"}];
   Object.assign(c, {tipo_visita: "REPARACION_FINALIZADA", tiempo_trabajo_min: 90, desplazamiento_min: 0});
   assert.deepEqual(problemasParaFirmar(c), [], "material dictado con la referencia a confirmar, sin desplazamiento: se puede firmar");
@@ -112,18 +116,27 @@ test("albarán del proveedor: lo dudoso entra solo si el técnico lo ha comparad
 });
 
 test("precios del albarán del proveedor: PRECIO si se leyó con seguridad; neto solo si la línea cuadra con su importe", async () => {
-  const {preciosDeLinea} = await import("../sat/lib/materiales-albaran.js");
+  const {preciosDeLinea, descuentoTexto, camposDePrecio} = await import("../sat/lib/materiales-albaran.js");
   const c = (valor, confianza = 0.95) => ({valor, confianza});
   // Datos ficticios. 3 × 10,00 con 45 % + 5 % (= 47,75 %) = 15,68 → cuadra.
-  assert.deepEqual(preciosDeLinea({precio: c(10), descuento: c(47.75), importe: c(15.68)}, 3), {precio_papel: 10, precio_neto: 5.225});
-  // Descuento mal leído (6 en vez de 62): no cuadra → solo el PRECIO del papel, sin neto.
-  assert.deepEqual(preciosDeLinea({precio: c(2), descuento: c(6, 0.6), importe: c(0.76)}, 1), {precio_papel: 2});
-  // Precio con dudas: nada (nunca se estima).
-  assert.deepEqual(preciosDeLinea({precio: c(8, 0.6), importe: c(4.18)}, 1), {});
+  assert.deepEqual(preciosDeLinea({precio: c(10), descuento: c(47.75), importe: c(15.68)}, 3), {precio_leido: 10, dto_leido: 47.75, precio_papel: 10, precio_neto: 5.225});
+  // Descuento mal leído (6 en vez de 62): no cuadra → sin neto comprobado, pero se ESTIMA (usuario, 2026-11-23: «que intente
+  // rellenar») con el importe ÷ cantidad, que ya lleva el descuento; la oficina lo ve «sin comprobar».
+  assert.deepEqual(preciosDeLinea({precio: c(2), descuento: c(6, 0.6), importe: c(0.76)}, 1),
+    {precio_leido: 2, dto_leido: 6, precio_papel: 2, precio_neto_estimado: 0.76, neto_estimado_como: "importe ÷ cantidad del papel"});
+  // Precio con dudas: nunca comprobado; estimado con el importe.
+  assert.deepEqual(preciosDeLinea({precio: c(8, 0.6), importe: c(4.18)}, 1), {precio_leido: 8, precio_neto_estimado: 4.18, neto_estimado_como: "importe ÷ cantidad del papel"});
+  // Sin importe: precio menos el descuento leído.
+  assert.deepEqual(preciosDeLinea({precio: c(10, 0.5), descuento: c(20, 0.5)}, 2), {precio_leido: 10, dto_leido: 20, precio_neto_estimado: 8, neto_estimado_como: "precio del papel − 20 %"});
+  // Importe por encima del precio × cantidad (cantidad o importe mal leídos): no se usa; precio menos descuento.
+  assert.equal(preciosDeLinea({precio: c(5, 0.5), importe: c(50, 0.5)}, 2).precio_neto_estimado, 5);
   // Sin descuento y cuadra: el neto es el precio.
-  assert.deepEqual(preciosDeLinea({precio: c(2.5), importe: c(7.5)}, 3), {precio_papel: 2.5, precio_neto: 2.5});
+  assert.deepEqual(preciosDeLinea({precio: c(2.5), importe: c(7.5)}, 3), {precio_leido: 2.5, precio_papel: 2.5, precio_neto: 2.5});
   // Descuento en cascada «60+10» (el lector da el equivalente, 64 %): 2 × 10 × 0,36 = 7,20 → neto 3,60.
-  assert.deepEqual(preciosDeLinea({precio: c(10), descuento: c(64), importe: c(7.2)}, 2), {precio_papel: 10, precio_neto: 3.6});
+  assert.deepEqual(preciosDeLinea({precio: c(10), descuento: c(64), importe: c(7.2)}, 2), {precio_leido: 10, dto_leido: 64, precio_papel: 10, precio_neto: 3.6});
+  // Descuento escrito por el técnico.
+  assert.deepEqual(["", "62", "62,5", "60+10", "60 10", "60 + 10%", "abc", "100"].map(descuentoTexto), [0, 62, 62.5, 64, 64, 64, null, null]);
+  assert.deepEqual(camposDePrecio({precio_neto: 3.6, precio_comprobado: "TECNICO", precio_neto_estimado: 0, otro: 1}), {precio_neto: 3.6, precio_comprobado: "TECNICO"});
 });
 
 test("sat-stel: solo da de alta lo leído del albarán del proveedor y comprobado; referencias con el prefijo del proveedor", async () => {

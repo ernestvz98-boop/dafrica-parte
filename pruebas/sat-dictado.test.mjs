@@ -161,6 +161,12 @@ test("STEL: líneas del albarán de trabajo y texto para el cliente (sin importe
   assert.deepEqual(x.lineas.map((l) => [l["item-base-price"], l["discount-percentage"]]), [[9.36, 0], [1.95, 0]], "neto del papel o compra de STEL, + 30 %");
   x = lineasAlbaran(cm, [{material_id: "a", precio: 11, descuento_pct: 5}, {material_id: "b", precio: 2}], pagoAj);
   assert.deepEqual(x.lineas.map((l) => [l["item-base-price"], l["discount-percentage"]]), [[11, 5], [2, 0]], "la revisión manda, con su descuento");
+  // Sin neto comprobado ni compra en STEL: el ESTIMADO con lo leído (usuario, 2026-11-23: «que intente rellenar»), avisado.
+  cm.materiales[1].precio_neto_estimado = 2.5;
+  x = lineasAlbaran(cm, null, pagoAj);
+  assert.deepEqual([x.faltan, x.lineas.map((l) => l["item-base-price"]), x.sinComprobar], [[], [9.36, 3.25], ["Racor"]]);
+  x = lineasAlbaran(cm, null, pagoAj, new Map(), new Map([["b", 1.5]]));
+  assert.deepEqual([x.lineas[1]["item-base-price"], x.sinComprobar], [1.95, []], "la compra de STEL va antes que el estimado");
   assert.equal(textoAlbaran(c).split("\n")[0], "Intervención pendiente de repuestos");
   assert.equal(fechaStel("2026-11-16", "09:05"), "2026-11-16T09:05:00+0100");
   assert.equal(fechaStel("2026-07-01", "09:05"), "2026-07-01T09:05:00+0200");

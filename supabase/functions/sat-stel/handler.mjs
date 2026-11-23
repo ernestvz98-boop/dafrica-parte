@@ -70,11 +70,17 @@ export function margenDe(ajustes) {
 }
 /** Precio de venta de un material: su coste NETO (con los descuentos) más el margen, a céntimos. */
 export function precioVenta(coste, margen) { return redondear2(Number(coste) * (1 + Number(margen) / 100)); }
-/** Coste de un material: el neto del albarán del proveedor (la línea cuadraba con sus descuentos); si no, el de compra de STEL. */
+/**
+ * Coste de un material: el neto del albarán del proveedor (la línea cuadraba con sus descuentos, o el técnico copió precio y
+ * descuento del papel); si no, el de compra de STEL; si no, el ESTIMADO con lo leído del papel (usuario, 2026-11-23: «que
+ * intente rellenar y ya si existe error se modifica, o el técnico o en el STEL Order»), marcado sin comprobar.
+ */
 export function costeDe(m, costesStel = new Map()) {
-  if (Number(m?.precio_neto) > 0) return {coste: Number(m.precio_neto), origen: "albarán del proveedor (con descuentos)"};
+  if (Number(m?.precio_neto) > 0) return {coste: Number(m.precio_neto), origen: m.precio_comprobado === "TECNICO" ? "precio y descuento copiados del papel por el técnico" : "albarán del proveedor (con descuentos)"};
   const c = Number(costesStel.get(m?.id));
-  return c > 0 ? {coste: c, origen: "precio de compra en STEL"} : null;
+  if (c > 0) return {coste: c, origen: "precio de compra en STEL"};
+  if (Number(m?.precio_neto_estimado) > 0) return {coste: Number(m.precio_neto_estimado), origen: `SIN COMPROBAR: ${m.neto_estimado_como || "leído del papel"}`, dudoso: true};
+  return null;
 }
 const esDelProveedor = (m) => (typeof m?.origen === "object" && m.origen ? m.origen.tipo : m?.origen) === "ALBARAN_PROVEEDOR";
 /**
@@ -92,7 +98,7 @@ export const FALTA_PAGO = "Falta: forma de pago y cuenta bancaria (Ajustes)";
  * devuelve `faltan`. `costesStel`: precio de compra en STEL de los materiales sin neto del papel (id del material → €).
  */
 export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map(), costesStel = new Map()) {
-  const lineas = [], faltan = [];
+  const lineas = [], faltan = [], sinComprobar = [];
   const porMaterial = new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id]));
   // Precio de cada línea: el de la revisión de la oficina si la hay; si no, materiales a su coste neto más el margen
   // (usuario, 2026-11-23) y mano de obra y desplazamiento al precio por hora de Ajustes.
@@ -112,6 +118,7 @@ export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map(
       // Comprado al proveedor sin coste con descuentos comprobado: nunca el PRECIO bruto del papel (no lleva los descuentos).
       if (!c && esDelProveedor(m)) { faltan.push(`precio de compra con descuentos de «${m.descripcion}» (escríbelo en la revisión)`); continue; }
       if (c) precio = precioVenta(c.coste, margen);
+      if (c?.dudoso) sinComprobar.push(m.descripcion);
     }
     // El descuento de la revisión también va al albarán (antes se perdía); el coste + margen ya lleva los del proveedor.
     lineas.push({"line-type": "ITEM", "item-id": Number(item), "units": cantidad, "item-description": desc, ...conPrecio(precio), ...(precio !== null ? {"discount-percentage": dto} : {})});
@@ -135,7 +142,7 @@ export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map(
       ...conPrecio(porHora("DESPLAZAMIENTO", "precio_hora_desplazamiento")), ...dtoRevision("DESPLAZAMIENTO")});
   }
   if (!lineas.length && !faltan.length) faltan.push("al menos un material, tiempo de trabajo o desplazamiento");
-  return {lineas, faltan};
+  return {lineas, faltan, sinComprobar};
 }
 
 const canonRef = (s) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -314,8 +321,10 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
         ...(Number(m.precio_neto) > 0 ? {precio: precioVenta(m.precio_neto, margenDe(ctx.ajustes))} : {})});
     }
     const costes = await costesDeStel(c.materiales, p.revision, resueltos, new Set(altas.map((x) => x.material_id)));
-    const {lineas, faltan} = lineasAlbaran(c, p.revision, ctx.ajustes, resueltos, costes);
+    const {lineas, faltan, sinComprobar} = lineasAlbaran(c, p.revision, ctx.ajustes, resueltos, costes);
     if (faltan.length) throw new Bloqueo("Falta: " + faltan.join("; "));
+    // Precio estimado con lo leído del papel: se avisa en los comentarios PRIVADOS (no los ve el cliente) para revisarlo.
+    const notaPrecios = sinComprobar.length ? ` · PRECIO SIN COMPROBAR (revisar con el albarán del proveedor): ${sinComprobar.join(", ")}` : "";
     const titulo = `${p.codigo} · ${a.motivo}`.slice(0, 150);
     const version = Number(ctx.op.detalle?.version || p.version);
     // 1. ¿Ya existe? Por el id guardado o por el título (el código del parte va al principio).
@@ -336,7 +345,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       "account-id": Number(ctx.cliente.stel_id), title: titulo, "parent-incident-id": Number(incidente),
       date: fechaStel(c.fecha, c.hora_inicio), "start-date": fechaStel(c.fecha, c.hora_inicio), "end-date": fechaStel(c.fecha, c.hora_fin),
       comments: textoAlbaran(c),
-      "private-comments": `DAFRICA SAT ${p.codigo} · parte v${version} firmado · técnico: ${ctx.tecnico_nombre || ""}`.slice(0, 1000),
+      "private-comments": `DAFRICA SAT ${p.codigo} · parte v${version} firmado · técnico: ${ctx.tecnico_nombre || ""}${notaPrecios}`.slice(0, 1000),
       ...(c.direccion?.stel_id ? {"work-address-id": Number(c.direccion.stel_id)} : {}),
       ...(c.equipo?.stel_id ? {assets: [{id: Number(c.equipo.stel_id)}]} : {}),
       ...(Number(ctx.ajustes?.stel_serie_albaran_trabajo_id) > 0 ? {"serial-number-id": Number(ctx.ajustes.stel_serie_albaran_trabajo_id)} : {}),
@@ -381,7 +390,8 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     }
     const final = primero(lista(await stel("GET", `workDeliveryNotes/${id}`)));
     return {stel_id: id, detalle: {referencia: final?.["full-reference"] || final?.reference || null, version, accion, adjuntos: adjuntados,
-      adjuntos_total: adjuntar.length, articulos: Object.fromEntries(resueltos), ...(altas.length ? {articulos_creados: altas} : {})}};
+      adjuntos_total: adjuntar.length, articulos: Object.fromEntries(resueltos), ...(altas.length ? {articulos_creados: altas} : {}),
+      ...(sinComprobar.length ? {precios_sin_comprobar: sinComprobar} : {})}};
   }
 
   /**
@@ -562,7 +572,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       return responder({ok: true, servicios: hechos, llamadas});
     }
 
-    if (["borrar_albaran", "precios_albaran", "precio_articulo", "pagos", "recalcular_materiales"].includes(cuerpo.accion)) {
+    if (["borrar_albaran", "precios_albaran", "precio_articulo", "pagos", "recalcular_materiales", "precios_desde_stel"].includes(cuerpo.accion)) {
       // Acciones de oficina (usuario, 2026-11-20: «quiero un solo albarán, no dos, y que actualice los precios»). Solo con
       // sat.administrar, comprobado con la sesión de la persona.
       if ((await rpc("tiene_permiso", {permiso_codigo: "sat.administrar"}, {usuario: true})) !== true) return responder({error: "Solo administración"}, 403);
@@ -627,6 +637,30 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       const aj = (await rpc("sat_ajustes_leer", {}, {usuario: true})) || {};
       let revision = det.revision;
       let recalculado = null;
+      if (cuerpo.accion === "precios_desde_stel") {
+        // Precios corregidos a mano en el albarán de trabajo de STEL (usuario, 2026-11-23: «si existe error se modifica, o el
+        // técnico o en el STEL Order»): se traen a la revisión (cantidad, precio y descuento de cada línea, emparejadas por su
+        // artículo y en orden) para que la factura salga igual que el albarán. No se escribe nada en STEL.
+        if (!(revision || []).length) return responder({error: "Guarda primero la revisión económica"}, 409);
+        if (!det.stel_albaran_id) return responder({error: "El parte no tiene albarán de trabajo en STEL"}, 409);
+        const doc = primero(lista(await stel("GET", `workDeliveryNotes/${det.stel_albaran_id}`)));
+        if (!doc) return responder({error: "El albarán de trabajo ya no está en STEL"}, 404);
+        const deStel = (doc.lines || []).filter((x) => Number(x["item-id"]) > 0);
+        const usadas = new Set(), cambios = [];
+        revision = revision.map((l) => {
+          const i = deStel.findIndex((x, k) => !usadas.has(k) && Number(x["item-id"]) === Number(l.stel_item_id));
+          if (i < 0) return l;
+          usadas.add(i);
+          const x = deStel[i], precio = Number(x["item-base-price"]), dto = Number(x["discount-percentage"] || 0), uds = Number(x.units);
+          if (!Number.isFinite(precio) || precio < 0) return l;
+          const cantidad = Number.isFinite(uds) && uds !== 0 ? uds : l.cantidad;
+          if (precio === Number(l.precio) && dto === Number(l.descuento_pct || 0) && Number(cantidad) === Number(l.cantidad)) return l;
+          cambios.push({descripcion: l.descripcion, antes: {cantidad: l.cantidad, precio: l.precio, dto: Number(l.descuento_pct || 0)}, ahora: {cantidad, precio, dto}});
+          return {...l, cantidad, precio, descuento_pct: dto, coste_dudoso: false, coste_origen: "corregido en el albarán de STEL"};
+        });
+        if (cambios.length) await rpc("sat_revision_guardar", {p_id: parteId, p_lineas: revision, p_nota: det.revision_nota ?? null}, {usuario: true});
+        return fin({albaran: doc["full-reference"] || null, cambios, sin_pareja: revision.filter((l) => l.stel_item_id).length - usadas.size});
+      }
       if (cuerpo.accion === "recalcular_materiales") {
         // Materiales de la revisión a su coste NETO (con descuentos: el del albarán del proveedor o, si no, el de compra
         // en STEL) más el margen (usuario, 2026-11-23). Se guarda la revisión (con la sesión de la persona) y, si el parte ya
@@ -642,10 +676,10 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
           if (l.tipo !== "MATERIAL" || !l.material_id || !mats.has(l.material_id)) return l;
           const c = costeDe(mats.get(l.material_id), costes);
           if (!c) { sinCoste.push(l.descripcion); return l; }
-          return {...l, coste: c.coste, coste_origen: c.origen, margen_pct: margen, precio: precioVenta(c.coste, margen), descuento_pct: 0};
+          return {...l, coste: c.coste, coste_origen: c.origen, coste_dudoso: Boolean(c.dudoso), margen_pct: margen, precio: precioVenta(c.coste, margen), descuento_pct: 0};
         });
         await rpc("sat_revision_guardar", {p_id: parteId, p_lineas: revision, p_nota: det.revision_nota ?? null}, {usuario: true});
-        recalculado = {margen, materiales: revision.filter((l) => l.coste_origen).map((l) => ({descripcion: l.descripcion, coste: l.coste, origen: l.coste_origen, precio: l.precio})),
+        recalculado = {margen, materiales: revision.filter((l) => l.coste_origen).map((l) => ({descripcion: l.descripcion, coste: l.coste, origen: l.coste_origen, precio: l.precio, dudoso: Boolean(l.coste_dudoso)})),
           sin_coste: sinCoste};
         if (!det.stel_albaran_id) return fin({recalculado});
       }

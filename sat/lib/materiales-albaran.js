@@ -42,19 +42,67 @@ export function articuloPorReferencia(referencia, articulos) {
  *    al cliente (lo que el usuario escribía a mano en la revisión).
  *  - precio_neto: precio por unidad con los descuentos, solo si la línea CUADRA (cantidad × precio × (1 − dto) = importe
  *    del papel, ±0,01 €, con el importe aceptado). Es el de compra del artículo de STEL que se dé de alta (regla del robot).
- * No se enseñan al técnico ni salen en el PDF (la firma no acepta importes).
+ * No salen en el PDF (la firma no acepta importes). El técnico ve el precio y el descuento leídos de cada línea y los puede
+ * corregir copiándolos del papel («Corregir»): entonces el neto queda comprobado por él.
  */
 export function preciosDeLinea(l, cantidad) {
   const ok = (c) => typeof c?.confianza === "number" && c.confianza >= UMBRAL && Number.isFinite(Number(c?.valor));
+  const num = (c) => (c && c.valor !== null && c.valor !== undefined && c.valor !== "" && Number.isFinite(Number(c.valor)) ? Number(c.valor) : null);
+  const r4 = (x) => Math.round(x * 10000) / 10000;
   const out = {};
-  if (!ok(l?.precio) || !(Number(l.precio.valor) > 0)) return out;
-  const precio = Number(l.precio.valor);
-  out.precio_papel = precio;
-  const dto = Number.isFinite(Number(l.descuento?.valor)) ? Number(l.descuento.valor) : 0;
-  if (Number(cantidad) > 0 && ok(l.importe)) {
-    const calculado = Math.round(Number(cantidad) * precio * (1 - dto / 100) * 100) / 100;
-    if (Math.abs(calculado - Number(l.importe.valor)) <= 0.011) out.precio_neto = Math.round(precio * (1 - dto / 100) * 10000) / 10000;
+  // Lo leído tal cual (con o sin dudas), para enseñárselo al técnico y que lo corrija con el papel.
+  const pl = num(l?.precio), dl = num(l?.descuento);
+  if (pl !== null && pl > 0) out.precio_leido = pl;
+  if (dl !== null && dl > 0 && dl < 100) out.dto_leido = dl;
+  if (ok(l?.precio) && Number(l.precio.valor) > 0) {
+    const precio = Number(l.precio.valor);
+    out.precio_papel = precio;
+    const dto = Number.isFinite(Number(l.descuento?.valor)) ? Number(l.descuento.valor) : 0;
+    if (Number(cantidad) > 0 && ok(l.importe)) {
+      const calculado = Math.round(Number(cantidad) * precio * (1 - dto / 100) * 100) / 100;
+      if (Math.abs(calculado - Number(l.importe.valor)) <= 0.011) out.precio_neto = r4(precio * (1 - dto / 100));
+    }
   }
+  // Sin neto comprobado, un coste ESTIMADO con lo leído (usuario, 2026-11-23: «que de igual manera intente rellenar y ya si
+  // existe error se modifica, o el técnico o en el STEL Order»). Va marcado «sin comprobar» en la revisión; nunca da de alta
+  // el precio de compra de un artículo de STEL. Primero el importe ÷ cantidad (el importe ya lleva los descuentos); si no
+  // encaja con el precio, el precio menos el descuento leído.
+  if (out.precio_neto === undefined) {
+    const imp = num(l?.importe), q = Number(cantidad);
+    if (q > 0 && imp !== null && imp > 0 && (pl === null || imp / q <= pl * 1.0001)) {
+      out.precio_neto_estimado = r4(imp / q); out.neto_estimado_como = "importe ÷ cantidad del papel";
+    } else if (pl !== null && pl > 0) {
+      const d = dl !== null && dl > 0 && dl < 100 ? dl : 0;
+      out.precio_neto_estimado = r4(pl * (1 - d / 100));
+      out.neto_estimado_como = d ? `precio del papel − ${d} %` : "precio del papel (sin descuento leído)";
+    }
+  }
+  return out;
+}
+
+/**
+ * Descuento escrito por el técnico: «» → 0; «62» o «62,5» → ese %; «60+10» o «60 10» → en cascada (64 %). Inválido → null.
+ */
+export function descuentoTexto(texto) {
+  const t = String(texto ?? "").trim();
+  if (!t) return 0;
+  const partes = t.replace(/%/g, "").split(/\s*\+\s*|\s+/).filter(Boolean);
+  let factor = 1;
+  for (const p of partes) {
+    if (!/^\d{1,3}([.,]\d{1,4})?$/.test(p)) return null;
+    const n = Number(p.replace(",", "."));
+    if (!(n >= 0 && n < 100)) return null;
+    factor *= 1 - n / 100;
+  }
+  return Math.round((1 - factor) * 1e8) / 1e6;
+}
+
+/** Campos de precio de un material que pasan del albarán leído al parte (para la revisión de la oficina). */
+export function camposDePrecio(m) {
+  const out = {};
+  for (const k of ["precio_papel", "precio_neto", "precio_neto_estimado", "precio_leido", "dto_leido"]) if (Number(m?.[k]) > 0) out[k] = Number(m[k]);
+  if (out.precio_neto_estimado && m.neto_estimado_como) out.neto_estimado_como = String(m.neto_estimado_como);
+  if (out.precio_neto && m.precio_comprobado) out.precio_comprobado = String(m.precio_comprobado);
   return out;
 }
 

@@ -43,11 +43,16 @@ export function proponerLineas(contenido, articulos, ajustes) {
     // Materiales comprados (usuario, 2026-11-23): coste NETO con los descuentos del albarán del proveedor (solo si la línea
     // cuadraba) más el margen. Sin ese neto, el precio queda vacío: «Precios de materiales (compra + margen)» lo trae del
     // precio de compra de STEL. Nunca el PRECIO bruto del papel (no lleva los descuentos).
-    const coste = Number(m.precio_neto) > 0 ? Number(m.precio_neto) : null;
+    // Sin neto comprobado, el ESTIMADO con lo leído (usuario, 2026-11-23: «que intente rellenar y ya si existe error se
+    // modifica»), marcado sin comprobar (en ámbar) para que la oficina lo mire.
+    const comprobado = Number(m.precio_neto) > 0, estimado = !comprobado && Number(m.precio_neto_estimado) > 0;
+    const coste = comprobado ? Number(m.precio_neto) : estimado ? Number(m.precio_neto_estimado) : null;
+    const origen = comprobado ? (m.precio_comprobado === "TECNICO" ? "precio y descuento copiados del papel por el técnico" : "albarán del proveedor (con descuentos)")
+      : `SIN COMPROBAR: ${m.neto_estimado_como || "leído del papel"}`;
     lineas.push({tipo: "MATERIAL", material_id: m.id, stel_item_id: a ? a.stel_id : (m.stel_item_id ?? null),
       descripcion: [m.descripcion, m.referencia ? `Ref. ${m.referencia}` : ""].filter(Boolean).join(" "),
       cantidad: Number(m.cantidad) || null, precio: coste !== null ? precioVenta(coste, margen) : null, descuento_pct: 0, iva_pct: a?.iva_pct ?? 21,
-      ...(coste !== null ? {coste, coste_origen: "albarán del proveedor (con descuentos)", margen_pct: margen} : {})});
+      ...(coste !== null ? {coste, coste_origen: origen, coste_dudoso: estimado, margen_pct: margen} : {})});
   }
   const servicio = (clave) => porId.get(Number(ajustes?.[clave])) || null;
   const precioHora = (clave, s) => {

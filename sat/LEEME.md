@@ -61,7 +61,9 @@ Diseño y capacidades de STEL comprobadas: [`docs/sat-diseno.md`](../docs/sat-di
   por NIF y por nombre; si hay parecidos, se para y lo decides tú).
 - **Revisión económica**: «Proponer desde el parte» rellena los materiales a su **coste neto + margen** (30 % por
   defecto, en Ajustes): el coste es el precio con los descuentos del albarán del proveedor (si la línea cuadra con su
-  importe) o, con «Precios de materiales (compra + 30 %)», el precio de compra del artículo en STEL. La
+  importe) o, con «Precios de materiales (compra + 30 %)», el precio de compra del artículo en STEL; si no hay ninguno, un
+  coste estimado con lo leído del papel, en ámbar «sin comprobar». Lo que esté mal se corrige en la revisión, el técnico con
+  «Corregir» (precio y descuento del papel) o en el albarán de STEL y «Traer precios corregidos». La
   mano de obra y el desplazamiento **por horas** (minutos anotados por el técnico ÷ 60) al **precio fijo por hora** de
   Ajustes (50 € por defecto; vacío = precio del servicio de STEL). Un desplazamiento solo con km queda sin horas para
   completarlo. Completa artículo, precio, descuento e IVA. **Guardar revisión**.
