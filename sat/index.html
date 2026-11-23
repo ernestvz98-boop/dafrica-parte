@@ -13,9 +13,9 @@
   <link rel="icon" href="../dafrica-logo.png.png">
   <link rel="apple-touch-icon" href="../dafrica-logo.png.png">
   <title>DAFRICA SAT</title>
-  <link rel="stylesheet" href="app.css?v=0.3.10">
+  <link rel="stylesheet" href="app.css?v=0.3.11">
   <script src="vendor/pdf-lib.min.js" defer></script>
-  <script type="module" src="app.js?v=0.3.10"></script>
+  <script type="module" src="app.js?v=0.3.11"></script>
 </head>
 <body>
   <header class="barra">
@@ -26,7 +26,7 @@
   <main id="app" class="app"><p class="cargando">Cargando…</p></main>
   <nav id="menu" class="menu" hidden>
     <a href="#/avisos" data-ruta="avisos">📋<span>Avisos</span></a>
-    <a href="#/bandeja" data-ruta="bandeja">🧾<span>Facturas</span></a>
+    <a href="#/bandeja" data-ruta="bandeja" id="menuFacturas" hidden>🧾<span>Facturas</span></a>
     <a href="#/admin" data-ruta="admin" id="menuAdmin" hidden>🗂️<span>Oficina</span></a>
     <a href="#/cuenta" data-ruta="cuenta">👤<span>Cuenta</span></a>
   </nav>

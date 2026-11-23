@@ -35,8 +35,20 @@ async function iniciar() {
   $("#menu").hidden = false;
   await refrescar({silencioso: true});
   setInterval(() => refrescar({silencioso: true}), 60000);
+  // Si se cerró la aplicación a mitad de un parte, al abrirla se sigue con él (usuario, 2026-11-23: «por si se le cierra, que no
+  // empiece de cero, que quede guardado para seguir»). Todo lo hecho ya está guardado en el teléfono al momento.
+  if (!location.hash || location.hash === "#/avisos") {
+    const enCurso = await partesEnCurso();
+    if (enCurso.length === 1) location.hash = rutaParte(enCurso[0]);
+  }
   render();
 }
+
+/** Partes empezados en este teléfono y todavía no enviados (lo más reciente primero). */
+async function partesEnCurso() {
+  return (await partes.todas()).filter((p) => p.estadoLocal !== "ENVIADO").sort((a, b) => (b.creado || 0) - (a.creado || 0));
+}
+const rutaParte = (p) => `#/parte/${p.id}/${p.contenido?.modo === "RAPIDO" ? "rapido" : "datos"}`;
 
 async function refrescar({silencioso = false} = {}) {
   try {
@@ -52,6 +64,8 @@ async function refrescar({silencioso = false} = {}) {
     await reabrirCorregibles(ps);
     $("#numNotis").hidden = !yo.no_leidas; $("#numNotis").textContent = yo.no_leidas;
     $("#menuAdmin").hidden = !(puede("sat.administrar") || puede("sat.facturar"));
+    // El técnico solo hace el parte (albarán de trabajo); las facturas las hace la oficina (usuario, 2026-11-23).
+    $("#menuFacturas").hidden = !(puede("sat.administrar") || puede("sat.facturar"));
     return true;
   } catch (e) {
     if (e instanceof ErrorApi && e.estado === 401) { salir(); return CONFIG.local ? pantallaEntrar() : location.replace(CONFIG.loginProduccion); }
@@ -128,7 +142,7 @@ async function pintarVista() {
     if (ruta === "aviso") return await vistaNuevoAviso();
     if (ruta === "nuevo") return await vistaNuevoParte();
     if (ruta === "parte") return await vistaParte(a, b || "datos");
-    if (ruta === "bandeja") return await vistaBandeja();
+    if (ruta === "bandeja") { if (!esOficina() && !(S.yo?.permisos || []).includes("sat.facturar")) { location.hash = "#/avisos"; return; } return await vistaBandeja(); }
     if (ruta === "notificaciones") return await vistaNotificaciones();
     if (ruta === "cuenta") return vistaCuenta();
     if (ruta === "admin") { const m = await import("./admin.js"); return await m.vistaAdmin(app, a, b, {S, refrescar, render}); }
@@ -161,8 +175,10 @@ async function vistaAvisos() {
       <h3>${esc(a.cliente_texto || "Sin cliente")}</h3><div>${esc(a.motivo)}</div>
       ${a.direccion_texto ? `<div class="suave">📍 ${esc(a.direccion_texto)}</div>` : ""}</a>`;
   };
+  const enCurso = await partesEnCurso();
   app.innerHTML = `<div class="fila"><h1 class="crece">Mis avisos</h1></div>
-    <a class="boton verde ancho grande" href="#/nuevo">＋ Nuevo parte</a>
+    ${enCurso.map((p) => `<a class="boton ancho grande" href="${esc(rutaParte(p))}" style="margin-bottom:8px">▶ Seguir con el parte de ${esc(p.contenido?.cliente?.nombre || p.aviso?.motivo || "…")}</a>`).join("")}
+    <a class="boton ${enCurso.length ? "sec" : "verde"} ancho grande" href="#/nuevo">＋ Nuevo parte</a>
     ${esOficina() ? `<p class="centro"><a class="suave peq" href="#/aviso/nuevo">Crear un aviso con todos los datos</a></p>` : ""}
     ${abiertos.length ? abiertos.map(tarjeta).join("") : `<p class="suave">No tienes avisos abiertos.</p>`}
     ${cerrados.length ? `<h2>Cerrados recientemente</h2>${cerrados.map(tarjeta).join("")}` : ""}`;
@@ -233,7 +249,16 @@ async function vistaNuevoParte() {
       : lista.map((c) => `<button type="button" class="eleccion" data-cli="${esc(c.id)}">${esc(c.nombre)}${c.provisional ? " <small>(nuevo, sin STEL)</small>" : ""}
         <small>${esc([dirs(c)[0]?.texto, c.nif, c.telefono].filter(Boolean).join(" · "))}</small></button>`).join("") || `<p class="suave">Ningún cliente coincide.</p>`;
     $$("[data-cli]").forEach((b) => b.onclick = async () => {
+      if (S.creandoParte) return; // dos toques seguidos no crean dos partes
       const c = cat.clientes.find((x) => x.id === b.dataset.cli);
+      // Ya hay un parte empezado de este cliente en el teléfono: se sigue con él (no se duplica).
+      const previo = (await partesEnCurso()).find((p) => p.contenido?.cliente?.id === c.id);
+      if (previo) {
+        const r = await dialogo(`<h2>${esc(c.nombre)}</h2><p>Ya tienes un parte empezado de este cliente.</p>`,
+          [{texto: "Es otro trabajo: parte nuevo", valor: "nuevo"}, {texto: "Seguir con ese", valor: "seguir"}]); // el último es el destacado
+        if (r === "seguir") { location.hash = rutaParte(previo); return; }
+        if (r !== "nuevo") return;
+      }
       const ds = dirs(c);
       let direccion = ds.length === 1 ? ds[0] : null;
       if (ds.length > 1) {
@@ -241,7 +266,8 @@ async function vistaNuevoParte() {
         if (direccion === "nuevo") direccion = null;
         else if (!direccion) return;
       }
-      await crearAvisoYParte({cliente: c, direccion});
+      S.creandoParte = true;
+      try { await crearAvisoYParte({cliente: c, direccion}); } finally { S.creandoParte = false; }
     });
   };
   $("#bCli").addEventListener("input", pintar);
