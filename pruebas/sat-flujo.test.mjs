@@ -483,6 +483,23 @@ test("SAT: forma de pago y cuenta obligatorias; «pagos» las busca en STEL (una
   assert.equal(r.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO").estado, "OK", JSON.stringify(r));
   const wdn = e.stel.datos.workDeliveryNotes.at(-1);
   assert.deepEqual([wdn["payment-option-id"], wdn["bank-account-id"]], [e.semilla.fp.id, e.semilla.cb.id]);
+  // La oficina lee la foto del albarán del proveedor y añade líneas a la revisión (el móvil no las reconoció): van al albarán
+  // de trabajo; el artículo que no existe se da de alta y el precio es coste + 30 %.
+  const det = await rpc(adm, "sat_parte_detalle", {p_id: parteId});
+  const oficina = [{tipo: "MATERIAL", oficina: true, material_id: "ofi-1", stel_item_id: null, descripcion: "VALVULA FICTICIA Ref. 9990001", descripcion_material: "VALVULA FICTICIA",
+      referencia: "9990001", cantidad: 2, precio: 2.6, descuento_pct: 0, iva_pct: 21, precio_neto: 2, origen_material: {proveedor: "Proveedor Ficticio", numero: "X-1"}},
+    {tipo: "MATERIAL", oficina: true, material_id: "ofi-2", stel_item_id: e.semilla.p1.id, descripcion: "Termostato digital", referencia: "TER-01", cantidad: 1, precio: null,
+      descuento_pct: 0, iva_pct: 21, precio_neto_estimado: 10, neto_estimado_como: "importe ÷ cantidad del papel"}];
+  await rpc(adm, "sat_revision_guardar", {p_id: parteId, p_lineas: [...(det.revision || []), ...oficina], p_nota: null});
+  p = await fn(adm, {accion: "recalcular_materiales", parte_id: parteId});
+  assert.equal(p.ok, true, JSON.stringify(p));
+  const alta = e.stel.datos.products.filter((x) => x.reference === "9990001");
+  assert.equal(alta.length, 1, "el artículo de la línea de la oficina se da de alta una vez");
+  const lineasStel = e.stel.datos.workDeliveryNotes.at(-1).lines;
+  assert.deepEqual(lineasStel.filter((l) => [alta[0].id, e.semilla.p1.id].includes(l["item-id"])).map((l) => [l.units, l["item-base-price"]]), [[2, 2.6], [1, 13]],
+    "neto comprobado + 30 %; estimado + 30 % (sin compra en STEL)");
+  const rev = (await rpc(adm, "sat_parte_detalle", {p_id: parteId})).revision.find((l) => l.material_id === "ofi-1");
+  assert.equal(rev.stel_item_id, alta[0].id, "la revisión guarda el artículo");
 });
 
 test("SAT: el técnico descarta un parte sin enviar (duplicado); no el de otro ni uno enviado", {timeout: 120000}, async (t) => {

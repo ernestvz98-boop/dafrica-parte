@@ -3,7 +3,7 @@
 import {rpc, funcion, urlFirmada, subirArchivo, SinConexion} from "./lib/api.js";
 import {sha256} from "./lib/almacen.js";
 import {nuevoId, resumenTipo, horasTexto, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
-import {proponerLineas, totales, totalLinea, euros, lineasIncompletas, margenDe} from "./lib/economia.js";
+import {proponerLineas, totales, totalLinea, euros, lineasIncompletas, margenDe, precioVenta} from "./lib/economia.js";
 import {esc, $, $$, avisar, dialogo, confirmar, pedirTexto, elegir, fechaHora, fechaCorta, chipEstado} from "./lib/ui.js";
 
 let ctx;
@@ -83,7 +83,8 @@ async function detalle(raiz, id) {
     </dl></div>
     ${fotos.length ? `<div class="tarjeta"><h2>Fotografías</h2><div class="fotos">${fotos.map((f) => `<div class="foto">${f.a && url.get(f.a.storage_path)
       ? `<a href="${esc(url.get(f.a.storage_path))}" target="_blank" rel="noopener"><img src="${esc(url.get(f.a.storage_path))}" alt=""></a>` : `<p class="suave">No subida todavía</p>`}
-      <div class="pie peq"><b>${esc(MOMENTOS[f.momento] || "")}</b> ${esc(f.comentario || "")}</div></div>`).join("")}</div></div>` : ""}
+      <div class="pie peq"><b>${esc(MOMENTOS[f.momento] || "")}</b> ${esc(f.comentario || "")}
+      ${f.lectura ? `<div class="suave" title="${esc(f.lectura.navegador || "")}">Lectura en el móvil: ${f.lectura.error ? "error, " + esc(f.lectura.error) : `${esc(f.lectura.materiales)} línea(s) en ${esc(f.lectura.segundos)} s`}</div>` : ""}</div></div>`).join("")}</div></div>` : ""}
     ${audios.length ? `<div class="tarjeta"><h2>Audios y transcripción</h2>${audios.map((a) => `<div class="item"><audio controls preload="none" src="${esc(url.get(a.storage_path))}" style="width:100%"></audio>
       ${a.transcripcion ? `<p class="peq">${esc(a.transcripcion)}</p>` : `<p class="suave peq">Sin transcripción.</p>`}</div>`).join("")}</div>` : ""}
     <div class="tarjeta"><h2>Firmas</h2>${(d.firmas || []).map((f) => `<div class="item" style="${f.valida ? "" : "opacity:.6"}"><div class="fila"><b>${f.rol === "TECNICO" ? "Técnico" : "Responsable"}</b>
@@ -128,7 +129,8 @@ async function detalle(raiz, id) {
     eco.innerHTML = `<div class="desliza"><table class="tabla lineas-eco"><thead><tr><th>Concepto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Dto %</th><th class="num">IVA %</th><th class="num">Importe</th><th></th></tr></thead><tbody>
       ${lineas.map((l, i) => `<tr><td style="min-width:220px"><select data-l="${i}" data-k="tipo">${Object.entries(TIPOS_LINEA).map(([k, v]) => `<option value="${k}" ${l.tipo === k ? "selected" : ""}>${v}</option>`).join("")}</select>
         <button type="button" class="eleccion" data-art="${i}" style="margin:4px 0">${l.stel_item_id ? esc((precios.find((p) => Number(p.stel_id) === Number(l.stel_item_id)) || {}).nombre || "Artículo " + l.stel_item_id) : "<b>Elegir artículo de STEL…</b>"}</button>
-        <input data-l="${i}" data-k="descripcion" value="${esc(l.descripcion)}" placeholder="Descripción"></td>
+        <input data-l="${i}" data-k="descripcion" value="${esc(l.descripcion)}" placeholder="Descripción">
+        ${l.oficina ? `<div class="suave peq" title="${esc((l.dudas_lectura || []).join(" · "))}">📷 leída del albarán del proveedor${(l.dudas_lectura || []).length ? ` <span class="chip ambar">compárala con la foto</span>` : ""}</div>` : ""}</td>
         <td><input data-l="${i}" data-k="cantidad" inputmode="decimal" value="${esc(l.cantidad ?? "")}" style="width:72px"></td>
         <td><input data-l="${i}" data-k="precio" inputmode="decimal" value="${esc(l.precio ?? "")}" style="width:90px" class="${l.precio === null || l.precio === "" || l.coste_dudoso ? "dudoso" : ""}">
           ${Number(l.coste) > 0 ? `<div class="suave peq" title="${esc(l.coste_origen || "")}">coste ${euros(l.coste)} + ${esc(l.margen_pct ?? margenDe(aj))} %${l.coste_dudoso ? ` <span class="chip ambar">sin comprobar</span>` : ""}</div>` : ""}</td>
@@ -141,6 +143,7 @@ async function detalle(raiz, id) {
       ${editableEco ? `<div class="fila"><button type="button" class="boton sec mini" id="bLinea">＋ Línea</button><button type="button" class="boton sec mini" id="bProponer">Proponer desde el parte</button>
         ${lineas.some((l) => l.tipo === "MATERIAL" && l.material_id) ? `<button type="button" class="boton sec mini" id="bMargen">Precios de materiales (compra + ${esc(margenDe(aj))} %)</button>` : ""}
         ${d.stel_albaran_ref && d.revision ? `<button type="button" class="boton sec mini" id="bDesdeStel">Traer precios corregidos en ${esc(d.stel_albaran_ref)}</button>` : ""}
+        ${fotos.some((f) => f.momento === "MATERIAL" && f.a) ? `<button type="button" class="boton sec mini" id="bLeerAlb">📷 Leer el albarán del proveedor</button>` : ""}
         <button type="button" class="boton crece" id="bGuardarEco">Guardar revisión</button></div>
         <p class="suave peq">Materiales: coste neto con los descuentos del albarán del proveedor (o el precio de compra de STEL) más el ${esc(margenDe(aj))} %.${d.stel_albaran_ref ? ` El botón también actualiza las líneas, la forma de pago y la cuenta del albarán ${esc(d.stel_albaran_ref)}.` : ""}</p>` : ""}`;
     if (!editableEco) { $$("input, select, .eleccion, [data-quitar]", eco).forEach((x) => { x.disabled = true; }); return; }
@@ -170,6 +173,44 @@ async function detalle(raiz, id) {
         avisar(`${r.recalculado?.materiales?.length || 0} material(es) a coste + ${r.recalculado?.margen} %${r.albaran ? ` · albarán ${r.albaran} actualizado` : ""}${sin.length ? ` · sin coste: ${sin.join(", ")}` : ""}.`, {ms: 9000, error: sin.length > 0});
       } catch (e) { avisar(e.message, {error: true}); }
       ctx.render();
+    });
+    // Lectura de la foto del albarán del proveedor en la OFICINA (usuario, 2026-11-23: el móvil no reconoció líneas). Mismo
+    // lector que el teléfono, con la copia guardada; las líneas se AÑADEN a la revisión (marcadas «oficina») para revisarlas:
+    // lo dudoso en ámbar, lo repetido (misma referencia que un material del parte o de la revisión) no se añade.
+    $("#bLeerAlb")?.addEventListener("click", async (ev) => {
+      const b = ev.target; b.disabled = true; b.textContent = "Leyendo el albarán… (1 o 2 minutos)";
+      const canon = (s) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      try {
+        const {leerFotoAlbaran} = await import("./lib/lector-foto.js");
+        const {materialesDesdeAlbaran} = await import("./lib/materiales-albaran.js");
+        const ya = new Set([...(c.materiales || []), ...lineas].map((x) => canon(x.referencia)).filter((x) => x.length >= 3));
+        const margen = margenDe(aj);
+        let anadidas = 0, dudosas = 0, repetidas = 0, leidas = 0;
+        for (const f of fotos.filter((x) => x.momento === "MATERIAL" && x.a)) {
+          const blob = await (await fetch(url.get(f.a.storage_path))).blob();
+          const r = await leerFotoAlbaran(blob, {alProgresar: (t) => { b.textContent = t; }});
+          const prop = materialesDesdeAlbaran(r, {articulos: precios, fotoId: f.id});
+          leidas += prop.materiales.length;
+          for (const m of prop.materiales) {
+            if (m.referencia && ya.has(canon(m.referencia))) { repetidas++; continue; }
+            const comprobado = Number(m.precio_neto) > 0;
+            const coste = comprobado ? Number(m.precio_neto) : Number(m.precio_neto_estimado) > 0 ? Number(m.precio_neto_estimado) : null;
+            const dudoso = !m.fiable || !comprobado;
+            lineas.push({tipo: "MATERIAL", oficina: true, material_id: "ofi-" + nuevoId(), stel_item_id: m.stel_item_id ?? null,
+              descripcion: [m.descripcion, m.referencia ? `Ref. ${m.referencia}` : ""].filter(Boolean).join(" "), descripcion_material: m.descripcion,
+              referencia: m.referencia || "", unidad: m.unidad || "ud", cantidad: m.cantidad, precio: coste !== null ? precioVenta(coste, margen) : null,
+              descuento_pct: 0, iva_pct: 21, dudas_lectura: m.dudas || [],
+              ...(coste !== null ? {coste, coste_origen: comprobado ? "albarán del proveedor (con descuentos)" : `SIN COMPROBAR: ${m.neto_estimado_como || "leído del papel"}`, coste_dudoso: dudoso, margen_pct: margen} : {}),
+              ...(comprobado ? {precio_neto: Number(m.precio_neto)} : Number(m.precio_neto_estimado) > 0 ? {precio_neto_estimado: Number(m.precio_neto_estimado), neto_estimado_como: m.neto_estimado_como} : {}),
+              origen_material: {proveedor: prop.proveedor, numero: prop.numero, linea: m.origen?.linea ?? null}});
+            if (m.referencia) ya.add(canon(m.referencia));
+            anadidas++; if (dudoso) dudosas++;
+          }
+        }
+        avisar(leidas ? `${anadidas} línea(s) añadidas${dudosas ? ` (${dudosas} en ámbar: compáralas con la foto)` : ""}${repetidas ? `; ${repetidas} ya estaban` : ""}. Revisa, pulsa «Guardar revisión» y después «Precios de materiales» para pasarlas al albarán de STEL.`
+          : "No se han reconocido líneas en la foto: escríbelas con «＋ Línea».", {ms: 12000, error: !leidas});
+      } catch (e) { avisar("No se pudo leer: " + e.message, {error: true}); }
+      pintarEco();
     });
     $("#bDesdeStel")?.addEventListener("click", async (ev) => {
       ev.target.disabled = true; ev.target.textContent = "Leyendo STEL…";

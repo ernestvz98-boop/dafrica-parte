@@ -3,6 +3,21 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-23 · DAFRICA SAT 0.3.10 a 0.3.13: técnico más sencillo, partes que no se pierden, lectura en la oficina (sat-stel v10)
+
+- Primer uso real del técnico: el albarán del proveedor fotografiado no dio líneas en el móvil (en el ordenador, la misma
+  copia da 8 líneas, 2 completas) y el parte se creó dos veces (se cerró la app y se volvió a pulsar «Nuevo parte»).
+- 0.3.10: el técnico no ve «aviso con todos los datos» ni «modo detallado»; el precio de una línea solo si hay que mirarlo.
+  DAFRICA Control: quien solo tiene el SAT entra directo a la app de partes.
+- 0.3.11: al abrir la app se sigue con el parte sin enviar; «Seguir con el parte de …»; mismo cliente → pregunta; el técnico
+  no ve «Facturas» (las hace la oficina).
+- 0.3.12: «Descartar este parte» sin enviar (`sat_parte_descartar`, migración `sat_partes_9`).
+- 0.3.13: oficina → «📷 Leer el albarán del proveedor» en la revisión: mismo lector con la copia guardada; las líneas se
+  añaden marcadas «oficina» (lo dudoso en ámbar). `sat-stel` v10 las lleva al albarán de trabajo (`materialesDeOficina`):
+  busca o da de alta su artículo y precio coste + margen. Móvil: si no hay líneas, aviso claro y «Volver a leer», y un
+  registro de la lectura (segundos, líneas, error, navegador; sin imagen ni texto) en la foto del parte, visible en la oficina.
+- Verificado: `npm run test:sat` (28) y `npm test` (359), con datos ficticios; emulador en el navegador.
+
 ## 2026-11-23 · DAFRICA SAT 0.3.9: precio estimado si no cuadra; corregir en la app o en STEL (sat-stel v9)
 
 - Usuario: «que de igual manera intente rellenar y ya si existe error se modifica, o el técnico o en el STEL Order».
