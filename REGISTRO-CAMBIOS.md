@@ -3,6 +3,27 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-23 · Lector: cifras perdidas por el OCR de página, releídas casilla a casilla con cuadre
+
+- Fallo real: foto de un albarán de proveedor (7 filas) hecha por el técnico de SAT. El OCR de la página entera no sacaba
+  cantidad, precio, descuento ni importe en 6 filas (rayas verticales de la tabla y trazos a mano sobre los precios); en el
+  móvil no salió ninguna línea. Reproducido con la foto real (privada, `pruebas/corpus-real/fotos-sat/`, fuera de git).
+- Explicación: las cifras están; leídas casilla a casilla salen, pero con la raya de la tabla leída como «1» («1,001»),
+  la coma decimal como punto («12.50») y el descuento en cascada sin espacio («455» = 45+5).
+- Corrección (`albaranes/escaneado.js`, `cifrasPorCasillas`, segunda fase): con las columnas y el formato (decimales) de al
+  menos DOS filas que cuadran en la página, cada casilla vacía se relee sola (3 estrategias, solo cifras); se buscan las
+  combinaciones de cantidad, precio, descuento e importe con ese formato y se acepta solo si UNA hace cuadrar la fila. Lo
+  leído por el OCR de página no se cambia; dos combinaciones posibles, nada; la misma combinación en dos filas juntas, a
+  ninguna (salvo que una sea un fragmento sin descripción). Nunca se deduce una cifra.
+- Texto vertical del margen (`extraer.js`, `ruidoMargen`): trozos cortos («585», «255») a la izquierda de todos los títulos y
+  claramente antes de donde empiezan los códigos de las filas (mediana de 3 o más) no son celdas de la tabla: ni fila
+  fantasma ni código delante del real (que acababa en la descripción). Una columna con título (nº de línea) no se toca.
+- Títulos de código y descripción ilegibles («CSbIdO», «CUNCSNELDAS»; `titulosPorRelectura`): se releen solo esos títulos;
+  si al menos dos relecturas dan el título deducido por la posición y ninguna otro, el motivo «columna deducida» se quita.
+- Resultado con la foto real: 7 filas (antes 8 con una fantasma), códigos correctos, 7 de 7 cuadradas e iguales al papel
+  (antes 2), suma = total del albarán; 5 de 7 filas sin nada que revisar.
+- Regresión: `pruebas/cifras-casillas.test.js` (datos ficticios; la del margen falla sin el arreglo). `npm test` 365.
+
 ## 2026-11-23 · DAFRICA SAT 0.3.10 a 0.3.13: técnico más sencillo, partes que no se pierden, lectura en la oficina (sat-stel v10)
 
 - Primer uso real del técnico: el albarán del proveedor fotografiado no dio líneas en el móvil (en el ordenador, la misma

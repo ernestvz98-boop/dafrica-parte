@@ -277,6 +277,213 @@ async function resolverCampo(p,campo,cajas,ctx){
  if((ctx.validacionEstructural&&validas.length>=8||formatoRef&&validas.length>=6)&&mediana>=40)return resultado(validas,mediana);
  return null;
 }
+/*
+ * Cifras perdidas por el OCR de página (foto real de un albarán, 2026-11-23: en 6 de 7 filas no salían cantidad, precio,
+ * descuento ni importe; las rayas verticales de la tabla y los trazos a mano sobre la columna de precios estorban al leer
+ * la fila entera). Con las columnas probadas por al menos DOS filas que cuadran en la misma página, cada casilla vacía de
+ * una fila se relee por separado (recorte entre las rayas, solo cifras) y se buscan las combinaciones de cantidad, precio,
+ * descuento e importe con el formato de esas filas (mismos decimales). Solo si UNA combinación hace cuadrar la fila
+ * (cantidad × precio × (1 − dto) = importe) se acepta: el cuadre es la evidencia; con dos o ninguna, nada cambia.
+ * Lo que ya leyó el OCR de página no se cambia (es el único candidato de su casilla). Nunca se deduce una cifra.
+ */
+async function cifrasPorCasillas(principal,paginas,ctx,perfil){
+ const N=M("normalizar"),X=M("extraer"),hechos=[];
+ const ok=c=>c&&["OK","VERIFICADO"].includes(c.estado);
+ const NUM=["cantidad","precio","importe"];
+ const precioPor=ctx.precioPor||perfil?.precio_por||1;
+ const soluciones=[];
+ for(const pg of paginas){
+  const lineas=principal.lineas.filter(l=>(l.pagina??pg.numero)===pg.numero);
+  const ver=lineas.filter(l=>l.cuadre?.estado==="VERIFICADO"&&NUM.every(k=>ok(l[k])&&l[k].caja));
+  if(ver.length<2)continue;
+  const caja0=o=>[o.referencia,o.descripcion].map(c=>c?.caja).find(Boolean);
+  // Columnas (x en puntos) y formato de cada cifra según las filas que cuadran.
+  const col={},dec={},sep={};
+  for(const k of ["cantidad","precio","descuento","importe"]){
+   const cs=ver.map(o=>o[k]?.caja).filter(Boolean);
+   if(cs.length)col[k]={x0:Math.min(...cs.map(c=>c[0])),x1:Math.max(...cs.map(c=>c[2])),h:Math.max(...cs.map(c=>c[3]))};
+   if(k!=="descuento"){
+    const ds=[...new Set(ver.map(o=>(String(o[k].literal||"").match(/[.,](\d+)$/)||[])[1]?.length??0))];
+    const ss=[...new Set(ver.map(o=>(String(o[k].literal||"").match(/([.,])\d+$/)||[])[1]||""))];
+    if(ds.length===1&&ss.length===1&&ss[0]){dec[k]=ds[0];sep[k]=ss[0];}
+   }
+  }
+  if(!NUM.every(k=>col[k]&&dec[k]!=null))continue;
+  const orden=["cantidad","precio","descuento","importe"].filter(k=>col[k]).sort((a,b)=>col[a].x0-col[b].x0);
+  const h=Math.max(...orden.map(k=>col[k].h)),k=pg.dpi/72;
+  // Bandas: desde la mitad del hueco con la columna anterior (o 2,5 alturas antes) hasta 0,6 alturas tras la cifra más a
+  // la derecha (las cifras van alineadas a la derecha); así el recorte no llega a la raya de la columna siguiente.
+  const banda={};
+  orden.forEach((c,i)=>{
+   const izq=i?(col[orden[i-1]].x1+col[c].x0)/2+0.2*h:col[c].x0-2.5*h;
+   banda[c]=[izq,col[c].x1+0.6*h];
+  });
+  // Desplazamiento vertical de las cifras respecto al código de su fila (mediana de las filas que cuadran).
+  const dys=ver.map(o=>caja0(o)?o.importe.caja[1]-caja0(o)[1]:null).filter(v=>v!=null).sort((a,b)=>a-b);
+  const dy=dys.length?dys[Math.floor(dys.length/2)]:0;
+  for(const l of lineas){
+   if(l.cuadre?.estado==="VERIFICADO"||NUM.every(c=>ok(l[c])))continue;
+   const numerica=NUM.map(c=>l[c]).find(c=>ok(c)&&c.caja);
+   const base=numerica?numerica.caja[1]:caja0(l)?caja0(l)[1]+dy:null;
+   if(base==null)continue;
+   const cand={},centro={};
+   for(const c of orden){
+    if(ok(l[c])){cand[c]=[{literal:l[c].literal,valor:l[c].valor}];continue;}
+    const [a,b]=banda[c];
+    const rx0=Math.max(0,Math.floor(a*k)),rx1=Math.min(pg.anchoPx,Math.ceil(b*k));
+    const ry0=Math.max(0,Math.floor((base-1.4*h)*k)),ry1=Math.min(pg.altoPx,Math.ceil((base+0.6*h)*k));
+    if(rx1-rx0<6||ry1-ry0<6){cand[c]=[];continue;}
+    const textos=[];
+    for(const e of [{psm:7},{psm:7,escala:2},{psm:8,escala:2}]){
+     // (El OCR de una línea da la altura entera del recorte: la fila vecina se descarta después, por la solución repetida.)
+     const ws=(await pg.ocr({...e,region:[rx0,ry0,rx1-rx0,ry1-ry0],lista:c==="descuento"?"0123456789,.%+":"0123456789,."}))
+      .filter(w=>/\d/.test(w.texto));
+     if(ws.length)textos.push(ws.map(w=>w.texto).join(" "));
+    }
+    const vistos=new Map();
+    if(c==="descuento"){
+     for(const t of textos){
+      const tk=t.split(/[\s+%]+/).filter(x=>/^\d{1,2}([.,]\d{1,2})?$/.test(x));
+      const lits=tk.length===1?[tk[0]]:tk.length===2?[tk.join("+")]:[];
+      // Descuento en cascada leído sin el espacio («45 5» → «455»): más de 100 no es un descuento; se prueban sus cortes
+      // («45+5», «4+55») y solo el cuadre decide.
+      for(const x of t.split(/[\s%]+/))if(/^\d{3,4}$/.test(x)&&Number(x)>=100)
+       for(let i=1;i<x.length;i++){const a=x.slice(0,i),b=x.slice(i);if(a.length<=2&&b.length<=2&&!/^0/.test(b))lits.push(a+"+"+b);}
+      for(const lit of lits){const d=N.descuento(lit,ctx.opcionesNumero||{});if(d.estado==="OK"&&d.valor>0&&d.valor<100)vistos.set(lit,{literal:lit,valor:d.valor,factor:d.factor,porcentajes:d.porcentajes});}
+     }
+     if(!textos.length)vistos.set("",{literal:"",valor:null,vacio:true});
+    }else{
+     // El OCR confunde la coma y el punto decimales («12.50» por «12,50»): vale cualquiera de los dos con los decimales de
+     // la columna; el valor se lee como el de las filas que cuadran.
+     const re=new RegExp("^\\d{1,5}[.,]\\d{"+dec[c]+"}$");
+     for(const t of textos)for(const tok of t.split(/\s+/))
+      for(let i=0;i<tok.length;i++)for(let j=i+1;j<=tok.length;j++){
+       const s=tok.slice(i,j);
+       if(!re.test(s)||/^0\d/.test(s))continue;
+       // El valor sale del formato de la columna (sus decimales), no del separador: «40,000» con 3 decimales es 40, no 40.000.
+       const lit=s.replace(/[.,](?=\d+$)/,sep[c]),valor=Number(s.replace(/[.,](?=\d+$)/,"."));
+       // Cero nunca: los trozos «0,000» y «0,00» de una cifra harían cuadrar una fila con todo a cero.
+       if(Number.isFinite(valor)&&valor>0)vistos.set(lit,{literal:lit,valor,decimales:dec[c]});
+      }
+    }
+    cand[c]=[...vistos.values()];centro[c]=textos;
+   }
+   if(!NUM.every(c=>cand[c]?.length))continue;
+   const sols=[];
+   for(const q of cand.cantidad)for(const pr of cand.precio)for(const im of cand.importe)for(const d of cand.descuento||[{vacio:true}]){
+    const prueba={...l,subtotal:l.subtotal||{estado:"VACIO"},cantidad:{...q,estado:"OK"},precio:{...pr,estado:"OK"},importe:{...im,estado:"OK",decimales:dec.importe},
+     descuento:d.vacio?(ok(l.descuento)?{...l.descuento,estado:"OK"}:{estado:"VACIO"}):{...d,estado:"OK"}};
+    const cu=X.cuadre(prueba,precioPor);
+    if(cu.estado==="VERIFICADO")sols.push({q,pr,im,d:d.vacio?null:d,cu});
+   }
+   const distintas=[...new Map(sols.map(s=>[[s.q.valor,s.pr.valor,s.im.valor,s.d?.valor??0].join("|"),s])).values()];
+   if(distintas.length===1)soluciones.push({l,s:distintas[0],base,h,banda,textos:centro});
+   else if(distintas.length>1)l.motivos=[...(l.motivos||[]),"Relectura por casillas: "+distintas.length+" combinaciones cuadran; no se resuelve"];
+  }
+ }
+ // Dos filas muy juntas con la misma solución (un trozo de la fila de al lado leído como otra fila): no se da a ninguna,
+ // salvo que una sea solo un fragmento sin descripción (la foto real partió la primera fila en «585» y la fila de verdad):
+ // entonces es de la que tiene descripción.
+ const clave=x=>[x.s.q.valor,x.s.pr.valor,x.s.im.valor,x.s.d?.valor??0].join("|");
+ const conDescripcion=x=>String(x.l.descripcion?.valor??x.l.descripcion?.literal??"").trim().length>=3;
+ for(const x of soluciones){
+  const gemelas=soluciones.filter(o=>o!==x&&o.l.pagina===x.l.pagina&&clave(o)===clave(x)&&Math.abs(o.base-x.base)<2.5*x.h);
+  if(gemelas.length&&!(conDescripcion(x)&&gemelas.every(o=>!conDescripcion(o)))){
+   x.l.motivos=[...(x.l.motivos||[]),"Relectura por casillas: la misma combinación sale en la fila de al lado; no se resuelve"];continue;
+  }
+  const {l,s}=x;
+  const evid=(c,v)=>"Casilla de "+c+" releída sola ("+((x.textos[c]||[]).map(t=>"«"+t+"»").join(", ")||"lectura de página")+") → "+v;
+  const poner=(c,v,extra={})=>{
+   if(ok(l[c]))return {...l[c],estado:"VERIFICADO",motivos:(l[c].motivos||[]).filter(m=>m!=="El cuadre de la línea no se cumple")};
+   const [a,b]=x.banda[c]||[0,0];
+   return {...(l[c]||{}),...extra,literal:v.literal,valor:v.valor,estado:"VERIFICADO",motivos:[],caja:[a,x.base,b,x.h],
+    resolucion:{metodo:"relectura_casillas_cuadre",confianza:0.95,evidencias:[evid(c,v.literal),"Con esas cifras la línea cuadra: "+s.cu.detalle,
+     "Única combinación con el formato de las filas que cuadran que hace cuadrar la línea"]}};
+  };
+  l.cantidad=poner("cantidad",s.q);l.precio=poner("precio",s.pr);l.importe=poner("importe",s.im,{decimales:s.im.literal.split(/[.,]/)[1]?.length});
+  if(s.d)l.descuento=poner("descuento",s.d,{factor:s.d.factor,porcentajes:s.d.porcentajes});
+  // Los avisos de la fila sobre esas cifras (vacías, cuadre incompleto) ya no son ciertos.
+  l.cuadre=s.cu;l.motivos=(l.motivos||[]).filter(m=>!/^(Descuadre|Cuadre incompleto|Cuadre|Sin precios|Cantidad|Precio|Importe|Descuento)\b[^:]*:/i.test(m));
+  // El estado de la fila sale de sus motivos (igual que al construirla).
+  l.estado=l.motivos.length?"REVISAR":"OK";
+  hechos.push("linea "+l.fila+" cifras (relectura por casillas y cuadre)");
+ }
+ return hechos;
+}
+
+/*
+ * Títulos de código y descripción ilegibles (foto real, 2026-11-23: «CSbIdO» y «CUNCSNELDAS»): con CANTIDAD y dos títulos
+ * económicos leídos, el lector deduce esas columnas por su posición y deja códigos y descripciones en revisión. Se releen
+ * SOLO esos títulos (recorte de cada uno, las 6 estrategias de la relectura dirigida). La deducción queda confirmada si en
+ * cada título al menos dos relecturas dan el título deducido (CÓDIGO, REFERENCIA o ARTÍCULO para el código; DESCRIPCIÓN,
+ * CONCEPTO o DENOMINACIÓN para la descripción) y ninguna da otro. Solo se quita ese motivo: lo demás queda como estaba.
+ */
+async function titulosPorRelectura(principal,paginas){
+ const MOTIVO="Títulos de columna deducidos por posición",MOT_CAMPO="Título de la columna ilegible: columna deducida por su posición";
+ const afectadas=principal.lineas.filter(l=>(l.motivos||[]).includes(MOTIVO));
+ if(!afectadas.length)return [];
+ const X=M("extraer"),N=M("normalizar"),hechos=[];
+ // Título leído: el reconocimiento normal o, para confirmar SOLO estas dos columnas, una letra cambiada en un título de
+ // 6 letras o más («CUDIGO» por «CODIGO»; el reconocimiento normal lo admite desde 7).
+ const TITULOS={CODIGO:"referencia",REFERENCIA:"referencia",ARTICULO:"referencia",DESCRIPCION:"descripcion",CONCEPTO:"descripcion",DENOMINACION:"descripcion"};
+ const d1=(a,b)=>{if(Math.abs(a.length-b.length)>1)return false;let i=0;while(i<a.length&&a[i]===b[i])i++;
+  return a.slice(i+1)===b.slice(i+1)||a.slice(i+1)===b.slice(i)||a.slice(i)===b.slice(i+1);};
+ const tituloDe=t=>{
+  const d=X.campoDe(t);if(d)return d.campo;
+  const encontrados=new Set();
+  for(const p of String(t||"").split(/\s+/)){
+   const c=X.campoDe(p)?.campo;if(c){encontrados.add(c);continue;}
+   const k=N.canon(p).replace(/[^A-Z]/g,"");
+   if(k.length>=6)for(const [titulo,campo] of Object.entries(TITULOS))if(d1(k,titulo))encontrados.add(campo);
+  }
+  return encontrados.size===1?[...encontrados][0]:null;
+ };
+ for(const pg of paginas){
+  const lineas=afectadas.filter(l=>(l.pagina??pg.numero)===pg.numero);
+  const pag=(principal._pags||[]).find(p=>p.numero===pg.numero);
+  if(!lineas.length||!pag)continue;
+  const tabla=(principal.tablas||[]).find(t=>t.pagina===pg.numero);
+  const conCantidad=pag.lineas.filter(l=>l.celdas.some(c=>X.campoDe(c.texto)?.campo==="cantidad"));
+  const cab=conCantidad.sort((a,b)=>Math.abs(a.y-(tabla?.y_cabecera??a.y))-Math.abs(b.y-(tabla?.y_cabecera??b.y)))[0];
+  if(!cab)continue;
+  const cant=cab.celdas.find(c=>X.campoDe(c.texto)?.campo==="cantidad");
+  // Las mismas celdas que la cabecera dedujo: títulos no reconocidos a la izquierda de CANTIDAD.
+  const izquierda=cab.celdas.filter(c=>c.x1<=cant.x0&&!X.campoDe(c.texto)&&N.canon(c.texto).length>2).sort((a,b)=>a.x0-b.x0);
+  if(izquierda.length!==1&&izquierda.length!==2)continue;
+  const esperados=izquierda.length===2?["referencia","descripcion"]:["descripcion"];
+  const evidencias=[];let confirmado=true;
+  const k=pg.dpi/72;
+  for(const [i,c] of izquierda.entries()){
+   // Recorte algo más amplio que el de la relectura de casillas: la altura del título leída por el OCR se queda corta.
+   const h=c.alto||cab.alto,lecturas=[];
+   const rx0=Math.max(0,Math.floor((c.x0-h)*k)),rx1=Math.min(pg.anchoPx,Math.ceil((c.x1+h)*k));
+   const ry0=Math.max(0,Math.floor((c.y-1.8*h)*k)),ry1=Math.min(pg.altoPx,Math.ceil((c.y+0.6*h)*k));
+   if(rx1-rx0<8||ry1-ry0<8){confirmado=false;break;}
+   for(const e of ESTRATEGIAS){
+    const ws=await pg.ocr({...e,region:[rx0,ry0,rx1-rx0,ry1-ry0]});
+    if(ws.length)lecturas.push({texto:ws.map(w=>w.texto).join(" ")});
+   }
+   const campos=lecturas.map(r=>({campo:tituloDe(r.texto),texto:r.texto})).filter(x=>x.campo);
+   const buenos=campos.filter(x=>x.campo===esperados[i]),otros=campos.filter(x=>x.campo!==esperados[i]);
+   if(buenos.length<2||otros.length){confirmado=false;break;}
+   evidencias.push("«"+c.texto+"» releído como «"+buenos[0].texto+"» ("+buenos.length+" relecturas)");
+  }
+  if(!confirmado)continue;
+  for(const l of lineas){
+   for(const k of ["referencia","descripcion"]){
+    const f=l[k];
+    if(!f||!(f.motivos||[]).includes(MOT_CAMPO))continue;
+    const motivos=f.motivos.filter(m=>m!==MOT_CAMPO);
+    l[k]={...f,motivos,estado:motivos.length?f.estado:"OK",notas:[...(f.notas||[]),"Título de la columna confirmado por relectura: "+evidencias.join("; ")]};
+   }
+   l.motivos=(l.motivos||[]).filter(m=>m!==MOTIVO&&!m.endsWith(MOT_CAMPO));
+   l.estado=l.motivos.length?"REVISAR":"OK";
+  }
+  hechos.push("títulos de columna confirmados por relectura (página "+pg.numero+")");
+ }
+ return hechos;
+}
+
 async function segundaFase(principal,paginas,lecturas,opciones){
  const ctx=principal._ctx||{},perfil=ctx.perfil;
  const pag=paginas.find(p=>p.numero===(principal.tablas?.[0]?.pagina??paginas[0].numero))||paginas[0];
@@ -346,6 +553,8 @@ async function segundaFase(principal,paginas,lecturas,opciones){
   l.cuadre=c;l.motivos=(l.motivos||[]).filter(m=>!/^Descuadre:/.test(m));
   resueltos.push("linea "+l.fila+" descuento (cuadre)");
  }
+ resueltos.push(...await cifrasPorCasillas(principal,paginas,ctx,perfil));
+ resueltos.push(...await titulosPorRelectura(principal,paginas));
  // Líneas: código y descripción leídos con poca confianza (no hay cuadre que los confirme).
  const pendientes=[];
  for(const l of principal.lineas){
@@ -692,5 +901,5 @@ async function leerCabeceras(paginas,opciones={}){
  }
  return out;
 }
-return {extraerEscaneado,leerCabeceras,coincidenciaVision,LECTURAS};
+return {extraerEscaneado,leerCabeceras,coincidenciaVision,cifrasPorCasillas,LECTURAS};
 });
