@@ -3,6 +3,19 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-24 · Lector: facturas escaneadas (lo mismo que DAFRICA Control y la aplicación 0.3.53)
+
+- `albaranes/extraer.js` vuelve a ser el MISMO que en DAFRICA Control y en la aplicación de administración (cambio del 23 por la
+  tarde, con tres facturas reales escaneadas, privadas):
+  - «Albarán: nº  Fecha: …» dentro de la tabla de una factura es la cabecera del albarán citado (se descarta con su altura) y
+    ningún número que siga a «ALBARÁN» puede ser el número de la factura.
+  - «FECHA» que encabeza una columna con dos o más fechas distintas debajo no es la fecha del documento.
+  - En la fila del número, una fecha leída con una barra como «1» deja el número en revisión y esa fecha propuesta (antes, dos
+    lecturas falsas aceptadas).
+- `pruebas/lote-b.test.js` con las 3 pruebas de regresión (ficticias). `index.html`: versión nueva de `extraer.js` para que el
+  navegador no use la anterior (SAT lo carga sin versión: su service worker pregunta siempre al servidor, `no-cache`).
+- Verificación: `npm test` 452/452. Producción: nada publicado (`main` sin cambios).
+
 ## 2026-11-24 · DAFRICA SAT 0.3.18: el técnico solo cuenta, fotografía y firma; el albarán de trabajo se crea con todo (sat-stel v12)
 
 - Usuario: «que en el parte a firmar aparezcan su descripción y los materiales que utilizó así como el tiempo de trabajo y

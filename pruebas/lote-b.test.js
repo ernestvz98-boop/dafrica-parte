@@ -811,3 +811,67 @@ test("abono: cantidad negativa con el importe impreso en positivo cuadra; descue
  assert.deepEqual(d.lineas[0].descuento.porcentajes,[52]);
  assert.equal(d.lineas[0].cuadre.estado,"VERIFICADO");
 });
+// Facturas con albaranes que faltan (2026-11-23): cada línea y cada «ALBARÁN Nº» descartado llevan su altura «y» en la página, para
+// saber bajo qué albarán va cada línea. Fallo real: la cabecera del primer albarán («línea sin cantidad») salía sin posición.
+test("factura: las líneas y los «ALBARÁN Nº» descartados llevan su posición en la página",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const tit=fila(200,["CÓDIGO",45],["CANTIDAD",95],["DESCRIPCIÓN",140],["PRECIO",425],["IMPORTE",517]);
+ const pal=[...cabeceraDoc(),...fila(100,["FECHA",400],["NÚMERO",470]),...fila(112,["15/10/26",400],["A",478],["009999",488]),...tit,
+  ...fila(214,["ALBARAN",140],["Nº",180],["111.111",200]),...fila(228,["EX00001",45],["1,00",111],["MORDAZA",140],["10,000",442],["10,00",547]),
+  ...fila(242,["ALBARAN",140],["Nº",180],["222.222",200]),...fila(256,["EX00002",45],["2,00",111],["TALADRO",140],["5,000",442],["10,00",547])];
+ const r=extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ const cab=r.lineas_ignoradas.filter(x=>/ALBARAN/.test(x.texto));
+ assert.equal(cab.length,2);
+ assert.ok(cab.every(x=>Number.isFinite(x.y)),JSON.stringify(cab));
+ assert.ok(r.lineas.every(l=>Number.isFinite(l.y)));
+ // Cada línea, debajo de su albarán: la primera entre los dos, la segunda después del segundo.
+ assert.ok(cab[0].y<r.lineas[0].y&&r.lineas[0].y<cab[1].y&&cab[1].y<r.lineas[1].y);
+});
+// Facturas reales del 2026-11-23 (datos ficticios): «Albarán: 26/0002  Fecha: 08/10/26» en la columna del código no es un artículo
+// ni el número de la factura.
+test("factura: «Albarán: …» bajo la cabecera de la tabla no es una línea; su número nunca es el de la factura",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const cab=[...cabeceraDoc(),...fila(100,["Documento",29],["Núm,",95],["Fecha",148],["Vendedor",206]),...fila(112,["FACTURA",32],["26/0001",90],["08/10/26",144],["NOMBRE",216])];
+ const tabla=[...fila(200,["Código",28],["Descripción",108],["Cantidad",349],["Precio",402],["%",480],["Importe",515]),
+  ...fila(214,["Albarán:",23],["26/0002",58],["Fecha:",100],["08/10/26",131]),
+  ...fila(228,["METACRILATO",108],["FICTICIO",170],["2,00",358],["10,0000",400],["20,00",545])];
+ const r=extraerDePaginas([pagina([...cab,...tabla])],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ assert.equal(r.numero.valor,"26/0001");
+ assert.deepEqual(r.lineas.map(l=>l.descripcion.valor),["METACRILATO FICTICIO"]);
+ const alb=r.lineas_ignoradas.find(x=>/Albar/.test(x.texto));
+ assert.ok(alb&&Number.isFinite(alb.y)&&/citado/.test(alb.motivo),JSON.stringify(r.lineas_ignoradas));
+ // Sin número de factura legible, el del albarán citado no ocupa su lugar.
+ const sin=extraerDePaginas([pagina([...cabeceraDoc(),...fila(100,["Documento",29],["Fecha",148]),...fila(112,["FACTURA",32],["08/10/26",144]),...tabla])],
+  {registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ assert.notEqual(sin.numero.valor,"26/0002");
+});
+test("factura: «FECHA» que encabeza una columna con la fecha de cada cargo no es la fecha de la factura; un albarán con «FECHA» y «FECHA ENTREGA» sí",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const cargos=[...fila(200,["FECHA",40],["DESCRIPCION",112],["CARGOS",441],["ABONOS",505]),...fila(214,["03/10/26",40],["SUPLIDOS",93],["FICTICIOS",140],["1,11",470]),
+  ...fila(228,["06/10/26",41],["TASAS",93],["FICTICIAS",130],["2,22",466]),...fila(242,["09/10/26",41],["HONORARIOS",93],["3,33",466])];
+ const r=extraerDePaginas([pagina([...cabeceraDoc(),...fila(100,["FACTURA",100]),...fila(112,["1/0001",99]),...cargos])],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ assert.ok(!(r.fecha.estado==="OK"&&r.fecha.valor==="2026-10-03"),JSON.stringify(r.fecha));
+ assert.notEqual(r.fecha.estado,"OK");
+ // Un albarán con la fecha y, debajo, otra etiqueta con su fecha: la del albarán sigue siendo la etiquetada.
+ const alb=leer([...cabeceraDoc(),...fila(100,["FECHA",400]),...fila(112,["15/10/26",400]),...fila(124,["FECHA ENTREGA",400]),...fila(136,["16/10/26",400]),
+  ...fila(120,["ALBARÁN",60],["Nº",105],["600.111",120]),...titulos(),...filaPrecio(218)]);
+ assert.equal(alb.fecha.valor,"2026-10-15");
+ assert.equal(alb.fecha.estado,"OK");
+});
+test("factura: la barra leída como «1» en la fila del número («1511026» por la fecha) deja el número en revisión y propone la fecha",()=>{
+ const {extraerDePaginas}=require("../albaranes/extraer.js");
+ const pal=[...cabeceraDoc(),...fila(100,["HA",57],["FACTURA",100],["CLIENTE",176]),...fila(112,["1511026",45],["110001",99],["30001",177]),
+  ...fila(200,["CÓDIGO",45],["CANTIDAD",95],["DESCRIPCIÓN",140],["PRECIO",425],["IMPORTE",517]),...fila(228,["EX00001",45],["1,00",111],["MORDAZA",140],["10,000",442],["10,00",547])];
+ const r=extraerDePaginas([pagina(pal)],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ assert.equal(r.numero.valor,"110001");
+ assert.notEqual(r.numero.estado,"OK");
+ assert.equal(r.fecha.valor,"2026-10-15");
+ assert.notEqual(r.fecha.estado,"OK");
+ // Una barra bien y la otra perdida (otra lectura OCR: «1510/26»).
+ const media=extraerDePaginas([pagina([...cabeceraDoc(),...fila(100,["FACTURA",100]),...fila(112,["1510/26",45],["110001",99]),...pal.slice(-11)])],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ assert.equal(media.numero.estado,"REVISAR");
+ assert.equal(media.fecha.valor,"2026-10-15");
+ // Sin esa fecha sin barras en la fila, el número se acepta como siempre.
+ const ok=extraerDePaginas([pagina([...cabeceraDoc(),...fila(100,["FACTURA",100]),...fila(112,["110001",99]),...pal.slice(-11)])],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
+ assert.equal(ok.numero.estado,"OK");
+});

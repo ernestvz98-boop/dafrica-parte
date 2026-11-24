@@ -258,7 +258,8 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=In
    }
   }
   const valido=candidatos.find(c=>aceptar(c.texto));
-  if(valido)hallados.push({...valido,etiqueta:celda.texto});
+  // La casilla de la etiqueta y su renglón (para saber si encabeza una columna de la tabla).
+  if(valido)hallados.push({...valido,etiqueta:celda.texto,celdaEtiqueta:celda,indiceLinea:li});
  }));
  return hallados;
 }
@@ -341,6 +342,24 @@ function leerFecha(lineas,opciones){
  // Se aceptan también fechas con forma de fecha pero inexistentes (31/02): quedan INVALIDO.
  let hallados=valoresEtiquetados(lineas,RE_FECHA,EXCLUIR_FECHA,
   t=>/\d/.test(t)&&(F(t,opciones).estado==="OK"||/^\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}$/.test(t)));
+ // «FECHA» que encabeza una columna con dos o más fechas distintas en los renglones de debajo, alineadas (fallo real 2026-11-23:
+ // factura de una gestoría con «FECHA | DESCRIPCION | CARGOS» y la fecha de cada cargo; la primera se tomaba como la de la factura):
+ // es la fecha de cada línea, no la del documento.
+ const encabezaColumna=h=>{
+  const et=h.celdaEtiqueta;if(!et||h.indiceLinea==null)return false;
+  const alto=et.alto||10,fechas=new Map(),enColumna=c=>c.x1>=et.x0-2*alto&&c.x0<=et.x1+2*alto;
+  for(const l of lineas.slice(h.indiceLinea+1,h.indiceLinea+5)){
+   // Otra etiqueta de fecha en la columna («FECHA ENTREGA»): lo de debajo es de ella, no una columna de fechas.
+   if(l.celdas.some(c=>enColumna(c)&&RE_FECHA.test(N().sinAcentos(c.texto).replace(/[.:]/g," ").replace(/\s+/g," ").trim())))break;
+   for(const c of l.celdas){
+    if(!enColumna(c))continue;
+    const f=F(c.texto,opciones);if(f.estado==="OK"&&!fechas.has(f.valor))fechas.set(f.valor,c.x0);
+   }
+  }
+  const xs=[...fechas.values()];
+  return xs.length>=2&&Math.max(...xs)-Math.min(...xs)<=alto;
+ };
+ hallados=hallados.filter(h=>!encabezaColumna(h));
  let etiquetada=true;
  if(!hallados.length){
   etiquetada=false;
@@ -880,6 +899,12 @@ function leerTablaPagina(pagina,perfil=null){
    actual.cifrasEnSegundoRenglon=true;
    yAnterior=linea.y;continue;
   }
+  // «Albarán: 26/0001  Fecha: …» dentro de la tabla de una factura (fallo real 2026-11-23): es la cabecera de las líneas de ese
+  // albarán, no un artículo (sin cantidad ni importes). Se guarda con su altura: la aplicación sabe así de qué albarán es cada línea.
+  if(!tieneCantidad&&!tieneImportes&&/^ALBARAN\b\s*(N[ºO°]?\s*)?\d/.test(textoLinea)){
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Albarán citado en la factura (cabecera de sus líneas), no es un artículo"});
+   yAnterior=linea.y;continue;
+  }
   if(tieneCantidad||tieneRef||tieneImportes){
    actual={pagina:pagina.numero,celdas,conflictos,partida,textoEstimado,continuaciones:[],y:linea.y,
     titulosInferidos:cab.columnas.filter(c=>c.inferida).map(c=>c.campo)};
@@ -896,11 +921,12 @@ function leerTablaPagina(pagina,perfil=null){
    filas.push(actual);
   }else{
    const soloTexto=Object.keys(celdas).every(k=>["descripcion","referencia","otra","unidad"].includes(k));
+   // «ALBARÁN Nº …» dentro de una factura es la cabecera del albarán siguiente, nunca el final de la descripción de arriba (2026-11-23).
    if(actual&&soloTexto&&celdas.descripcion&&!celdas.referencia&&linea.y-yAnterior<=1.8*linea.alto&&
-     !RE_ANOTACION.test(clave(celdas.descripcion.texto))){
+     !RE_ANOTACION.test(clave(celdas.descripcion.texto))&&!/^ALBARAN\b/.test(clave(celdas.descripcion.texto))){
     actual.continuaciones.push(celdas.descripcion.texto);
    }else{
-    const ig={pagina:pagina.numero,texto:linea.texto,motivo:"Línea sin cantidad dentro de la tabla"};
+    const ig={pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Línea sin cantidad dentro de la tabla"};
     Object.defineProperties(ig,{_sinCantidad:{value:!!celdas.descripcion},_fila:{value:filas.length},_y:{value:linea.y},_x:{value:linea.celdas[0]?.x0??0},
      // Sin los trazos de bolígrafo que el OCR lee con confianza casi nula.
      _texto:{value:linea.celdas.filter(c=>c.conf==null||c.conf>=50).map(c=>c.texto).join(" ")}});
@@ -1511,16 +1537,48 @@ function extraerDePaginas(paginas,opciones={}){
  // líneas, «ALBARAN Nº …» de cada albarán facturado): el número de la factura tras «NÚMERO», «Nº FACTURA» o «FACTURA», aunque el
  // lector haya tomado otro (los «ALBARÁN Nº» de una factura son los albaranes que cita, no su número). Solo si hay uno.
  if(opciones.numeroDeFactura){
+  // Albaranes que cita la factura («Albarán: 26/0001», «ALBARÁN Nº 600.111»): ninguno es el número de la factura (fallo real
+  // 2026-11-23: alguna lectura OCR tomaba el del albarán citado bajo la cabecera y el número quedaba AMBIGUO).
+  const citados=new Set();
+  for(const l of primera.p.lineas)for(const m of N().sinAcentos(l.texto||"").toUpperCase().matchAll(/ALBARAN\s*(?:N[ºO°]?\.?|NUM(?:ERO)?\.?)?\s*[:.]?\s*([0-9A-Z][0-9A-Z.\/-]{2,})/g))
+   if(/\d/.test(m[1]))citados.add(N().canon(m[1]));
   const h=[...new Map(valoresEtiquetados(primera.p.lineas,/^(N(º|O)? ?(DE )?FACTURA|NUM(ERO)? (DE )?FACTURA|FACTURA( N(º|O)?)?|NUMERO|NUM)(\b|$)/i,
    /ALBARAN|PEDIDO|CLIENTE|PROVEEDOR|RECTIFICA|PAGINA|CUENTA|IBAN|TELEF|OBRA|CIF|NIF/,
    // Forma de número de documento: serie de letras opcional y cifras («A 000123», «FV26-001234»); nunca una fecha ni una dirección.
-   t=>/^[A-Z]{0,4}[ \/-]?\d[\d.\/ -]{2,}$/i.test(t.trim())&&!/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(t.trim()),{huecoDerecha:8,unirDerecha:true}).map(x=>[x.texto,x])).values()];
+   t=>/^[A-Z]{0,4}[ \/-]?\d[\d.\/ -]{2,}$/i.test(t.trim())&&!/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(t.trim())&&!citados.has(N().canon(t)),
+   {huecoDerecha:8,unirDerecha:true}).map(x=>[x.texto,x])).values()];
   // El título «FACTURA» encima de la casilla «NÚMERO» da las mismas cifras sin la serie («000123» y «A 000123»): si todas las
   // lecturas son las mismas cifras, vale la más completa.
   const cifras=t=>t.replace(/\D/g,"");
   if(h.length>1&&h.every(x=>cifras(x.texto)===cifras(h[0].texto)))h.sort((a,b)=>b.texto.length-a.texto.length).splice(1);
-  if(h.length===1)salida.numero={literal:h[0].texto,valor:h[0].texto,estado:"OK",motivos:[],notas:["Número de la factura tras «"+h[0].etiqueta+"»"],
-   caja:caja(h[0].celda),conf_ocr:h[0].celda?.conf??null};
+  if(h.length===1){
+   salida.numero={literal:h[0].texto,valor:h[0].texto,estado:"OK",motivos:[],notas:["Número de la factura tras «"+h[0].etiqueta+"»"],
+    caja:caja(h[0].celda),conf_ocr:h[0].celda?.conf??null};
+   // Barra leída como «1» (fallo real 2026-11-23: «1/0001» leído «110001» y, en la misma fila, la fecha «dd/mm/aa» leída «dd1mmaa»):
+   // si en el renglón del número hay una fecha escrita sin barras que solo es fecha con «/» en el lugar de los «1», el número puede
+   // llevar también una barra: no se acepta. La fecha se propone (sin aceptarla) si no hay otra.
+   // La fecha con alguna barra leída «1» o perdida (p. ej. «1511026» o «1510/26» por «15/10/26»: las dos formas del fallo real); vale si da una sola
+   // fecha posible. Sin ninguna barra («151026») puede ser cualquier número: no cuenta.
+   const fechaSinBarras=t=>{
+    if(!/^\d[\d\/]{6,9}$/.test(t))return null;const vistas=new Set();
+    for(const s1 of ["","1","/"])for(const s2 of ["","1","/"])for(const anio of [2,4]){
+     if((s1==="/"&&s2==="/")||(!s1&&!s2)||t.length!==4+s1.length+s2.length+anio)continue;
+     const i=2+s1.length,j=i+2+s2.length;
+     if(t.slice(2,i)!==s1||t.slice(i+2,j)!==s2)continue;
+     const f=N().fecha(t.slice(0,2)+"/"+t.slice(i,i+2)+"/"+t.slice(j),opcionesFecha);if(f.estado==="OK")vistas.add(f.valor);
+    }
+    return vistas.size===1?[...vistas][0]:null;
+   };
+   const c0=h[0].celda,fila=primera.p.lineas.find(l=>l.celdas.some(c=>c===c0||(c.x0===c0?.x0&&String(c0?.texto||"").startsWith(c.texto))));
+   const sinBarras=(fila?.celdas||[]).filter(c=>c!==c0).map(c=>String(c.texto||"").trim()).find(t=>fechaSinBarras(t));
+   if(sinBarras&&/1/.test(h[0].texto)){
+    salida.numero.estado="REVISAR";
+    salida.numero.motivos.push("En su fila el OCR lee la barra «/» como «1» (fecha «"+sinBarras+"»): el número puede llevar una barra");
+    if(salida.fecha?.estado!=="OK")
+     salida.fecha={literal:sinBarras,valor:fechaSinBarras(sinBarras),estado:"REVISAR",motivos:["Fecha leída sin barras («"+sinBarras+"»): propuesta, compárala con el papel"],notas:[],caja:null};
+   }
+  }else if(salida.numero?.valor!=null&&citados.has(N().canon(salida.numero.valor)))
+   salida.numero={literal:"",valor:null,estado:"VACIO",motivos:["El número leído es el de un albarán que cita la factura, no el de la factura"],notas:[],caja:null};
  }
  // El formato de número del perfil es el de sus ALBARANES: no vale para el número de una factura ni de una confirmación de
  // pedido (fallo real 2026-11-20: «A 000123» de una factura quedaba en revisión por no tener la forma de sus albaranes).
@@ -1563,7 +1621,7 @@ function extraerDePaginas(paginas,opciones={}){
   const texto=N().canon((cruda.celdas.referencia?.texto||"")+(cruda.celdas.descripcion?.texto||""));
   const sinPrecio=!cruda.celdas.precio&&!cruda.celdas.importe;
   if(sinPrecio&&noArticulo.some(p=>texto.startsWith(p))){
-   salida.lineas_ignoradas.push({pagina:cruda.pagina,texto:Object.values(cruda.celdas).map(c=>c.texto).join(" "),motivo:"Anotación de recogida, no es un artículo"});
+   salida.lineas_ignoradas.push({pagina:cruda.pagina,y:cruda.y,texto:Object.values(cruda.celdas).map(c=>c.texto).join(" "),motivo:"Anotación de recogida, no es un artículo"});
    continue;
   }
   const fila=construirFila(cruda,++n,opcionesNumero,perfil,precioPor);
