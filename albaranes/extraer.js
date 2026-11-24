@@ -236,7 +236,7 @@ const limpiarValor=v=>String(v||"").replace(/^[\s:#\-–.º°]+/,"").replace(/^N
 
 // huecoDerecha (en altos de la etiqueta): el valor a la derecha ha de estar a esa distancia como mucho (otra columna no vale).
 // unirDerecha: debajo de la etiqueta, si la celda más próxima no vale, se prueba unida a la celda pegada a su derecha.
-function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=Infinity,unirDerecha=false}={}){
+function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=Infinity,unirDerecha=false,parClaveValor=false}={}){
  const hallados=[];
  lineas.forEach((linea,li)=>linea.celdas.forEach((celda,ci)=>{
   const k=N().sinAcentos(celda.texto).replace(/[.:]/g," ").replace(/\s+/g," ").trim();
@@ -250,6 +250,9 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=In
   // 1009999999» se quedaba sin número).
   const derecha=linea.celdas.slice(ci+1).filter(c=>c.x0>=celda.x1-1&&c.x0-celda.x1<=huecoDerecha*(celda.alto||10)).find(c=>limpiarValor(c.texto)&&!/^N[ºo°O]?[^A-Za-z0-9]?$/i.test(c.texto.trim()));
   if(derecha)candidatos.push({texto:limpiarValor(derecha.texto),celda:derecha});
+  // Renglón «etiqueta | valor» a dos columnas (factura real 2026-11-24: el número a 9 alturas de su etiqueta): con parClaveValor, la
+  // ÚNICA celda con texto a la derecha de la etiqueta en su renglón, aunque esté lejos (lo demás lo decide «aceptar»).
+  else if(parClaveValor){const der=linea.celdas.slice(ci+1).filter(c=>c.x0>=celda.x1-1&&limpiarValor(c.texto));if(der.length===1)candidatos.push({texto:limpiarValor(der[0].texto),celda:der[0]});}
   // El OCR puede partir la fila de valores en varias líneas (bases distintas): se miran hasta
   // tres líneas y se sigue bajando si la celda hallada no tiene forma de valor válido.
   for(const abajo of lineas.slice(li+1,li+4)){
@@ -1653,11 +1656,15 @@ function extraerDePaginas(paginas,opciones={}){
   const citados=new Set();
   for(const l of primera.p.lineas)for(const m of N().sinAcentos(l.texto||"").toUpperCase().matchAll(/ALBARAN\s*(?:N[ºO°]?\.?|NUM(?:ERO)?\.?)?\s*[:.]?\s*([0-9A-Z][0-9A-Z.\/-]{2,})/g))
    if(/\d/.test(m[1]))citados.add(N().canon(m[1]));
-  const h=[...new Map(valoresEtiquetados(primera.p.lineas,/^(N(º|O)? ?(DE )?FACTURA|NUM(ERO)? (DE )?FACTURA|FACTURA( N(º|O)?)?|NUMERO|NUM)(\b|$)/i,
-   /ALBARAN|PEDIDO|CLIENTE|PROVEEDOR|RECTIFICA|PAGINA|CUENTA|IBAN|TELEF|OBRA|CIF|NIF/,
-   // Forma de número de documento: serie de letras opcional y cifras («A 000123», «FV26-001234»); nunca una fecha ni una dirección.
-   t=>/^[A-Z]{0,4}[ \/-]?\d[\d.\/ -]{2,}$/i.test(t.trim())&&!/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(t.trim())&&!citados.has(N().canon(t)),
-   {huecoDerecha:8,unirDerecha:true}).map(x=>[x.texto,x])).values()];
+  // «Número de la factura» (factura real 2026-11-24) y nunca el de la factura ORIGINAL que cita una rectificativa.
+  const h=[...new Map(valoresEtiquetados(primera.p.lineas,/^(N(º|O)? ?(DE )?FACTURA|NUM(ERO)? (DE (LA )?)?FACTURA|FACTURA( N(º|O)?)?|NUMERO|NUM)(\b|$)/i,
+   /ALBARAN|PEDIDO|CLIENTE|PROVEEDOR|RECTIFICA|ORIGINAL|PAGINA|CUENTA|IBAN|TELEF|OBRA|CIF|NIF/,
+   // Forma de número de documento: serie de letras opcional y cifras («A 000123», «FV26-001234»), también con la serie detrás
+   // («12345678 RX», factura real 2026-11-24), o un código de letras y cifras con al menos dos cifras («ES12AB34CDEF»); nunca una
+   // fecha ni una dirección.
+   t=>(/^[A-Z]{0,4}[ \/-]?\d[\d.\/ -]{2,}( ?[A-Z]{1,3})?$/i.test(t.trim())||/^(?=(?:[A-Z]*\d){2})[A-Z0-9]{8,20}$/i.test(t.trim()))&&
+    !/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(t.trim())&&!citados.has(N().canon(t)),
+   {huecoDerecha:8,unirDerecha:true,parClaveValor:true}).map(x=>[x.texto,x])).values()];
   // El título «FACTURA» encima de la casilla «NÚMERO» da las mismas cifras sin la serie («000123» y «A 000123»): si todas las
   // lecturas son las mismas cifras, vale la más completa.
   const cifras=t=>t.replace(/\D/g,"");
@@ -1690,6 +1697,25 @@ function extraerDePaginas(paginas,opciones={}){
    }
   }else if(salida.numero?.valor!=null&&citados.has(N().canon(salida.numero.valor)))
    salida.numero={literal:"",valor:null,estado:"VACIO",motivos:["El número leído es el de un albarán que cita la factura, no el de la factura"],notas:[],caja:null};
+  // Sin un solo número tras la etiqueta de la factura, el que tomó el lector por otra etiqueta («Nº doc CRM 26XXXX», factura real
+  // 2026-11-24: se aceptaba como número de la factura) nunca se da por bueno.
+  else if(salida.numero?.estado==="OK"){
+   const lit=String(salida.numero.literal||salida.numero.valor||"").trim();
+   const suya=lit&&primera.p.lineas.find(l=>String(l.texto||"").includes(lit));
+   if(h.length>1||!suya||!/FACTURA/.test(N().sinAcentos(suya.texto||"").toUpperCase()))
+    salida.numero={...salida.numero,estado:"REVISAR",motivos:[...(salida.numero.motivos||[]),h.length>1?"Varios números tras la etiqueta de la factura ("+h.map(x=>x.texto).join(" / ")+")":
+     "No está tras «Nº factura»"+(suya?" (está en «"+String(suya.texto).slice(0,40)+"»)":"")+": compruébalo con el papel"]};
+  }
+ // Fecha de la factura (factura real 2026-11-24: «Fecha de la factura/Fecha de la entrega | 19 noviembre 2026» quedaba fuera por
+  // «entrega»; en una rectificativa, también «Fecha de la factura original»): la única tras «Fecha (de la) factura», nunca la de la
+  // factura original, el pedido o el vencimiento.
+  {const F=N().fecha,ff=[...new Map(valoresEtiquetados(primera.p.lineas,/^FECHA (DE (LA )?)?FACTURA(\b|$)/,/ORIGINAL|VENCIMIENTO|PEDIDO|PAGO/,
+    t=>/\d/.test(t)&&F(t,opcionesFecha).estado==="OK",{huecoDerecha:8,parClaveValor:true}).map(x=>[F(x.texto,opcionesFecha).valor,x])).values()];
+   if(ff.length===1&&!(salida.fecha?.estado==="OK"&&salida.fecha.valor===F(ff[0].texto,opcionesFecha).valor)){
+    const f=F(ff[0].texto,opcionesFecha);
+    salida.fecha={literal:f.literal,valor:f.valor,estado:f.estado,motivos:[...f.motivos],notas:[...f.notas,"Fecha de la factura tras «"+ff[0].etiqueta+"»"],
+     caja:caja(ff[0].celda),conf_ocr:ff[0].celda?.conf??null};
+   }}
  }
  // El formato de número del perfil es el de sus ALBARANES: no vale para el número de una factura ni de una confirmación de
  // pedido (fallo real 2026-11-20: «A 000123» de una factura quedaba en revisión por no tener la forma de sus albaranes).
