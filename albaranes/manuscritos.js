@@ -612,17 +612,37 @@ function quienRecoge(lineas,excluir=[]){
  * Pedido a proveedor IMPRESO por el proveedor («Su referencia: PEDIDO: PAP01234», fallo real 2026-11-18: el lector solo buscaba
  * el escrito a mano). Solo palabras impresas leídas con fiabilidad (confianza OCR ≥ 90) con la forma «PAP» + 5 cifras; si hay
  * dos distintos, ninguno.
+ * Sin ninguno así, uno con letras que el OCR confunde con cifras («S/REF:PAPO9876», fallo real 2026-11-24: un subrayado a boli sobre
+ * el 0; el albarán se creó sin su pedido): la misma corrección que lo escrito a mano (normalizarPedido), con al menos 3 cifras de
+ * verdad y palabra aparte; NUNCA fiable: se propone y lo decide la persona en la revisión («Es del pedido …»).
+ * Detrás de la etiqueta de su referencia o de su pedido («S/REF:», «SU PEDIDO», «PEDIDO»), además, partido por el OCR en dos
+ * palabras («PAPO98 76») o con una letra de «PAP» mal leída («P4P», «PAF», «RAP»): también propuesto, nunca fiable.
  */
+const RE_ETIQ_PEDIDO=/(?:^|[^A-Z0-9])(?:S ?\/ ?REF(?:ERENCIA)?|SU REF(?:ERENCIA)?|REF\.? CLIENTE|SU PEDIDO|N\.?º? ?PEDIDO|PEDIDO)\b\s*[:.]?\s*/i;
 function pedidoImpreso(lineas){
- const vistos=new Map();
+ const exactos=new Map(),dudosos=new Map();
+ const anotar=(vistos,v,c)=>{const x=vistos.get(v);vistos.set(v,{literal:c.texto,conf:Math.max(x?.conf??0,c.conf??100)});};
  for(const l of lineas||[])for(const c of l.celdas||[]){
   if((c.conf??100)<30)continue;
-  for(const m of String(c.texto||"").toUpperCase().matchAll(/(?:^|[^A-Z0-9])(PAP\s?\d{5})(?![0-9])/g)){const v=m[1].replace(/\s/g,"");
-   const x=vistos.get(v);vistos.set(v,{literal:c.texto,conf:Math.max(x?.conf??0,c.conf??100)});}
+  const t=String(c.texto||"").toUpperCase();
+  for(const m of t.matchAll(/(?:^|[^A-Z0-9])(PAP\s?\d{5})(?![0-9])/g))anotar(exactos,m[1].replace(/\s/g,""),c);
+  for(const m of t.matchAll(/(?:^|[^A-Z0-9])(PAP\s?[0-9OQDILZSBG]{5})(?![0-9A-Z])/g)){
+   const crudo=m[1].replace(/\s/g,""),v=normalizarPedido(crudo);
+   if(v&&v!==crudo&&(crudo.slice(3).match(/[0-9]/g)||[]).length>=3)anotar(dudosos,v,c);
+  }
  }
+ for(const l of lineas||[]){
+  const confs=(l.celdas||[]).map(c=>c.conf??100),t=String(l.texto||"").toUpperCase(),e=t.match(RE_ETIQ_PEDIDO);
+  if(!e||(confs.length&&Math.max(...confs)<30))continue;
+  const m=t.slice(e.index+e[0].length).match(/^([PRFB8][A4][PRFB8])\s?([0-9OQDILZSBG](?:\s?[0-9OQDILZSBG]){4})(?![0-9A-Z])/);
+  if(!m||[...m[1]].filter((x,i)=>x==="PAP"[i]).length<2)continue;
+  const cifras=m[2].replace(/\s/g,""),v=normalizarPedido("PAP"+cifras);
+  if(v&&(cifras.match(/[0-9]/g)||[]).length>=3)anotar(dudosos,v,{texto:m[0].trim(),conf:confs.length?Math.min(...confs):100});
+ }
+ const vistos=exactos.size?exactos:dudosos;
  if(vistos.size!==1)return null;
  const [valor,x]=[...vistos.entries()][0];
- return {valor,literal:x.literal,fiable:x.conf>=90};
+ return {valor,literal:x.literal,fiable:vistos===exactos&&x.conf>=90};
 }
 // El pedido impreso decide el del albarán: con lo escrito a mano igual (o sin nada escrito), validado; si lo escrito dice otro
 // número, en revisión.
@@ -633,7 +653,7 @@ function conPedidoImpreso(pedido,impreso){
  // Impreso pero leído con poca confianza (fallo real 2026-11-18, «PAP…» con confianza 48): propuesto, sin validar; lo valida la
  // consulta a STEL (mismo proveedor y sus artículos) o la persona en la revisión.
  if(!impreso.fiable&&!escrito&&!alternativas.length)return {valor:impreso.valor,literal:impreso.literal,estado:"REVISAR",confianza:0.8,
-  motivos:["Pedido impreso leído con poca confianza: sin validar"],resolucion:{metodo:"pedido_impreso_dudoso",evidencias:ev,alternativas:[impreso.valor]}};
+  motivos:["Pedido impreso leído con poca confianza («"+impreso.literal+"»): sin validar"],resolucion:{metodo:"pedido_impreso_dudoso",evidencias:ev,alternativas:[impreso.valor]}};
  if(!escrito&&!alternativas.length)return {valor:impreso.valor,literal:impreso.literal,estado:"OK",confianza:0.95,motivos:[],resolucion:{metodo:"pedido_impreso",evidencias:ev,alternativas:[impreso.valor]}};
  if(escrito===impreso.valor||(!escrito&&alternativas.includes(impreso.valor)))
   return {...pedido,valor:impreso.valor,estado:"OK",confianza:0.97,motivos:[],resolucion:{...pedido.resolucion,metodo:"pedido_impreso_y_escrito",evidencias:[...ev,...(pedido.resolucion?.evidencias||[])],alternativas:[impreso.valor]}};

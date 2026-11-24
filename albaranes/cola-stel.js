@@ -283,16 +283,18 @@ function orden(doc,catalogo,opciones={}){
  // Pedido a proveedor: solo validado (uno leído y sin validar ya impide AUTO_OK).
  const pe=r.manuscritos?.pedido,pedido=pe?.estado==="OK"&&/^PAP\d{5}$/.test(canon(pe.valor))?{codigo:canon(pe.valor)}:null;
  if(pe&&pe.estado!=="OK"&&texto(pe))motivos.push("Pedido (PAP) leído y sin validar");
- // Albarán SIN PAP de un proveedor con un pedido abierto que tiene todos sus artículos (usuario, 2026-11-17: «una alerta»):
+ // Albarán SIN PAP de un proveedor con un pedido abierto que tiene sus artículos (usuario, 2026-11-17: «una alerta»):
  // nunca se asocia solo; va a revisión con el aviso y la persona decide (plan.pedidos_posibles). opciones.pedidosAbiertos:
- // [{codigo, cuenta, referencias}] (los pedidos que creó el robot, de la cola).
+ // [{codigo, cuenta, referencias}] (los pedidos que creó el robot, de la cola). Basta con la mitad de sus artículos (fallo real
+ // 2026-11-24: un albarán de un pedido se creó sin él; el pedido tenía una referencia mal escrita y exigir todos no avisaba).
  const refsAlb=(r.lineas||[]).map(l=>canon(texto(l.referencia))).filter(Boolean);
  // PAP leído (impreso o a mano) y sin validar (fallo real 2026-11-18): sus lecturas se ofrecen en la revisión («Es del pedido …»).
  const leidosSinValidar=!esPedido&&!pedido&&pe&&pe.estado!=="OK"?[...new Set([pe.valor,...(pe.resolucion?.alternativas||[])].map(x=>canon(x)).filter(x=>/^PAP\d{5}$/.test(x)))].slice(0,5):[];
+ const comunes=x=>{const del=new Set((x.referencias||[]).map(canon));return refsAlb.filter(k=>del.has(k)).length;};
  const pedidosPosibles=leidosSinValidar.length?leidosSinValidar:esPedido||pedido||(pe&&texto(pe))||!refsAlb.length?[]:
-  (opciones.pedidosAbiertos||[]).filter(x=>String(x.cuenta)===String(r.proveedor?.account_id)&&refsAlb.every(k=>(x.referencias||[]).map(canon).includes(k))).map(x=>x.codigo).slice(0,5);
+  (opciones.pedidosAbiertos||[]).filter(x=>String(x.cuenta)===String(r.proveedor?.account_id)&&comunes(x)>=Math.max(1,Math.ceil(refsAlb.length/2))).map(x=>x.codigo).slice(0,5);
  if(leidosSinValidar.length)motivos.push("Lleva el pedido "+leidosSinValidar.join(" o ")+" sin confirmar: si es ese, márcalo en la revisión («Es del pedido …»)");
- else if(pedidosPosibles.length)motivos.push("Puede ser del pedido "+pedidosPosibles.join(" o ")+" (mismo proveedor y todos sus artículos): si lo es, márcalo en la revisión");
+ else if(pedidosPosibles.length)motivos.push("Puede ser del pedido "+pedidosPosibles.join(" o ")+" (mismo proveedor y artículos del albarán en el pedido): si lo es, márcalo en la revisión");
  // Anotación a mano que no es la obra («CS XXXX 2026/1234», usuario 2026-11-16): va al título, pero el número no se lee con
  // seguridad: la escribe la persona en la revisión (el robot pone `anotacion.texto`; sin texto, nada).
  // Con un texto fijo de la anotación (opciones.anotacionTexto, privado: lo pasa la aplicación; usuario 2026-11-17: «siempre es el
