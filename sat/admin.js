@@ -133,7 +133,9 @@ async function detalle(raiz, id) {
         ${l.oficina ? `<div class="suave peq" title="${esc((l.dudas_lectura || []).join(" · "))}">📷 leída del albarán del proveedor${(l.dudas_lectura || []).length ? ` <span class="chip ambar">compárala con la foto</span>` : ""}</div>` : ""}</td>
         <td><input data-l="${i}" data-k="cantidad" inputmode="decimal" value="${esc(l.cantidad ?? "")}" style="width:72px"></td>
         <td><input data-l="${i}" data-k="precio" inputmode="decimal" value="${esc(l.precio ?? "")}" style="width:90px" class="${l.precio === null || l.precio === "" || l.coste_dudoso ? "dudoso" : ""}">
-          ${Number(l.coste) > 0 ? `<div class="suave peq" title="${esc(l.coste_origen || "")}">coste ${euros(l.coste)} + ${esc(l.margen_pct ?? margenDe(aj))} %${l.coste_dudoso ? ` <span class="chip ambar">sin comprobar</span>` : ""}</div>` : ""}</td>
+          ${Number(l.coste) > 0 ? `<div class="suave peq" title="${esc(l.coste_origen || "")}">coste ${euros(l.coste)} +
+            <input data-l="${i}" data-k="margen_pct" inputmode="decimal" value="${esc(l.margen_pct ?? margenDe(aj))}" style="width:46px;min-height:0;padding:2px 4px" aria-label="Margen %"> %
+            ${l.coste_dudoso ? ` <span class="chip ambar">sin comprobar</span>` : ""}</div>` : ""}</td>
         <td><input data-l="${i}" data-k="descuento_pct" inputmode="decimal" value="${esc(l.descuento_pct ?? 0)}" style="width:64px"></td>
         <td><input data-l="${i}" data-k="iva_pct" inputmode="decimal" value="${esc(l.iva_pct ?? "")}" style="width:64px"></td>
         <td class="num">${euros(totalLinea(l))}</td><td><button type="button" class="boton mini sec" data-quitar="${i}">✕</button></td></tr>`).join("")}
@@ -141,14 +143,23 @@ async function detalle(raiz, id) {
       <p class="num" style="text-align:right">Base ${euros(t.base)} · IVA ${euros(t.iva)} · <b>Total ${euros(t.total)}</b></p>
       ${lineasIncompletas(lineas).length ? `<div class="alerta ambar">${lineasIncompletas(lineas).length} línea(s) sin artículo de STEL, cantidad, precio o IVA.</div>` : ""}
       ${editableEco ? `<div class="fila"><button type="button" class="boton sec mini" id="bLinea">＋ Línea</button><button type="button" class="boton sec mini" id="bProponer">Proponer desde el parte</button>
-        ${lineas.some((l) => l.tipo === "MATERIAL" && l.material_id) ? `<button type="button" class="boton sec mini" id="bMargen">Precios de materiales (compra + ${esc(margenDe(aj))} %)</button>` : ""}
+        ${lineas.some((l) => l.tipo === "MATERIAL" && l.material_id) ? `<button type="button" class="boton sec mini" id="bMargen">Precios de materiales (compra + margen)</button>` : ""}
         ${d.stel_albaran_ref && d.revision ? `<button type="button" class="boton sec mini" id="bDesdeStel">Traer precios corregidos en ${esc(d.stel_albaran_ref)}</button>` : ""}
         ${fotos.some((f) => f.momento === "MATERIAL" && f.a) ? `<button type="button" class="boton sec mini" id="bLeerAlb">📷 Leer el albarán del proveedor</button>` : ""}
         <button type="button" class="boton crece" id="bGuardarEco">Guardar revisión</button></div>
-        <p class="suave peq">Materiales: coste neto con los descuentos del albarán del proveedor (o el precio de compra de STEL) más el ${esc(margenDe(aj))} %.${d.stel_albaran_ref ? ` El botón también actualiza las líneas, la forma de pago y la cuenta del albarán ${esc(d.stel_albaran_ref)}.` : ""}</p>` : ""}`;
+        <p class="suave peq">Materiales: coste neto con los descuentos del albarán del proveedor (o el precio de compra de STEL) más el margen de cada línea (se cambia en la casilla «%» de cada material; por defecto el ${esc(margenDe(aj))} % de Ajustes).${d.stel_albaran_ref ? ` El botón también actualiza las líneas, la forma de pago y la cuenta del albarán ${esc(d.stel_albaran_ref)}.` : ""}</p>` : ""}`;
     if (!editableEco) { $$("input, select, .eleccion, [data-quitar]", eco).forEach((x) => { x.disabled = true; }); return; }
     $$("[data-l]", eco).forEach((el) => el.addEventListener("change", () => {
       const l = lineas[Number(el.dataset.l)], k = el.dataset.k;
+      // Margen de UN material (usuario, 2026-11-24: «el extra a cada uno por separado»): precio = coste × (1 + margen).
+      if (k === "margen_pct") {
+        const m = Number(String(el.value).replace(",", "."));
+        if (el.value.trim() !== "" && Number.isFinite(m) && m >= 0 && m <= 500 && Number(l.coste) > 0) {
+          Object.assign(l, {margen_pct: m, margen_manual: true, precio: precioVenta(l.coste, m)});
+        }
+        pintarEco();
+        return;
+      }
       l[k] = ["cantidad", "precio", "descuento_pct", "iva_pct"].includes(k) ? (el.value.trim() === "" ? null : Number(el.value.replace(",", "."))) : el.value;
       if (k === "precio" && l.coste_dudoso) { l.coste_dudoso = false; l.coste_origen = "precio puesto por la oficina"; }
       pintarEco();

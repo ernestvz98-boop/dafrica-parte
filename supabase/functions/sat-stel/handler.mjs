@@ -164,8 +164,21 @@ export function mismaReferencia(stel, ref) {
  */
 export function materialDelProveedor(m) {
   const origen = typeof m?.origen === "object" && m.origen ? m.origen.tipo : m?.origen;
+  // Sin código en el papel (una tasa o un envase): vale si la descripción se puede usar como nombre;
+  // se le pone una referencia propia fija (`referenciaPropia`), como hace el robot de compras con los artículos sin código.
+  const sinCodigo = !String(m?.referencia ?? "").trim() && String(m?.descripcion || "").trim().length >= 3;
   return origen === "ALBARAN_PROVEEDOR" && (m.comprobado === "TECNICO" || !(m.dudas || []).length)
-    && canonRef(m.referencia).length >= 3 && String(m.descripcion || "").trim().length >= 2;
+    && (canonRef(m.referencia).length >= 3 || sinCodigo) && String(m.descripcion || "").trim().length >= 2;
+}
+/**
+ * Referencia propia FIJA de un material sin código en el papel: «SR-» + 8 cifras hexadecimales de la huella del proveedor y la
+ * descripción (la misma cada vez, para encontrarlo después y no duplicarlo). Antes de crearlo se busca por el nombre exacto.
+ */
+export async function referenciaPropia(m) {
+  const o = typeof m?.origen === "object" && m.origen ? m.origen : {};
+  const texto = `${canonRef(o.proveedor || "")}|${canonRef(m?.descripcion || "")}`;
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto)));
+  return "SR-" + [...h.slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
 }
 
 /**
@@ -334,7 +347,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       if (m.stel_item_id || conRevision.has(m.id) || !materialDelProveedor(m)) continue;
       const r = await articuloParaMaterial(m, p, ctx.ajustes);
       resueltos.set(m.id, r.id);
-      if (r.creado) altas.push({material_id: m.id, referencia: String(m.referencia).trim(), nombre: String(m.descripcion).trim().slice(0, 250), stel_id: r.id,
+      if (r.creado) altas.push({material_id: m.id, referencia: String(m.referencia ?? "").trim() || await referenciaPropia(m), nombre: String(m.descripcion).trim().slice(0, 250), stel_id: r.id,
         ...(Number(m.precio_neto) > 0 ? {precio: precioVenta(m.precio_neto, margenDe(ctx.ajustes))} : {})});
     }
     const costes = await costesDeStel(c.materiales, p.revision, resueltos, new Set(altas.map((x) => x.material_id)));
@@ -418,7 +431,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
    * (regla del robot, usuario 2026-10-30). Reintentar no duplica: la siguiente vez lo encuentra por la referencia.
    */
   async function articuloParaMaterial(m, p, ajustes) {
-    const ref = String(m.referencia).trim(), nombre = String(m.descripcion).trim().slice(0, 250);
+    const ref = String(m.referencia ?? "").trim() || await referenciaPropia(m), nombre = String(m.descripcion).trim().slice(0, 250);
     const porRef = lista(await stel("GET", "products", {query: {reference: ref, limit: 20}})).filter((x) => mismaReferencia(x.reference, ref));
     if (porRef.length > 1) throw new Bloqueo(`La referencia ${ref} está ${porRef.length} veces en STEL: elige el artículo en la revisión`);
     if (porRef.length === 1) return {id: idDe(porRef), creado: false};
@@ -706,7 +719,9 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
           if (l.tipo !== "MATERIAL" || !l.material_id || !mats.has(l.material_id)) return l;
           const c = costeDe(mats.get(l.material_id), costes);
           if (!c) { sinCoste.push(l.descripcion); return l; }
-          return {...l, coste: c.coste, coste_origen: c.origen, coste_dudoso: Boolean(c.dudoso), margen_pct: margen, precio: precioVenta(c.coste, margen), descuento_pct: 0};
+          // Margen puesto a mano en esa línea por la oficina (usuario, 2026-11-24): se respeta; si no, el de Ajustes.
+          const m = l.margen_manual && Number(l.margen_pct) >= 0 ? Number(l.margen_pct) : margen;
+          return {...l, coste: c.coste, coste_origen: c.origen, coste_dudoso: Boolean(c.dudoso), margen_pct: m, precio: precioVenta(c.coste, m), descuento_pct: 0};
         });
         await rpc("sat_revision_guardar", {p_id: parteId, p_lineas: revision, p_nota: det.revision_nota ?? null}, {usuario: true});
         recalculado = {margen, materiales: revision.filter((l) => l.coste_origen).map((l) => ({descripcion: l.descripcion, coste: l.coste, origen: l.coste_origen, precio: l.precio, dudoso: Boolean(l.coste_dudoso)})),

@@ -3,6 +3,20 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-24 · DAFRICA SAT 0.3.16: margen por material y materiales sin código (sat-stel v11)
+
+- Fallo real: el albarán de trabajo de un parte quedó PARADO porque una línea del albarán del proveedor sin código (una tasa)
+  no se podía dar de alta en STEL. Ahora `materialDelProveedor` admite una línea sin código si tiene descripción, y
+  `articuloParaMaterial` le pone una referencia propia fija «SR-» + huella de proveedor y descripción (`referenciaPropia`, la
+  misma regla que el robot de compras): se busca por esa referencia, después por el nombre exacto, y solo si no está se crea.
+- Usuario: «aplicarle a los materiales un extra a cada uno por separado, en la oficina». La revisión muestra bajo el precio
+  de cada material con coste la casilla «coste … + __ %»; cambiarla recalcula ese precio y marca la línea (`margen_manual`);
+  «Precios de materiales (compra + margen)» (`recalcular_materiales`) respeta el margen de esa línea y usa el de Ajustes en
+  las demás.
+- Verificación: `npm run test:sat` (prueba nueva de punta a punta en el emulador: tasa sin código → SR- dado de alta una vez
+  y reutilizado al reintentar; margen del 50 % en una línea respetado al recalcular) y `npm test` completo.
+- Producción: `sat-stel` v11 (copia de la v10 en `respaldo-v10-handler.mjs`) y la web, con el permiso total del usuario para SAT.
+
 ## 2026-11-23 · Lector unificado con la aplicación de administración (DAFRICA SAT 0.3.15)
 
 - La web (DAFRICA Control y la app SAT) y la aplicación de escritorio DAFRICA Administración usaban dos copias de `albaranes/`

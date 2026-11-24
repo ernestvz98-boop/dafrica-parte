@@ -140,13 +140,21 @@ test("precios del albarán del proveedor: PRECIO si se leyó con seguridad; neto
 });
 
 test("sat-stel: solo da de alta lo leído del albarán del proveedor y comprobado; referencias con el prefijo del proveedor", async () => {
-  const {materialDelProveedor, mismaReferencia} = await import("../supabase/functions/sat-stel/handler.mjs");
+  const {materialDelProveedor, mismaReferencia, referenciaPropia} = await import("../supabase/functions/sat-stel/handler.mjs");
   const o = {tipo: "ALBARAN_PROVEEDOR"};
+  // Sin código en el papel (una tasa): vale con descripción, con referencia propia fija «SR-» (misma entrada, misma referencia).
+  const tasa = {origen: {...o, proveedor: "Proveedor Ficticio"}, referencia: "", descripcion: "TASA FICTICIA", dudas: []};
+  assert.ok(materialDelProveedor(tasa));
+  const r1 = await referenciaPropia(tasa), r2 = await referenciaPropia({...tasa, descripcion: "tasa  ficticia"});
+  assert.match(r1, /^SR-[0-9A-F]{8}$/);
+  assert.equal(r1, r2, "la misma descripción (sin importar mayúsculas ni espacios) da la misma referencia");
+  assert.notEqual(r1, await referenciaPropia({...tasa, descripcion: "OTRA TASA"}));
+  assert.ok(!materialDelProveedor({...tasa, descripcion: "TA"}), "sin descripción útil, no");
   assert.ok(materialDelProveedor({origen: o, referencia: "9990000002", descripcion: "TE FICTICIA", dudas: []}));
   assert.ok(materialDelProveedor({origen: o, referencia: "9990000002", descripcion: "TE FICTICIA", dudas: ["x"], comprobado: "TECNICO"}));
   assert.ok(!materialDelProveedor({origen: o, referencia: "9990000002", descripcion: "TE FICTICIA", dudas: ["x"]}), "dudoso sin comprobar, no");
   assert.ok(!materialDelProveedor({origen: "DICTADO", referencia: "TER 01", descripcion: "Termostato", dudas: []}), "lo dictado, no");
-  assert.ok(!materialDelProveedor({origen: o, referencia: "", descripcion: "Sin referencia", dudas: []}), "sin referencia, no");
+  assert.ok(!materialDelProveedor({origen: o, referencia: "12", descripcion: "Código cortado", dudas: []}), "código de menos de 3, no");
   assert.ok(mismaReferencia("H8953- 1255087035", "1255087035"));
   assert.ok(mismaReferencia("1255087035", "1255087035"));
   assert.ok(!mismaReferencia("H89531255087035", "1255087035"), "sin separador no se parte");

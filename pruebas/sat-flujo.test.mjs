@@ -529,3 +529,52 @@ test("SAT: el técnico descarta un parte sin enviar (duplicado); no el de otro n
   await rpc(tec, "sat_parte_guardar", {p_parte: {id: p2, aviso_id: avisoOf.id, contenido: {...contenido, cliente: {id: avisoOf.cliente_id, nombre: avisoOf.cliente_texto}}}});
   assert.equal((await rpc(tec, "sat_parte_descartar", {p_id: p2})).aviso_estado, "ASIGNADO");
 });
+
+test("SAT: material del proveedor SIN código (una tasa) → referencia propia SR- y se da de alta una vez; margen por línea", {timeout: 120000}, async (t) => {
+  const e = await crearEmulador({demo: true});
+  t.after(() => e.cerrar());
+  const tec = await e.entrar("tecnico@prueba.local"), adm = await e.entrar("admin@prueba.local");
+  const rpc = async (tok, fn, args) => {
+    const r = await fetch(`${e.origen}/rest/v1/rpc/${fn}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json"}, body: JSON.stringify(args)});
+    const x = await r.text(); assert.equal(r.status, 200, fn + ": " + x); return x ? JSON.parse(x) : null;
+  };
+  const fn = async (tok, cuerpo) => (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json", Origin: e.origen}, body: JSON.stringify(cuerpo)})).json();
+  const subir = (tok, ruta, b, tipo) => fetch(`${e.origen}/storage/v1/object/sat-archivos/${ruta}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": tipo}, body: b});
+  const aviso = (await rpc(tec, "sat_avisos_listar", {}))[0];
+  const cli = (await rpc(tec, "sat_catalogo", {})).clientes.find((c) => c.id === aviso.cliente_id);
+  const origen = {tipo: "ALBARAN_PROVEEDOR", proveedor: "Proveedor Ficticio", numero: "A-9", linea: 2};
+  const contenido = {tipo_visita: "REPARACION_FINALIZADA", fecha: "2026-11-24", hora_inicio: "08:00", hora_fin: "09:00", modo: "RAPIDO",
+    cliente: {id: cli.id, stel_id: cli.stel_id, nombre: cli.nombre}, direccion: {texto: "x"}, trabajos: "Recarga", fotos: [], tiempo_trabajo_min: 60, desplazamiento_min: 0,
+    materiales: [{id: "t1", descripcion: "TASA FICTICIA", referencia: "", cantidad: 2, unidad: "ud", dudas: [], comprobado: "TECNICO", origen, precio_papel: 3, precio_neto: 3}]};
+  const parteId = uuid(), fid = uuid(), pid = uuid(), pdf = Buffer.from("%PDF parte");
+  await rpc(tec, "sat_parte_guardar", {p_parte: {id: parteId, aviso_id: aviso.id, contenido}});
+  await subir(tec, `${parteId}/f-${fid}.png`, Buffer.from("png"), "image/png");
+  await rpc(tec, "sat_archivo_registrar", {p: {id: fid, parte_id: parteId, tipo: "FIRMA", storage_path: `${parteId}/f-${fid}.png`}});
+  const b = {parte_id: parteId, texto_alcance: "A", firmado_en: new Date().toISOString(), contenido};
+  await rpc(tec, "sat_firma_registrar", {p: {...b, id: uuid(), rol: "TECNICO", imagen_path: `${parteId}/f-${fid}.png`}});
+  await rpc(tec, "sat_firma_registrar", {p: {...b, id: uuid(), rol: "CLIENTE", ausente_motivo: "No había nadie responsable en el local"}});
+  await subir(tec, `${parteId}/p-${pid}.pdf`, pdf, "application/pdf");
+  await rpc(tec, "sat_archivo_registrar", {p: {id: pid, parte_id: parteId, tipo: "PDF_PARTE", storage_path: `${parteId}/p-${pid}.pdf`, sha256: sha(pdf)}});
+  await rpc(tec, "sat_parte_enviar", {p_id: parteId, p_pdf_path: `${parteId}/p-${pid}.pdf`, p_pdf_sha256: sha(pdf)});
+  let r = await fn(tec, {accion: "procesar", parte_id: parteId});
+  const alb = r.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO");
+  assert.equal(alb.estado, "OK", JSON.stringify(r));
+  const altas = e.stel.datos.products.filter((x) => x.name === "TASA FICTICIA");
+  assert.equal(altas.length, 1);
+  assert.match(altas[0].reference, /^SR-[0-9A-F]{8}$/);
+  assert.deepEqual([altas[0]["purchase-price"], altas[0]["sales-price"]], [3, 3.9]);
+  assert.deepEqual(e.stel.datos.workDeliveryNotes.at(-1).lines[0]["item-base-price"], 3.9, "coste + 30 %");
+  // Otra vez la misma tasa: se encuentra por su referencia propia, no se duplica.
+  await rpc(adm, "sat_stel_reintentar", {p_op: (await rpc(adm, "sat_parte_detalle", {p_id: parteId})).operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO").id});
+  await fn(adm, {accion: "procesar", parte_id: parteId});
+  assert.equal(e.stel.datos.products.filter((x) => x.name === "TASA FICTICIA").length, 1);
+  // La oficina pone un margen propio a esa línea (50 %): «Precios de materiales» lo respeta.
+  const rev = (await rpc(adm, "sat_parte_detalle", {p_id: parteId})).revision || [];
+  const lineas = [{tipo: "MATERIAL", material_id: "t1", stel_item_id: altas[0].id, descripcion: "TASA FICTICIA", cantidad: 2, precio: 4.5, descuento_pct: 0, iva_pct: 21,
+    coste: 3, margen_pct: 50, margen_manual: true}, ...rev.filter((l) => l.material_id !== "t1")];
+  await rpc(adm, "sat_revision_guardar", {p_id: parteId, p_lineas: lineas, p_nota: null});
+  const rc = await fn(adm, {accion: "recalcular_materiales", parte_id: parteId});
+  assert.equal(rc.ok, true, JSON.stringify(rc));
+  assert.deepEqual(rc.recalculado.materiales.map((m) => m.precio), [4.5], "margen de la línea (50 %), no el de Ajustes");
+  assert.equal(e.stel.datos.workDeliveryNotes.at(-1).lines[0]["item-base-price"], 4.5);
+});
