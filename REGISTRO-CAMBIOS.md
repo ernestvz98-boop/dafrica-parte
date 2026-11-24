@@ -3,6 +3,15 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-24 · Lector: facturas de servicios y dos lecturas fiables distintas (lo mismo que DAFRICA Control y la aplicación)
+
+- `albaranes/extraer.js` y `escaneado.js` vuelven a ser los mismos que en las otras dos copias: tabla de servicios con «CARGOS» (cada
+  concepto con cantidad 1 y precio = importe, confirmados con los totales impresos; suplidos sin IVA), totales con «GASTOS»,
+  «HONORARIOS», «%», «A INGRESAR» y relectura sin rayas del cuadro del pie; y `lecturasFiablesDistintas` (de la sesión de SAT, ya en
+  origin/main: un código o descripción que otra lectura fiable lee distinto queda en revisión).
+- `pruebas/factura-servicios.test.js` (4) y `pruebas/lecturas-distintas.test.js`; `index.html` con versión nueva de los dos ficheros.
+  Nada publicado.
+
 ## 2026-11-24 · Lector: tablas en casillas con rayas (lo mismo que DAFRICA Control y la aplicación)
 
 - `albaranes/ocr.js`, `escaneado.js`, `motor-navegador.js` y `extraer.js` vuelven a ser los MISMOS que en DAFRICA Control y en la

@@ -33,7 +33,8 @@ function puntuar(r){
  if(r.fecha?.estado==="OK")s+=2;
  // Una fila repartida por posición estimada vale menos que la misma fila con celdas separadas.
  // Una línea que solo cuadra tras reparar la lectura (separador, primera cifra perdida) vale menos que la que cuadra tal cual.
- for(const l of r.lineas||[])s+=(l.cuadre?.estado==="VERIFICADO"?(l.cuadre.reparado?2.5:3):l.estado==="OK"?1:-1)-(l.columnas_estimadas?0.5:0);
+ // Un concepto de servicios con su importe leído (se confirma después con los totales) es una fila real: no resta.
+ for(const l of r.lineas||[])s+=(l.cuadre?.estado==="VERIFICADO"?(l.cuadre.reparado?2.5:3):l.estado==="OK"?1:l.servicio&&l.importe?.valor!=null?0.5:-1)-(l.columnas_estimadas?0.5:0);
  for(const v of r.validaciones||[])if(v.estado==="FALLO")s-=2;
  if(r.totales?.validacion?.estado==="OK")s+=2;
  return s;
@@ -897,11 +898,16 @@ async function extraerEscaneado(paginas,opciones={}){
  // casilla bajo su título y se extrae de nuevo con los títulos y las cifras releídas.
  if(geo&&geo.y_cabecera!=null&&!lecturas.some(r=>r.totales?.validacion?.estado==="OK")){
   const p=paginas.find(x=>x.numero===geo.pagina),k=p.dpi/72;
-  const titulo=t=>/BASE|TOTAL|I\.?V\.?A|IMPORTE|SUMA/.test(String(t).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase());
+  // También «GASTOS» y «HONORARIOS» (gestoría, 2026-11-24: «GASTOS | HONORARIOS | % | I.V.A. | TOTAL FACTURA», cifras en casillas).
+  const titulo=t=>/BASE|TOTAL|I\.?V\.?A|IMPORTE|SUMA|GASTOS|HONORARIOS/.test(String(t).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase());
   let fila=null;
+  // Debajo del final de la tabla o, si la tabla no tiene pie reconocible (sigue hasta el final de la página), debajo de su última línea
+  // leída (gestoría, 2026-11-24: el cuadro de totales va al pie sin ningún rótulo de fin de tabla).
+  // Solo cuentan las líneas con alguna cifra (en una lectura, la fila de títulos del cuadro caía en la tabla como línea vacía).
+  const ultima=Math.max(-Infinity,...principal.lineas.filter(l=>l.pagina===geo.pagina&&l.y!=null&&(l.importe?.valor!=null||l.cantidad?.valor!=null)).map(l=>l.y));
   for(const r of lecturas)for(const pb of r._pags||[]){
    if(fila||pb.numero!==p.numero)continue;
-   fila=pb.lineas.find(l=>l.y>=geo.y_fin-1&&l.celdas.filter(c=>titulo(c.texto)).length>=3&&!l.celdas.some(c=>/\d[.,]\d/.test(c.texto)))||null;
+   fila=pb.lineas.find(l=>(l.y>=geo.y_fin-1||(l.y>geo.y_cabecera+2*l.alto&&l.y>ultima+2*l.alto))&&l.celdas.filter(c=>titulo(c.texto)).length>=3&&!l.celdas.some(c=>/\d[.,]\d/.test(c.texto)))||null;
   }
   if(fila){
    const celdas=fila.celdas.filter(c=>!/^[|¦\[\]]+$/.test(c.texto));
@@ -928,6 +934,21 @@ async function extraerEscaneado(paginas,opciones={}){
     for(const otro of ["fecha","numero","proveedor"])r[otro]=null;
     Object.defineProperty(r,"_pags",{value:[pag],enumerable:false});
     lecturas.push(r);
+   }
+   // Tampoco así (gestoría, 2026-11-24: de «GASTOS | HONORARIOS | % | I.V.A. | TOTAL FACTURA» ninguna lectura veía «%» ni «I.V.A.» y las
+   // casillas solo daban el total): la franja del cuadro, de lado a lado, sin rayas; como otra lectura del pie.
+   if(!lecturas.some(r=>r.totales?.validacion?.estado==="OK"))for(const psm of [6,4]){
+    // Hasta «A INGRESAR» debajo (el total impreso dos veces: si uno se lee mal, vale el que cuadra).
+    const y0=Math.max(0,Math.floor((fila.y-2*fila.alto)*k)),y1=Math.min(p.altoPx,Math.ceil((fila.y+10*fila.alto)*k));
+    if(y1-y0<10)break;
+    const ws=await p.ocr({psm,region:[0,y0,p.anchoPx,y1-y0],tratamiento:"sinRayas"});
+    if(!ws?.length)continue;
+    const pag=paginaDesdePalabras(ws.map(w=>({...w,y0:w.y0+y0,y1:w.y1+y0})),{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi});
+    const r=extraerDePaginas([pag],opciones);r._lectura="pie_sin_rayas_psm"+psm;r._solo_cabecera=true;
+    for(const otro of ["fecha","numero","proveedor"])r[otro]=null;
+    Object.defineProperty(r,"_pags",{value:[pag],enumerable:false});
+    lecturas.push(r);
+    if(r.totales?.validacion?.estado==="OK")break;
    }
   }
  }

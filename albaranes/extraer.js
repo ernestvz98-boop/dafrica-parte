@@ -44,7 +44,8 @@ const COLUMNAS=[
  ["precio",/^(PRECIO|PRECIO ?UNIDAD|PRECIO ?UNITARIO|PRECIO ?UNIT|P UNIT|P UNITARIO|PUNITARIO|PUNIT|PVP|PRECIO ?UD|PRECIO ?UNID|P UNID|PRECIO DIA|PRECIO DIARIO|PRECIO ALQUILER|PRECIO NETO|PRECIO NETO U|PRECIO NETO UD|PRECIO NETO UNIT|PRECIO NETO UNITARIO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000|IMP ?UNI|IMP ?UNIT|IMP ?UNITARIO|IMPORTE ?UNITARIO|IMPORTE ?UNIDAD|IMP ?UNIDAD)$/],
  ["subtotal",/^(SUBTOTAL|BRUTO|IMPORTE BRUTO)$/],
  ["descuento",/^(DTO|DTOS|DESC|DESCUENTO|DTO %|% DTO|%DTO|DTO%|% DESC|DESC %|DTO ?[123]|DESC ?[123]|% ?DTO ?[123]|DTO ?[123] ?%)$/],
- ["importe",/^(IMPORTE|IMPORTE NETO|TOTAL|NETO|TOTAL LINEA|IMPORTE TOTAL|IMPORTE EUR)$/]
+ // «CARGOS»: importe de cada concepto en una factura de servicios (gestoría, 2026-11-24: «FECHA | DESCRIPCION | CARGOS | ABONOS»).
+ ["importe",/^(IMPORTE|IMPORTE NETO|TOTAL|NETO|TOTAL LINEA|IMPORTE TOTAL|IMPORTE EUR|CARGOS)$/]
 ];
 // Títulos de una palabra que el OCR puede leer con una letra cambiada («Descrinción»).
 const TITULOS_OCR={DESCRIPCION:"descripcion",CONCEPTO:"descripcion",DENOMINACION:"descripcion",CANTIDAD:"cantidad",
@@ -143,8 +144,11 @@ function evaluarCabecera(celdas){
   }
  }
  const ajenasFinal=columnas.filter(c=>c.campo==="otra").length;
- const valida=finales.has("cantidad")&&(finales.has("descripcion")||finales.has("referencia"))&&finales.size>=3&&ajenasFinal<=3;
- return {valida,columnas:columnas.sort((a,b)=>a.x0-b.x0),ajenas:ajenasFinal};
+ // Factura de servicios (gestoría, 2026-11-24): conceptos con su importe en «CARGOS», sin cantidad ni precio. Vale como tabla; cada
+ // concepto lleva cantidad 1 y precio = importe (usuario: «cantidad 1»), confirmados solo con los totales impresos (verificarServicios).
+ const servicios=!finales.has("cantidad")&&!finales.has("precio")&&finales.has("descripcion")&&columnas.some(c=>c.campo==="importe"&&c.clave==="CARGOS")&&ajenasFinal<=3;
+ const valida=(finales.has("cantidad")&&(finales.has("descripcion")||finales.has("referencia"))&&finales.size>=3&&ajenasFinal<=3)||servicios;
+ return {valida,...(servicios?{servicios:true}:{}),columnas:columnas.sort((a,b)=>a.x0-b.x0),ajenas:ajenasFinal};
 }
 function buscarCabeceraTabla(lineas,desde=0){
  for(let i=desde;i<lineas.length;i++){
@@ -944,7 +948,7 @@ function leerTablaPagina(pagina,perfil=null){
  }
  const precio=cols.find(c=>c.campo==="precio");
  const precioPor=precio&&/1000|MIL/.test(precio.clave)?1000:precio&&/100/.test(precio.clave)?100:1;
- return {cabecera:cab.columnas.map(c=>c.campo),filas,ignoradas,pie,indiceCabecera:cab.indice,precioPor,dudosasTrasFin,cabeceraPerfil:!!cab.de_perfil};
+ return {cabecera:cab.columnas.map(c=>c.campo),filas,ignoradas,pie,indiceCabecera:cab.indice,precioPor,dudosasTrasFin,cabeceraPerfil:!!cab.de_perfil,...(cab.servicios?{servicios:true}:{})};
 }
 
 function valorPie(lineas,re,opcionesNumero){
@@ -970,10 +974,13 @@ function valorPie(lineas,re,opcionesNumero){
  * los valores se devuelven en REVISAR; con varias combinaciones distintas, AMBIGUO.
  */
 const ETIQ_TOTALES={
- base:/^(BASE IMPONIBLE|BASE|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES)\b/,
- pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA)\b/,
- cuota:/^(CUOTA ?[IL1]VA|TOTAL ?[IL1]VA|IMPORTE ?I ?V ?A|I V A|IVA)\b/,
- total:/^(TOTAL A PAGAR|TOTAL ALBARAN|IMPORTE TOTAL|TOTAL EUR|TOTAL)\b/
+ base:/^(BASE IMPONIBLE|BASE|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES)\b|^HONORARIOS$/,
+ pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA)\b|^%$/,
+ cuota:/^(CUOTA ?[IL1]VA|TOTAL ?[IL1]VA|IMPORTE ?I ?V ?A|I V A|IVA)\b|^[L1] ?V ?A$/,
+ // Gastos suplidos de una gestoría (2026-11-24: «GASTOS | HONORARIOS | % | I.V.A. | TOTAL FACTURA»): fuera de la base, sin IVA.
+ exento:/^(GASTOS|SUPLIDOS|GASTOS SUPLIDOS|TOTAL SUPLIDOS)$/,
+ // «A INGRESAR» (gestoría, 2026-11-24): el total otra vez, en su casilla; solo se toma si cuadra con base, IVA y suplidos.
+ total:/^(TOTAL A PAGAR|TOTAL ALBARAN|IMPORTE TOTAL|TOTAL EUR|TOTAL|A INGRESAR)\b/
 };
 const EXCLUIR_TOTAL=/^TOTAL ?(L ?[IÍ1L]? ?N ?E ?A ?S|[IL1] ?[IÍ1L]? ?N ?E ?A ?S|[IL1]VA|RE|NETO|BRUTO)\b/;
 function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={}){
@@ -1020,10 +1027,12 @@ function leerTotales(lineas,opcionesNumero){
  const res={base_imponible:vacio(),iva_porcentaje:vacio(),cuota_iva:vacio(),total:vacio(),validacion:null};
  const B=candidatos(lineas,ETIQ_TOTALES.base,opcionesNumero),P=candidatos(lineas,ETIQ_TOTALES.pct,opcionesNumero,{porcentaje:true});
  const C=candidatos(lineas,ETIQ_TOTALES.cuota,opcionesNumero),T=candidatos(lineas,ETIQ_TOTALES.total,opcionesNumero,{excluir:EXCLUIR_TOTAL});
+ const E=candidatos(lineas,ETIQ_TOTALES.exento,opcionesNumero);
  const unicos=a=>[...new Map(a.map(x=>[x.valor,x])).values()];
  const combos=[];
- for(const b of unicos(B))for(const c of unicos(C))for(const t of unicos(T))
-  if(Math.abs(b.valor+c.valor-t.valor)<=0.021&&t.valor>0)combos.push({b,c,t});
+ // Con gastos suplidos impresos: base + cuota + suplidos = total (la cuota solo de la base).
+ for(const e of [null,...unicos(E)])for(const b of unicos(B))for(const c of unicos(C))for(const t of unicos(T))
+  if(Math.abs(b.valor+c.valor+(e?.valor||0)-t.valor)<=0.021&&t.valor>0)combos.push({b,c,t,...(e?{e}:{})});
  const conPct=combos.flatMap(x=>unicos(P).filter(p=>Math.abs(x.b.valor*p.valor/100-x.c.valor)<=0.021).map(p=>({...x,p})));
  const elegidos=conPct.length?conPct:combos;
  // Base y cuota se imprimen a veces con 4 y con 2 decimales (48,0000 y 48,00): al céntimo
@@ -1031,7 +1040,7 @@ function leerTotales(lineas,opcionesNumero){
  const cent=v=>Math.round(v*100);
  const decs=x=>[x.b,x.c].reduce((n,y)=>n+((String(y.literal).match(/,(\d+)/)||[,""])[1].length>2?1:0),0);
  const grupos=new Map();
- for(const x of elegidos){const k=[cent(x.b.valor),cent(x.c.valor),cent(x.t.valor)].join("|");const y=grupos.get(k);if(!y||decs(x)<decs(y))grupos.set(k,x);}
+ for(const x of elegidos){const k=[cent(x.b.valor),cent(x.c.valor),cent(x.t.valor),x.e?cent(x.e.valor):""].join("|");const y=grupos.get(k);if(!y||decs(x)<decs(y))grupos.set(k,x);}
  const distintos=[...grupos.values()];
  const marcar=(x,estado,motivo)=>({...x,estado,motivos:motivo?[motivo]:[]});
  if(distintos.length===1){
@@ -1039,7 +1048,8 @@ function leerTotales(lineas,opcionesNumero){
   res.base_imponible=marcar(x.b,"VERIFICADO");res.cuota_iva=marcar(x.c,"VERIFICADO");res.total=marcar(x.t,"VERIFICADO");
   if(x.p)res.iva_porcentaje=marcar(x.p,"VERIFICADO");
   else if(unicos(P).length===1)res.iva_porcentaje=marcar(unicos(P)[0],"OK");
-  res.validacion={estado:"OK",detalle:"Base "+x.b.literal+" + IVA "+x.c.literal+" = total "+x.t.literal+(x.p?" (IVA "+x.p.valor+" %)":"")};
+  if(x.e)res.exento=marcar(x.e,"VERIFICADO");
+  res.validacion={estado:"OK",detalle:"Base "+x.b.literal+" + IVA "+x.c.literal+(x.e?" + suplidos "+x.e.literal:"")+" = total "+x.t.literal+(x.p?" (IVA "+x.p.valor+" %)":"")};
   return res;
  }
  if(distintos.length>1){
@@ -1282,6 +1292,47 @@ function precioAlFinalDeLaDescripcion(f,celdas,opcionesNumero,precioPor){
  f.descripcion={...f.descripcion,literal:m[1].trim(),valor:m[1].trim(),estado:"REVISAR",
   motivos:[...(f.descripcion.motivos||[]),"Descripción leída junto con la cifra del precio (columna sin título): se revisa el texto"],
   notas:[...(f.descripcion.notas||[]),"Precio «"+m[2]+"» separado del final de la descripción"]};
+}
+/*
+ * Concepto de una factura de servicios (gestoría, 2026-11-24; usuario: «cantidad 1»): sin cantidad ni precio impresos, cantidad 1 y precio
+ * = su importe. No son lecturas: quedan en revisión hasta que los conceptos cuadran con los totales impresos (verificarServicios).
+ */
+function conceptoDeServicio(f){
+ if(f.cantidad.estado!=="VACIO"||f.precio.estado!=="VACIO"||!["OK","VERIFICADO"].includes(f.importe.estado)||!(f.importe.valor>0))return;
+ const nota="Concepto sin cantidad (factura de servicios): cantidad 1 y precio = importe";
+ f.cantidad={literal:"",valor:1,estado:"REVISAR",motivos:["Sin cantidad impresa: 1 (se confirma con los totales)"],notas:[nota],implicita:true};
+ f.precio={literal:f.importe.literal,valor:f.importe.valor,estado:"REVISAR",motivos:["Precio = importe del concepto (se confirma con los totales)"],notas:[nota],
+  por:1,caja:f.importe.caja,conf_ocr:f.importe.conf_ocr};
+ f.servicio=true;
+ f.cuadre={estado:"NO_APLICA",detalle:"concepto de servicios: se confirma con los totales impresos"};
+ f.motivos=f.motivos.filter(m=>!/^(Cantidad|Cuadre incompleto|precio)/i.test(m));
+ f.motivos.push("Concepto de servicios: se confirma con los totales impresos");
+ f.estado="REVISAR";
+}
+/*
+ * Conceptos de servicios contra los totales impresos (con sus etiquetas, verificados entre sí): los suplidos («SUPLIDOS …») suman los
+ * gastos suplidos y los demás la base imponible. Si cuadran los dos, cantidad, precio e importe de cada concepto quedan verificados y
+ * cada uno con su IVA: 0 los suplidos, el % impreso los demás. Si no, siguen en revisión. Todas las líneas han de ser conceptos.
+ */
+function verificarServicios(salida){
+ const conceptos=salida.lineas.filter(l=>l.servicio);
+ if(!conceptos.length||conceptos.length!==salida.lineas.length)return;
+ const T=salida.totales||{},ok=c=>c?.estado==="VERIFICADO"&&c.valor!=null;
+ if(!ok(T.base_imponible)||!ok(T.total))return;
+ const suplido=l=>/^SUPLIDOS?\b/.test(clave(l.descripcion?.valor||""));
+ const suma=a=>Math.round(a.reduce((n,l)=>n+(Number(l.importe.valor)||0),0)*100)/100;
+ const sup=conceptos.filter(suplido),resto=conceptos.filter(l=>!suplido(l));
+ if(sup.length&&!ok(T.exento))return;
+ if(Math.abs(suma(sup)-(sup.length?T.exento.valor:0))>0.011||Math.abs(suma(resto)-T.base_imponible.valor)>0.011)return;
+ const pct=ok(T.iva_porcentaje)?T.iva_porcentaje.valor:null;
+ for(const l of conceptos){
+  const s=suplido(l),nota=s?"Suplido: suman los gastos suplidos impresos ("+T.exento.literal+"), sin IVA":"Suman la base imponible impresa ("+T.base_imponible.literal+")";
+  for(const k of ["cantidad","precio","importe"])l[k]={...l[k],estado:"VERIFICADO",motivos:[],notas:[...(l[k].notas||[]).filter(n=>n!==nota),nota]};
+  l.iva={valor:s?0:pct,estado:s||pct!=null?"VERIFICADO":"VACIO",motivos:[],notas:[nota]};
+  l.cuadre={estado:"VERIFICADO",detalle:"concepto de servicios: "+nota};
+  l.motivos=l.motivos.filter(m=>!/^Concepto de servicios/.test(m));
+  l.estado=l.motivos.length?"REVISAR":"OK";
+ }
 }
 function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  const c=cruda.celdas;
@@ -1677,6 +1728,7 @@ function extraerDePaginas(paginas,opciones={}){
  const precioPor=perfil?.precio_por||tablas.map(x=>x.t?.precioPor).find(Boolean)||1;
  const noArticulo=(perfil?.anotaciones_no_articulo||["RETIRADO POR","RECOGIDO POR","PEDIDO POR"]).map(t=>N().canon(t));
  let n=0;
+ const servicios=tablas.some(x=>x.t?.servicios);
  for(const cruda of crudas){
   const texto=N().canon((cruda.celdas.referencia?.texto||"")+(cruda.celdas.descripcion?.texto||""));
   const sinPrecio=!cruda.celdas.precio&&!cruda.celdas.importe;
@@ -1685,6 +1737,12 @@ function extraerDePaginas(paginas,opciones={}){
    continue;
   }
   const fila=construirFila(cruda,++n,opcionesNumero,perfil,precioPor);
+  // Factura de servicios: una fila sin cantidad ni importe en cifras (los títulos del cuadro de totales leídos como fila) no es un concepto.
+  if(servicios&&fila.cantidad.estado==="VACIO"&&fila.importe.valor==null){
+   salida.lineas_ignoradas.push({pagina:cruda.pagina,y:cruda.y,texto:Object.values(cruda.celdas).map(c=>c.texto).join(" "),motivo:"Fila sin importe en una factura de servicios"});
+   n--;continue;
+  }
+  if(servicios)conceptoDeServicio(fila);
   if(salida.tipo_pdf==="ESCANEADO_OCR"&&fila.descripcion.valor){
    const v=restituirGlifos(fila.descripcion.valor,perfil);
    if(v!==fila.descripcion.valor){fila.descripcion={...fila.descripcion,valor:v,notas:[...(fila.descripcion.notas||[]),"Símbolo restituido según el formato del proveedor (el OCR no lo reconoce)"]};}
@@ -1812,6 +1870,7 @@ function separadorDelNumero(numero,perfil){
 
 /* Validaciones de documento, confianza y estado. Se puede repetir tras combinar lecturas. */
 function finalizar(salida){
+ verificarServicios(salida);
  const ctx=salida._ctx,incidencias=[...ctx.incidenciasBase];
  // Formato de número del proveedor, también tras combinar lecturas OCR (prueba real 2026-10-28: «0.01»,
  // la casilla del descuento junto al título «ALBARÁN» llegó a número aceptado desde otra lectura).
