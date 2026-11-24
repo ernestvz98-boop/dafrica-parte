@@ -230,7 +230,8 @@ function columnaDe(celda,cols){
 const RE_NUMERO=/^(N[ºO°*?]?\s?(DE\s)?ALBARAN|NUM(ERO)?\s(DE\s)?ALBARAN|ALBARAN(\s(DE\s)?(ENTREGA|VENTA|SALIDA))?(\sN[ºO°]?)?|N[ºO°]\s?DOC(UMENTO)?|NUM(ERO)?\sDOC(UMENTO)?|DOCUMENTO)(\b|$)/;
 const EXCLUIR_NUMERO=/CLIENTE|PEDIDO|PROVEEDOR|TELEF|FAX|PAGINA|OBRA|CIF|NIF|FACTURA|PRESUPUESTO|CUENTA|IBAN/;
 const RE_FECHA=/^(FECHA(\s(ALBARAN|DOCUMENTO|EMISION|DE\sEMISION|EXPEDICION|DEL\sALBARAN))?|F\sEMISION)(\b|$)/;
-const EXCLUIR_FECHA=/ENTREGA|VENCIMIENTO|PEDIDO|NACIMIENTO|CADUCIDAD|PREVISTA|SERVICIO|PAGO/;
+// «Fecha Venc.», «F. Vto.» (factura real 2026-11-24: la fecha de vencimiento de una tabla al pie se aceptaba como la de la factura).
+const EXCLUIR_FECHA=/ENTREGA|VENCIMIENTO|\bVENC\b|\bVTO\b|\bVCTO\b|PEDIDO|NACIMIENTO|CADUCIDAD|PREVISTA|SERVICIO|PAGO/;
 // Quita separadores y restos de etiqueta («º 77812», «Nº: 123», «nº. 45»).
 const limpiarValor=v=>String(v||"").replace(/^[\s:#\-–.º°]+/,"").replace(/^N[ºo°O]?\.?(?=[\s:.]|$)/i,"").replace(/^[\s:#\-–.º°]+/,"").trim();
 
