@@ -532,7 +532,10 @@ function clasificarNota(t,{impreso=[],vocabulario=[]}={}){
  const pal=s.split(/[^A-Z0-9Ñ]+/).filter(Boolean);
  // Ya impreso en la página (una palabra de 4+ letras igual o a una letra de una impresa): es texto impreso mal detectado.
  const imp=new Set((impreso||[]).map(w=>String(w).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"")).filter(w=>w.length>=4));
- const impresa=w=>w.length>=4&&/[A-Z]/.test(w)&&[...imp].some(x=>x===w||(Math.abs(x.length-w.length)<=1&&distancia(x,w)<=1)||(w.length>=5&&x.includes(w)));
+ // Un número de 4+ cifras dentro de una palabra impresa («98760» de un código «9876012345», fallo real 2026-11-24: salió «A MANO: …» en
+ // el título) también es lo impreso mal detectado.
+ const impresa=w=>w.length>=4&&(/[A-Z]/.test(w)?[...imp].some(x=>x===w||(Math.abs(x.length-w.length)<=1&&distancia(x,w)<=1)||(w.length>=5&&x.includes(w)))
+  :/^\d+$/.test(w)&&[...imp].some(x=>x.includes(w)));
  if(pal.some(impresa))return null;
  const m=s.match(MATRICULA_NOTA);
  if(m)return {tipo:"MATRICULA",texto:m[1]+m[2]};
