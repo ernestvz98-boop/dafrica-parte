@@ -60,6 +60,35 @@ function similitud(a,b){
  if(a.cantidad?.valor!=null&&a.cantidad.valor===b.cantidad?.valor)s+=0.5;
  return s;
 }
+// Textos distintos del de la casilla `c` (código o descripción de la línea `l`) en otras lecturas de la página que la leen
+// ENTERA y con confianza: palabras de la misma fila física que pisan la casilla, todas con 90 o más, desde su principio hasta
+// su final. Una lectura que no la cubre o con alguna palabra dudosa no cuenta (no es una interpretación fiable).
+// El texto de cada lectura se compara con el de la lectura principal sacado igual (palabras en bruto de esa zona), no con la
+// casilla ya limpia: la limpieza no es una lectura distinta.
+function lecturasFiablesDistintas(l,c,lecturas,N,principal){
+ const [x0,y,x1,alto]=c.caja;
+ if(!(alto>0)||!N.canon(c.literal??c.valor))return [];
+ const textoDe=r=>{
+  const pg=(r._pags||[]).find(p=>l.pagina==null||p.numero===l.pagina);
+  if(!pg)return null;
+  const ws=(pg.lineas||[]).flatMap(li=>li.celdas||[])
+   .filter(w=>Math.abs(w.y-y)<=0.6*Math.max(alto,w.alto||0)&&w.x1>x0+0.5&&w.x0<x1-0.5)
+   .sort((a,b)=>a.x0-b.x0);
+  if(!ws.length||ws.some(w=>!(w.conf>=90)))return null;
+  if(ws[0].x0>x0+0.6*alto||ws.at(-1).x1<x1-0.6*alto)return null;
+  return ws.map(w=>w.texto).join(" ").trim();
+ };
+ const base=textoDe(principal);
+ if(base==null)return [];
+ const distintos=new Set();
+ for(const r of lecturas){
+  if(r===principal)continue;
+  const t=textoDe(r);
+  if(t!=null&&N.canon(t)&&N.canon(t)!==N.canon(base))distintos.add(t);
+ }
+ return [...distintos];
+}
+
 // Para cada línea de la principal, la línea más parecida de otra lectura (si se parece).
 function emparejar(principal,otra){
  const usadas=new Set();
@@ -582,6 +611,21 @@ async function segundaFase(principal,paginas,lecturas,opciones){
  }
  resueltos.push(...await cifrasPorCasillas(principal,paginas,ctx,perfil));
  resueltos.push(...await titulosPorRelectura(principal,paginas));
+ // Código o descripción aceptados solo por la confianza del OCR que otra lectura de la página, también fiable, lee distinto
+ // en la misma fila: dos interpretaciones plausibles, no se acepta ninguna (foto real 2026-11-24: la descripción de una tasa
+ // con 92 en psm 4 y 6, sin su última letra, y entera con 91 en psm 4 Sauvola; se aceptaba la incompleta).
+ for(const l of principal.lineas){
+  for(const campo of ["referencia","descripcion"]){
+   const c=l[campo];
+   if(!c||c.estado!=="OK"||c.resolucion||(c.confianza??0)<0.9||!c.caja)continue;
+   const otras=lecturasFiablesDistintas(l,c,lecturas,N,principal);
+   if(!otras.length)continue;
+   const m="Lecturas OCR fiables distintas: "+[c.literal,...otras].join(" | ");
+   l[campo]={...c,estado:"REVISAR",confianza:0.5,motivos:[...(c.motivos||[]),m]};
+   l.motivos=[...(l.motivos||[]),(campo==="referencia"?"Código: ":"Descripción: ")+m];
+   l.estado="REVISAR";
+  }
+ }
  // Líneas: código y descripción leídos con poca confianza (no hay cuadre que los confirme).
  const pendientes=[];
  for(const l of principal.lineas){

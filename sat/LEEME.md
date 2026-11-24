@@ -18,7 +18,9 @@ Diseño y capacidades de STEL comprobadas: [`docs/sat-diseno.md`](../docs/sat-di
    - **● Grabar audio** contando qué le pasaba, qué has hecho, el material (con cantidades) y lo pendiente. Se
      transcribe solo (o «adjuntar un audio del teléfono», o «Prefiero escribirlo»).
    - **Fotos del trabajo** (antes / arreglado) y, si lo hay, **foto del albarán o ticket de compra**: se adjunta y
-     se leen sus materiales solos.
+     se leen sus materiales solos. Si quedan códigos o descripciones dudosos, la foto se lee otra vez con la hoja
+     enderezada (sale el texto mucho más limpio) y de ahí se proponen, siempre en duda, para compararlos con el papel
+     (tarda el doble: un minuto más o menos en el móvil).
    - **¿Cómo queda?** (terminado, pendiente de presupuesto/repuestos/otra visita, o solo revisión), **horas de
      trabajo** y **horas de desplazamiento** con botones (½ h, 1 h…, «Otra…»).
    - **Firmar ✍️**: el texto del audio se ordena solo (avería, trabajos, pendiente; cada frase entera, sin

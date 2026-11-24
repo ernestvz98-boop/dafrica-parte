@@ -2,6 +2,9 @@
 // Control (albaranes/*.js + tesseract.js servido por la propia web: sin servicios externos, funciona en el teléfono y,
 // una vez descargado, sin conexión). La foto nunca sale del teléfono para leerla.
 
+import {enderezarLienzo} from "./enderezar.js";
+import {aplicarSegunda, necesitaSegunda} from "./segunda-lectura.js";
+
 const RAIZ = new URL("../", location.href); // la web: …/sat/ → …/
 const SCRIPTS = ["albaranes/normalizar.js", "albaranes/nif.js", "albaranes/texto-pdf.js", "albaranes/proveedores.js", "albaranes/extraer.js",
   "albaranes/articulos.js", "albaranes/etiquetas.js", "albaranes/ocr.js", "albaranes/escaneado.js", "vendor/tesseract/tesseract.min.js",
@@ -45,13 +48,36 @@ export async function lienzoDeFoto(file) {
   return c;
 }
 
-/** Lee la foto con el lector de albaranes. Devuelve el resultado completo del lector (con confianza por campo). */
+/**
+ * Lee la foto con el lector de albaranes. Devuelve el resultado completo del lector (con confianza por campo). Si quedan
+ * códigos o descripciones dudosos y se encuentra la hoja, la lee otra vez ENDEREZADA y toma de ahí propuestas mejores para
+ * esos campos, siempre en duda (segunda-lectura.js). `segunda_lectura` lo resume para el registro de lectura.
+ */
 export async function leerFotoAlbaran(file, {alProgresar = null} = {}) {
   alProgresar?.("Preparando el lector (la primera vez descarga unos 9 MB)…");
   await cargarLector();
-  const lienzo = await lienzoDeFoto(file);
+  const hoy = new Date().toISOString().slice(0, 10);
+  const leer = (l) => window.DafricaAlbaranes.escaneado.extraerEscaneado([window.DafricaAlbaranes.motorNavegador.paginaDesdeLienzo(l, {alProgresar})], {hoy});
+  let lienzo = await lienzoDeFoto(file), hoja = null;
   try {
-    const pagina = window.DafricaAlbaranes.motorNavegador.paginaDesdeLienzo(lienzo, {alProgresar});
-    return await window.DafricaAlbaranes.escaneado.extraerEscaneado([pagina], {hoy: new Date().toISOString().slice(0, 10)});
-  } finally { lienzo.width = 0; lienzo.height = 0; }
+    const r = await leer(lienzo);
+    if (!necesitaSegunda(r)) return r;
+    const t0 = Date.now();
+    try {
+      const e = enderezarLienzo(lienzo);
+      if (!e.enderezada) { r.segunda_lectura = {enderezada: false}; return r; }
+      hoja = e.lienzo;
+      lienzo.width = 0; lienzo.height = 0;
+      alProgresar?.("Segunda lectura con la hoja enderezada…");
+      const r2 = await leer(hoja);
+      r.segunda_lectura = {enderezada: true, segundos: Math.round((Date.now() - t0) / 1000), cambios: aplicarSegunda(r, r2)};
+    } catch (e) {
+      // La segunda lectura solo mejora propuestas: si falla, vale la primera tal cual.
+      r.segunda_lectura = {error: String(e?.message || e).slice(0, 200)};
+    }
+    return r;
+  } finally {
+    lienzo.width = 0; lienzo.height = 0;
+    if (hoja) { hoja.width = 0; hoja.height = 0; }
+  }
 }

@@ -601,7 +601,10 @@ async function leerAlbaranRapido(pid, fid, blob) {
     const prop = materialesDesdeAlbaran(r, {articulos: S.catalogo.articulos || [], fotoId: fid});
     Object.assign(diag, {segundos: Math.round((Date.now() - t0) / 1000), lineas_lector: (r?.lineas || []).length, materiales: prop.materiales.length,
       proveedor: prop.proveedor ? true : false, numero: prop.numero ? true : false, confianza: typeof r?.confianza === "number" ? Math.round(r.confianza * 100) / 100 : null,
-      paginas: Array.isArray(r?.paginas) ? r.paginas.length : null});
+      paginas: Array.isArray(r?.paginas) ? r.paginas.length : null,
+      ...(r?.segunda_lectura ? {segunda: {enderezada: r.segunda_lectura.enderezada ?? null, segundos: r.segunda_lectura.segundos ?? null,
+        propuestas: (r.segunda_lectura.cambios || []).filter((c) => c.tipo === "propuesta").length,
+        conflictos: (r.segunda_lectura.cambios || []).filter((c) => c.tipo === "conflicto").length, ...(r.segunda_lectura.error ? {error: r.segunda_lectura.error} : {})}} : {})});
     res = {estado: "LEIDO", proveedor: [prop.proveedor, prop.numero ? "n.º " + prop.numero : ""].filter(Boolean).join(" · "),
       materiales: prop.materiales.map((m) => ({...m, id: nuevoId()})), avisos: prop.avisos, diag};
   } catch (e) {

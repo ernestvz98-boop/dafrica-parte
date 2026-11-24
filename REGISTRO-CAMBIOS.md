@@ -3,6 +3,27 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-24 · Lector: dos lecturas fiables distintas no se aceptan; SAT 0.3.17 lee la foto enderezada
+
+- Fallo real (foto de un albarán de un técnico, privada): la descripción de una línea (una tasa) salía ACEPTADA sin su última letra
+  con 0,95 solo por la confianza del OCR (92). La lectura de la página con psm 4 y 6 perdía la última letra; la de psm 4 con
+  umbral Sauvola la leía entera con 91. `escaneado.js` (`lecturasFiablesDistintas`): un código o una descripción aceptados solo
+  por la confianza del OCR que otra lectura de la página lee DISTINTO, entera y con todas sus palabras a 90 o más, en la misma
+  fila, quedan en revisión con las dos lecturas en el motivo (dos interpretaciones plausibles: no se resuelve). Se compara el
+  texto en bruto de cada lectura con el de la principal sacado igual (la limpieza de la casilla no es otra lectura). Solo puede
+  pasar campos aceptados a revisión: nunca acepta nada nuevo. Regresión: `pruebas/lecturas-distintas.test.js` (ficticia).
+- SAT: en esa foto el texto de la tabla quedaba a unos 250 ppp (la hoja no llena el encuadre y sale en perspectiva) y el OCR
+  destrozaba códigos y descripciones bien impresos (la misma cifra mal leída en los tres códigos, palabras irreconocibles). Con
+  la hoja enderezada (`sat/lib/enderezar.js`, ya existente) el texto sale limpio pero las cifras peor. `sat/lib/segunda-lectura.js`:
+  si quedan códigos o descripciones dudosos y se encuentra la hoja, segunda lectura enderezada; las líneas se emparejan por su
+  contenido (importe, cantidad, código casi igual, descripción) y en orden; la primera lectura manda en cifras y líneas, y la
+  enderezada solo PROPONE código y descripción cuando la primera no está segura y ella lee con más confianza (siempre en duda:
+  el mismo OCR sobre la misma foto no es prueba independiente). Si las dos aceptan cosas distintas, en duda. Foto real: los tres
+  códigos bien propuestos y dos descripciones limpias; la foto anterior (7 líneas) sigue con 7 de 7 cuadradas y cuatro
+  descripciones propuestas sin la basura del final. Tarda el doble (unos 75 s en el ordenador). Pruebas `sat-segunda-lectura.test.mjs`.
+- Verificación: `npm test` y `npm run test:sat`; banco privado de 103 albaranes reales (7 lotes) con el lector antes y después.
+- Producción: web 0.3.17 (permiso total del usuario para SAT; el arreglo del lector, con su «sí, guárdala y arréglalo»).
+
 ## 2026-11-24 · DAFRICA SAT 0.3.16: margen por material y materiales sin código (sat-stel v11)
 
 - Fallo real: el albarán de trabajo de un parte quedó PARADO porque una línea del albarán del proveedor sin código (una tasa)
