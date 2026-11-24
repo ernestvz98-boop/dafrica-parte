@@ -82,6 +82,42 @@ function bandasOscuras(lienzo){
  for(const t of tramos){if(unidos.length&&t[0]-unidos.at(-1)[1]<=15)unidos.at(-1)[1]=t[1];else unidos.push(t);}
  return unidos.filter(t=>t[1]-t[0]>=12&&t[1]-t[0]<=150);
 }
+/*
+ * Página sin las rayas largas de las tablas (factura real escaneada del 2026-11-23: títulos y cifras encerrados en casillas con borde y
+ * una firma sobre los títulos; el OCR de página solo leía «Importe»). Los tramos oscuros horizontales de 1,3 cm o más y verticales de
+ * 1 cm o más (una letra mide unos 3 mm) pasan a blanco, con el borde gris que dejan al lado; el resto de la página queda igual.
+ * Devuelve también las rayas horizontales que cruzan al menos un 30 % de la página (las de las filas de la tabla), en píxeles:
+ * {lienzo, rayasH:[{y, x0, x1}]}.
+ */
+function quitarRayas(lienzo){
+ const w=lienzo.width,h=lienzo.height,d=lienzo.getContext("2d",{willReadFrequently:true}).getImageData(0,0,w,h).data;
+ const g=new Uint8Array(w*h);
+ for(let i=0;i<w*h;i++)g[i]=Math.round(0.299*d[4*i]+0.587*d[4*i+1]+0.114*d[4*i+2]);
+ const LH=Math.round(DPI*0.5),LV=Math.round(DPI*0.4),OSCURO=150,GRIS=210,borrar=new Uint8Array(w*h);
+ const tramoH=new Array(h).fill(null);
+ for(let y=0;y<h;y++)for(let x=0;x<w;){if(g[y*w+x]>=OSCURO){x++;continue;}const x0=x;while(x<w&&g[y*w+x]<OSCURO)x++;
+  if(x-x0>=LH){borrar.fill(1,y*w+x0,y*w+x);const t=tramoH[y];tramoH[y]=t?{x0:Math.min(t.x0,x0),x1:Math.max(t.x1,x)}:{x0,x1:x};}}
+ // Filas de píxeles seguidas (o a 2 px) con tramo largo = una raya; su altura, la del medio.
+ const rayasH=[];
+ for(let y=0;y<h;y++){
+  if(!tramoH[y])continue;
+  const r={y0:y,y1:y,x0:tramoH[y].x0,x1:tramoH[y].x1};
+  while(y+1<h&&(tramoH[y+1]||(y+2<h&&tramoH[y+2]))){y++;if(tramoH[y]){r.y1=y;r.x0=Math.min(r.x0,tramoH[y].x0);r.x1=Math.max(r.x1,tramoH[y].x1);}}
+  if(r.x1-r.x0>=0.3*w&&r.y1-r.y0<=0.02*DPI*4)rayasH.push({y:(r.y0+r.y1)/2,x0:r.x0,x1:r.x1});
+ }
+ for(let x=0;x<w;x++)for(let y=0;y<h;){if(g[y*w+x]>=OSCURO){y++;continue;}const y0=y;while(y<h&&g[y*w+x]<OSCURO)y++;if(y-y0>=LV)for(let k=y0;k<y;k++)borrar[k*w+x]=1;}
+ const c=document.createElement("canvas");c.width=w;c.height=h;
+ const x2=c.getContext("2d"),img=x2.createImageData(w,h);
+ for(let i=0;i<w*h;i++){
+  let v=g[i];
+  if(borrar[i])v=255;
+  else if(v<GRIS&&v>=OSCURO-40){const y=(i/w)|0,x=i-y*w;
+   if((y>0&&borrar[i-w])||(y<h-1&&borrar[i+w])||(x>0&&borrar[i-1])||(x<w-1&&borrar[i+1]))v=255;}
+  img.data[4*i]=img.data[4*i+1]=img.data[4*i+2]=v;img.data[4*i+3]=255;
+ }
+ x2.putImageData(img,0,0);
+ return {lienzo:c,rayasH};
+}
 function recortar(lienzo,[x,y,w,h]){
  const c=document.createElement("canvas");c.width=w;c.height=h;
  c.getContext("2d",{alpha:false}).drawImage(lienzo,x,y,w,h,0,0,w,h);
@@ -119,6 +155,14 @@ function paginaOcr(n,lienzos,clave,rotacion,alProgresar,contador,base){
      const t=invertirBanda(imagen);if(region){imagen.width=0;imagen.height=0;}
      const {data}=await w.recognize(t,{},{blocks:true,text:false});t.width=0;t.height=0;
      return root.DafricaAlbaranes.ocr.palabrasDesdeTesseractJs(data).map(p=>({...p,x0:p.x0-MARGEN_INVERTIDA,x1:p.x1-MARGEN_INVERTIDA,y0:p.y0-MARGEN_INVERTIDA,y1:p.y1-MARGEN_INVERTIDA}));
+    }
+    if(tratamiento==="sinRayas"){
+     const {lienzo:t,rayasH}=quitarRayas(imagen);if(region){imagen.width=0;imagen.height=0;}
+     const {data}=await w.recognize(t,{},{blocks:true,text:false});t.width=0;t.height=0;
+     const palabras=root.DafricaAlbaranes.ocr.palabrasDesdeTesseractJs(data);
+     // Las rayas de las filas (en píxeles de la página), para juntar los renglones de cada fila (ocr.unirFilasEntreRayas).
+     Object.defineProperty(palabras,"rayasH",{value:region?[]:rayasH,enumerable:false});
+     return palabras;
     }
     if(escala!==1){
      const c=document.createElement("canvas");c.width=Math.round(imagen.width*escala);c.height=Math.round(imagen.height*escala);

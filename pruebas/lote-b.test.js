@@ -875,3 +875,35 @@ test("factura: la barra leída como «1» en la fila del número («1511026» po
  const ok=extraerDePaginas([pagina([...cabeceraDoc(),...fila(100,["FACTURA",100]),...fila(112,["110001",99]),...pal.slice(-11)])],{registro:registroCon(),hoy:HOY,numeroDeFactura:true});
  assert.equal(ok.numero.estado,"OK");
 });
+
+/* --------- Fallo real 2026-11-23 (Comfriber): «Nº de Albarán» leído «N* de Albarán» y «Precio Unit.» sin leer (datos ficticios) --------- */
+test("«N* de Albarán» / «N? de Albarán» (el «º» mal leído) es la etiqueta del número",()=>{
+ const tit=fila(200,["CÓDIGO",60],["CONCEPTO",120],["CANTIDAD",400],["PRECIO",460],["IMPORTE",545]);
+ const lin=fila(218,["EX0001",60],["REGULADOR",120],["1,00",420],["10,00",462],["10,00",560]);
+ for(const et of ["N*","N?"]){
+  const r=leer([...cabeceraDoc(),...fila(110,["Número de Cliente",296],[et+" de Albarán",388],["Fecha",488]),
+   ...fila(122,["99999999",322],["L/9.999",390],["15/10/26",470]),...tit,...lin]);
+  assert.equal(r.numero.valor,"L/9.999",et);
+  assert.equal(r.numero.estado,"OK",et);
+ }
+});
+const sinTituloPrecio=()=>fila(200,["CÓDIGO",60],["DESCRIPCIÓN",120],["UNIDADES",337],["DTO.(%)",469],["IMPORTE TOTAL",518]);
+test("precio sin título de columna caído al final de la descripción: se separa si la línea cuadra; la descripción, a revisión",()=>{
+ const r=leer([...cabeceraDoc(),...etiquetas(),...sinTituloPrecio(),
+  ...fila(218,["EX0001",50],["REJILLA",122],["FICTICIA",165],["20,00",250],["4,00",358],["50",487],["40,00",545])]);
+ const l=r.lineas[0];
+ assert.equal(l.precio.valor,20,JSON.stringify([l.descripcion.literal,l.precio,l.cantidad.valor,l.importe.valor]));
+ assert.equal(l.cuadre.estado,"VERIFICADO");
+ assert.equal(l.descripcion.valor,"REJILLA FICTICIA");
+ assert.equal(l.descripcion.estado,"REVISAR");
+});
+test("cifra al final de la descripción que no cuadra, o cantidad 1 sin descuento: no es el precio",()=>{
+ const noCuadra=leer([...cabeceraDoc(),...etiquetas(),...sinTituloPrecio(),
+  ...fila(218,["EX0001",50],["REJILLA",122],["FICTICIA",165],["21,00",250],["4,00",358],["50",487],["40,00",545])]).lineas[0];
+ assert.notEqual(noCuadra.precio.valor,21);
+ assert.match(noCuadra.descripcion.literal,/21,00$/);
+ const trivial=leer([...cabeceraDoc(),...etiquetas(),...sinTituloPrecio(),
+  ...fila(218,["EX0001",50],["CABLE",122],["FICTICIO",160],["2,50",250],["1,00",358],["2,50",545])]).lineas[0];
+ assert.notEqual(trivial.precio.valor,2.5);
+ assert.match(trivial.descripcion.literal,/2,50$/);
+});

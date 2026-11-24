@@ -36,9 +36,12 @@ const caja=c=>c?[Math.round(c.x0*10)/10,Math.round(c.y*10)/10,Math.round(c.x1*10
 const COLUMNAS=[
  ["referencia",/^(REF|REFERENCIA|REF ARTICULO|COD|CODIGO|COD ART|CODIGO ARTICULO|COD ARTICULO|ART|ARTICULO)$/],
  ["descripcion",/^(DESCRIPCION|CONCEPTO|CONCEPTOS|DENOMINACION|DESIGNACION|DETALLE|PRODUCTO|DESCRIPCION ARTICULO|DESCRIPCION DEL PRODUCTO|DESCRIPCION DEL ARTICULO|DESCRIPCION DEL|DESCRIPCION DE|DESCRIPCION EQUIPOS ALQUILADOS|DESCRIPCION EQUIPOS|EQUIPOS ALQUILADOS|DESCRIPCION SERVICIO|DESCRIPCION SERVICIOS)$/],
- ["cantidad",/^(CANTIDAD|CANT|UDS|UNIDADES|UNDS|CTDAD|CANT SERVIDA|CANTIDAD SERVIDA|KILOS|KGS)$/],
+ // «UNID» (factura real escaneada 2026-11-23: «Unid. | Imp. Uni.» con las cantidades debajo). Si una tabla la usa para la unidad de
+ // medida («UD», «KG»), esas casillas no son números y la línea queda sin cantidad (a revisión), nunca con una cantidad falsa.
+ ["cantidad",/^(CANTIDAD|CANT|UDS|UNIDADES|UNDS|UNID|CTDAD|CANT SERVIDA|CANTIDAD SERVIDA|KILOS|KGS)$/],
  ["unidad",/^(UD|UN|U M|UM|UNIDAD|MEDIDA)$/],
- ["precio",/^(PRECIO|PRECIO ?UNIDAD|PRECIO ?UNITARIO|PRECIO ?UNIT|P UNIT|P UNITARIO|PUNITARIO|PUNIT|PVP|PRECIO ?UD|PRECIO ?UNID|P UNID|PRECIO DIA|PRECIO DIARIO|PRECIO ALQUILER|PRECIO NETO|PRECIO NETO U|PRECIO NETO UD|PRECIO NETO UNIT|PRECIO NETO UNITARIO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000)$/],
+ // «IMP. UNI.» = importe unitario (misma factura real del 2026-11-23).
+ ["precio",/^(PRECIO|PRECIO ?UNIDAD|PRECIO ?UNITARIO|PRECIO ?UNIT|P UNIT|P UNITARIO|PUNITARIO|PUNIT|PVP|PRECIO ?UD|PRECIO ?UNID|P UNID|PRECIO DIA|PRECIO DIARIO|PRECIO ALQUILER|PRECIO NETO|PRECIO NETO U|PRECIO NETO UD|PRECIO NETO UNIT|PRECIO NETO UNITARIO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000|IMP ?UNI|IMP ?UNIT|IMP ?UNITARIO|IMPORTE ?UNITARIO|IMPORTE ?UNIDAD|IMP ?UNIDAD)$/],
  ["subtotal",/^(SUBTOTAL|BRUTO|IMPORTE BRUTO)$/],
  ["descuento",/^(DTO|DTOS|DESC|DESCUENTO|DTO %|% DTO|%DTO|DTO%|% DESC|DESC %|DTO ?[123]|DESC ?[123]|% ?DTO ?[123]|DTO ?[123] ?%)$/],
  ["importe",/^(IMPORTE|IMPORTE NETO|TOTAL|NETO|TOTAL LINEA|IMPORTE TOTAL|IMPORTE EUR)$/]
@@ -106,14 +109,17 @@ function evaluarCabecera(celdas){
  // Un título de dos palabras que el OCR parte en dos celdas («IMPORTE» | «NETO», «PRECIO» | «UNID.»; fallo real 2026-11-18: la
  // segunda se tomaba por otra columna de importe y se ignoraba, y las cifras, centradas bajo ella, se perdían). Dos títulos
  // pegados (hueco menor que 1,5 altos) que juntos son un título conocido del mismo campo que el primero se unen.
+ // También dos trozos que solos no son títulos y juntos sí («Imp.» | «Uni.» = precio; factura real escaneada del 2026-11-23).
  const altoTit=Math.max(0,...celdas.map(c=>c.alto||0))||10;
  const columnas=[];
  for(const c of [...todas].sort((a,b)=>a.x0-b.x0)){
   const prev=columnas[columnas.length-1];
-  const junto=prev&&c.x0-prev.x1<=1.5*altoTit&&prev.campo!=="otra"?campoDe(prev.clave+" "+c.clave):null;
-  if(junto&&junto.campo===prev.campo){prev.clave=junto.clave;prev.x1=Math.max(prev.x1,c.x1);continue;}
+  const junto=prev&&c.x0-prev.x1<=1.5*altoTit&&(prev.campo!=="otra"||c.campo==="otra")?campoDe(prev.clave+" "+c.clave):null;
+  if(junto&&(junto.campo===prev.campo||(prev.campo==="otra"&&c.campo==="otra"))){prev.campo=junto.campo;prev.clave=junto.clave;prev.x1=Math.max(prev.x1,c.x1);continue;}
   columnas.push({...c});
  }
+ // «UNID» junto a otra columna de cantidad («Cant. | Unid.») es la unidad de medida.
+ if(columnas.filter(c=>c.campo==="cantidad").length>1)for(const c of columnas)if(c.campo==="cantidad"&&c.clave==="UNID")c.campo="unidad";
  const campos=new Set(columnas.map(c=>c.campo));
  if(campos.has("referencia")&&!campos.has("descripcion")){
   // «ARTÍCULO» sin columna de descripción es la descripción.
@@ -216,7 +222,8 @@ function columnaDe(celda,cols){
 }
 
 /* --------------------------- Etiquetas de cabecera -------------------------- */
-const RE_NUMERO=/^(N[ºO°]?\s?(DE\s)?ALBARAN|NUM(ERO)?\s(DE\s)?ALBARAN|ALBARAN(\s(DE\s)?(ENTREGA|VENTA|SALIDA))?(\sN[ºO°]?)?|N[ºO°]\s?DOC(UMENTO)?|NUM(ERO)?\sDOC(UMENTO)?|DOCUMENTO)(\b|$)/;
+// «Nº de Albarán» con el «º» leído «*» o «?» por el OCR (fallo real 2026-11-23: «N* de Albarán» sin número).
+const RE_NUMERO=/^(N[ºO°*?]?\s?(DE\s)?ALBARAN|NUM(ERO)?\s(DE\s)?ALBARAN|ALBARAN(\s(DE\s)?(ENTREGA|VENTA|SALIDA))?(\sN[ºO°]?)?|N[ºO°]\s?DOC(UMENTO)?|NUM(ERO)?\sDOC(UMENTO)?|DOCUMENTO)(\b|$)/;
 const EXCLUIR_NUMERO=/CLIENTE|PEDIDO|PROVEEDOR|TELEF|FAX|PAGINA|OBRA|CIF|NIF|FACTURA|PRESUPUESTO|CUENTA|IBAN/;
 const RE_FECHA=/^(FECHA(\s(ALBARAN|DOCUMENTO|EMISION|DE\sEMISION|EXPEDICION|DEL\sALBARAN))?|F\sEMISION)(\b|$)/;
 const EXCLUIR_FECHA=/ENTREGA|VENCIMIENTO|PEDIDO|NACIMIENTO|CADUCIDAD|PREVISTA|SERVICIO|PAGO/;
@@ -1200,6 +1207,24 @@ function hipotesisOCR(campo,opcionesNumero,{digitoInicial=false}={}){
   if(lit.length>d)pon(lit.slice(0,-d)+","+lit.slice(-d));
  return out;
 }
+/*
+ * Cuadre con dos escalas (fallo real 2026-11-24, albarán escaneado: precio e importe leídos sin coma en la misma fila, p. ej. «3750» y «075»; el cuadre
+ * 0,020 × 3750 = 75 sale igual que 0,020 × 37,50 = 0,75 y las cifras sin coma se aceptaban). Una línea que cuadra tal cual y TAMBIÉN con
+ * el separador decimal repuesto en alguna de sus cifras (las mismas hipótesis de hipotesisOCR, solo en OCR) tiene dos lecturas
+ * plausibles: devuelve las cifras de la otra (con `reparado` en las que cambian), o null si no hay otra.
+ */
+function otraEscalaQueCuadra(f,opcionesNumero,precioPor){
+ const campos=["cantidad","precio","importe"];
+ const opciones=campos.map(k=>hipotesisOCR(f[k],opcionesNumero));
+ if(opciones.some(o=>!o.length)||!opciones.some(o=>o.some(x=>x.reparado)))return null;
+ for(const q of opciones[0])for(const p of opciones[1])for(const i of opciones[2]){
+  if(!q.reparado&&!p.reparado&&!i.reparado)continue;
+  const prueba={...f,cantidad:{...f.cantidad,valor:q.valor,estado:"OK"},precio:{...f.precio,valor:p.valor,estado:"OK"},
+   importe:{...f.importe,valor:i.valor,estado:"OK",decimales:i.decimales??f.importe.decimales}};
+  if(cuadre(prueba,precioPor).estado==="VERIFICADO")return {cantidad:q,precio:p,importe:i};
+ }
+ return null;
+}
 function repararSeparadoresOCR(f,opcionesNumero,precioPor){
  const campos=["cantidad","precio","importe"];
  const opciones=campos.map(k=>hipotesisOCR(f[k],opcionesNumero,{digitoInicial:k==="importe"}));
@@ -1233,6 +1258,30 @@ function restituirGlifos(texto,perfil){
  let t=String(texto??"");
  for(const [patron,reemplazo] of perfil?.glifos_ocr||[])t=t.replace(new RegExp(patron,"g"),reemplazo);
  return t;
+}
+/*
+ * Precio sin título de columna (fallo real 2026-11-23: cabecera «Código | Descripción | Unidades | Dto.(%) | Importe Total»
+ * sin «Precio» leído; la fila «cantidad | precio | dto | importe» dejaba el precio al final de la descripción y el precio vacío).
+ * La última cifra de la descripción pasa a precio solo si no hay casilla de precio, cantidad, descuento e importe son
+ * válidos y con ella la línea cuadra. Cantidad 1 sin descuento no es prueba (cualquier cifra igual al importe cuadraría).
+ */
+function precioAlFinalDeLaDescripcion(f,celdas,opcionesNumero,precioPor){
+ if(celdas.precio?.texto||f.precio.estado!=="VACIO"||f.cantidad.estado!=="OK"||f.importe.estado!=="OK")return;
+ if(!["OK","VACIO"].includes(f.descuento.estado)||!["OK","REVISAR"].includes(f.descripcion.estado))return;
+ const m=String(f.descripcion.literal||"").match(/^(.*[A-Za-zÁÉÍÓÚÑÜáéíóúñü].*?)\s+(\d{1,3}(?:\.\d{3})*,\d{2,4})$/);
+ if(!m)return;
+ const p=N().numero(m[2],opcionesNumero);
+ if(p.estado!=="OK"||!(p.valor>0))return;
+ if(Math.abs(f.cantidad.valor)===1&&f.descuento.estado!=="OK")return;
+ const precio={...f.precio,...p,literal:m[2],caja:f.descripcion.caja??null,conf_ocr:f.descripcion.conf_ocr??null,por:precioPor,
+  notas:[...(p.notas||[]),"Precio leído al final de la descripción (la columna del precio no tiene título) y confirmado por el cuadre"]};
+ if(cuadre({...f,precio},precioPor).estado!=="VERIFICADO")return;
+ f.precio=precio;
+ // La descripción no se acepta sola: el cuadre confirma la cifra, no el texto (caso real: un «º» leído «%» en todas las
+ // lecturas del mismo motor; sin la cifra pegada, las relecturas coincidían y se habría aceptado mal).
+ f.descripcion={...f.descripcion,literal:m[1].trim(),valor:m[1].trim(),estado:"REVISAR",
+  motivos:[...(f.descripcion.motivos||[]),"Descripción leída junto con la cifra del precio (columna sin título): se revisa el texto"],
+  notas:[...(f.descripcion.notas||[]),"Precio «"+m[2]+"» separado del final de la descripción"]};
 }
 function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  const c=cruda.celdas;
@@ -1307,6 +1356,7 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  }
  importeEnColumnaDescuento(f,opcionesNumero,precioPor);
  descuentoConPunto(f,opcionesNumero,precioPor);
+ precioAlFinalDeLaDescripcion(f,c,opcionesNumero,precioPor);
  f.cuadre=cuadre(f,precioPor);
  // Descuento sin título (asignar, _sinTitulo): solo si con él la línea cuadra con su importe; si no, como antes, dos cifras en
  // la columna del precio y ninguna se acepta.
@@ -1318,7 +1368,17 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
    f.cuadre=cuadre(f,precioPor);
   }
  }
- if(f.cuadre.estado!=="VERIFICADO")repararSeparadoresOCR(f,opcionesNumero,precioPor);
+ // Cuadra tal cual y también con la coma en otro sitio: dos lecturas plausibles, ninguna se acepta (ni se «repara»: la reparación
+ // escogería la otra sin más prueba). Si otra lectura OCR de la misma fila cuadra sin ambigüedad, escaneado.js toma sus cifras.
+ const otraEscala=f.cuadre.estado==="VERIFICADO"?otraEscalaQueCuadra(f,opcionesNumero,precioPor):null;
+ if(otraEscala){
+  const dudas=["cantidad","precio","importe"].filter(k=>otraEscala[k].reparado).map(k=>"«"+f[k].literal+"» o «"+otraEscala[k].reparado+"»").join(", ");
+  f.cuadre={estado:"AMBIGUO",detalle:"la línea cuadra con dos lecturas de sus cifras: "+dudas};
+  for(const k of ["cantidad","precio","importe","subtotal"])if(f[k]?.estado==="OK")
+   f[k]={...f[k],estado:"REVISAR",motivos:[...(f[k].motivos||[]),"La línea cuadra también con la coma en otro sitio ("+dudas+")"]};
+  f.motivos.push("Cuadre con dos lecturas posibles: "+dudas+" (¿coma no leída por el OCR?)");
+ }
+ if(f.cuadre.estado!=="VERIFICADO"&&f.cuadre.estado!=="AMBIGUO")repararSeparadoresOCR(f,opcionesNumero,precioPor);
  sugerirCantidad(f,precioPor);
  const numericos=["cantidad","precio","descuento","importe","subtotal"];
  if(f.cuadre.estado==="VERIFICADO"){

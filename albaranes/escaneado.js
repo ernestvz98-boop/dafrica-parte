@@ -173,7 +173,7 @@ function combinarLineas(principal,lecturas){
    if(verificada){
     for(const k of ["cantidad","precio","descuento","subtotal","importe","cuadre"])l[k]=verificada[k];
     if(l.referencia?.estado==="VACIO"&&verificada.referencia?.estado!=="VACIO")l.referencia=verificada.referencia;
-    l.motivos=l.motivos.filter(m=>!/^(Descuadre|Cuadre incompleto|Cantidad|precio|importe|descuento|Columnas separadas)/i.test(m));
+    l.motivos=l.motivos.filter(m=>!/^(Descuadre|Cuadre incompleto|Cuadre con dos lecturas|Cantidad|precio|importe|descuento|Columnas separadas)/i.test(m));
     l.notas=[...(l.notas||[]),"Cifras tomadas de otra lectura OCR de la misma línea, confirmadas por el cuadre"];
    }
   }
@@ -828,6 +828,31 @@ async function extraerEscaneado(paginas,opciones={}){
    }
   }
   if(titulos.size)trasladar(n=>titulos.get(n)||null,"banda_oscura_invertida");
+ }
+ // Tampoco así: títulos y cifras encerrados en casillas con borde (factura real escaneada del 2026-11-23, con una firma encima de los
+ // títulos: de ellos solo se leía «Importe» y de las filas faltaban cantidades y precios). Se lee la página SIN las rayas largas de la
+ // tabla (como otra lectura más, si con ella sale la tabla) y sus títulos se trasladan a las lecturas de siempre.
+ if(!lecturas.some(r=>r.tablas?.[0]?.y_cabecera!=null)){
+  const titulos=new Map();
+  const {unirFilasEntreRayas}=M("ocr");
+  for(const conf of [{psm:4},{psm:6}]){
+   const pags=[];
+   for(const p of paginas){
+    const palabras=await p.ocr({psm:conf.psm,tratamiento:"sinRayas"}),k=72/p.dpi;
+    let pag=paginaDesdePalabras(palabras,{numero:p.numero,anchoPx:p.anchoPx,altoPx:p.altoPx,dpi:p.dpi});
+    // Cada fila de la tabla, entre sus dos rayas, en un solo renglón (con la misma corrección de inclinación que las palabras).
+    const inc=pag.inclinacion||0;
+    if(palabras.rayasH?.length&&typeof unirFilasEntreRayas==="function")
+     pag=unirFilasEntreRayas(pag,palabras.rayasH.map(r=>({y:(r.y-inc*((r.x0+r.x1)/2-p.anchoPx/2))*k,x0:r.x0*k,x1:r.x1*k})));
+    pags.push(pag);
+   }
+   const r=extraerDePaginas(pags,opciones);r._lectura="pagina_psm"+conf.psm+"_sin_rayas";
+   Object.defineProperty(r,"_pags",{value:pags,enumerable:false});
+   if(!titulosLeidos(r))continue;
+   lecturas.push(r);
+   for(const pg of pags){if(titulos.has(pg.numero))continue;const t=leerTablaPagina(pg);if(t)titulos.set(pg.numero,{...pg.lineas[t.indiceCabecera],sin_rayas:true});}
+  }
+  if(titulos.size)trasladar(n=>titulos.get(n)||null,"sin_rayas");
  }
  let principal=[...lecturas].sort((a,b)=>puntuar(b)-puntuar(a))[0];
  // Relectura de la banda de la tabla (la zona con más cifras) con la geometría de la principal.

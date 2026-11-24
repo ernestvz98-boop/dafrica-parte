@@ -138,5 +138,50 @@ function palabrasDesdeTesseractJs(data){
  return out;
 }
 
-return {paginaDesdePalabras,palabrasDesdeTsv,palabrasDesdeTesseractJs,estimarInclinacion};
+/*
+ * Tabla con rayas (lectura sin rayas, 2026-11-24; factura real escaneada del 2026-11-23): lo que queda entre dos rayas horizontales
+ * seguidas es UNA fila, aunque el OCR la lea en varios renglones (el texto en dos renglones y las cifras centradas entre ellos, que
+ * salían como filas sueltas de descripción). Solo franjas del alto de una fila (de 1,2 a 5 alturas de letra) con 2 a 4 renglones; las
+ * demás (una tabla sin rayas por dentro: todas sus filas entre las dos rayas del borde) se dejan como están. En la fila unida, las
+ * casillas que se solapan en horizontal (la misma columna) juntan sus textos de arriba abajo. rayas: [{y, x0, x1}] en puntos.
+ */
+function unirFilasEntreRayas(pagina,rayas){
+ const lineas=pagina?.lineas||[];
+ if(!lineas.length||!Array.isArray(rayas)||rayas.length<2)return pagina;
+ const altos=lineas.map(l=>l.alto).filter(a=>a>0).sort((a,b)=>a-b),alto=altos[Math.floor(altos.length/2)]||10;
+ const ys=rayas.map(r=>r.y).sort((a,b)=>a-b),usadas=new Set(),unidas=[];
+ for(let i=0;i+1<ys.length;i++){
+  const a=ys[i],b=ys[i+1];
+  if(b-a<1.2*alto||b-a>5*alto)continue;
+  const dentro=lineas.filter(l=>!usadas.has(l)&&l.y-l.alto/2>a&&l.y-l.alto/2<b);
+  if(dentro.length<2||dentro.length>4)continue;
+  dentro.forEach(l=>usadas.add(l));
+  unidas.push(unirLineas(dentro));
+ }
+ if(!unidas.length)return pagina;
+ const todas=[...lineas.filter(l=>!usadas.has(l)),...unidas].sort((x,y)=>x.y-y.y).map((l,i)=>({...l,indice:i}));
+ return {...pagina,lineas:todas,avisos:[...(pagina.avisos||[]),unidas.length+" filas de la tabla unidas por sus rayas (varios renglones cada una)"]};
+}
+function unirLineas(ls){
+ const orden=[...ls].sort((a,b)=>a.y-b.y);
+ // La altura de la fila: la del renglón con más cifras (el de las cantidades e importes), o el del medio.
+ const cifras=l=>l.celdas.filter(c=>/\d/.test(c.texto)).length;
+ const base=[...orden].sort((a,b)=>cifras(b)-cifras(a))[0]||orden[Math.floor(orden.length/2)];
+ const grupos=[];
+ for(const [j,l] of orden.entries())for(const c of l.celdas){
+  const g=grupos.find(x=>c.x0<x.x1&&c.x1>x.x0);
+  if(g){g.partes.push({c,j});g.x0=Math.min(g.x0,c.x0);g.x1=Math.max(g.x1,c.x1);}
+  else grupos.push({x0:c.x0,x1:c.x1,partes:[{c,j}]});
+ }
+ const celdas=grupos.sort((a,b)=>a.x0-b.x0).map(g=>{
+  const partes=g.partes.sort((a,b)=>a.j-b.j||a.c.x0-b.c.x0),una=partes.length===1?partes[0].c:null;
+  if(una)return {...una,y:base.y};
+  const confs=partes.map(p=>p.c.conf).filter(v=>v!=null);
+  return {texto:partes.map(p=>p.c.texto).join(" "),x0:g.x0,x1:g.x1,y:base.y,alto:Math.max(...partes.map(p=>p.c.alto||0)),
+   conf:confs.length?Math.min(...confs):null,unida:true};
+ });
+ return {y:base.y,alto:Math.max(...orden.map(l=>l.alto)),celdas,texto:celdas.map(c=>c.texto).join(" "),unida:orden.length};
+}
+
+return {paginaDesdePalabras,palabrasDesdeTsv,palabrasDesdeTesseractJs,estimarInclinacion,unirFilasEntreRayas};
 });

@@ -3,6 +3,23 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-24 · Lector: tablas en casillas con rayas (lo mismo que DAFRICA Control y la aplicación)
+
+- `albaranes/ocr.js`, `escaneado.js`, `motor-navegador.js` y `extraer.js` vuelven a ser los MISMOS que en DAFRICA Control y en la
+  aplicación de administración:
+  - Si ninguna lectura ve los títulos de la tabla (factura escaneada real con la tabla en casillas con borde y una firma encima), la
+    página se lee también sin las rayas largas (`quitarRayas`, tratamiento «sinRayas»), como una lectura más y solo si salen los títulos.
+  - `unirFilasEntreRayas`: cada fila entre dos rayas horizontales es una línea aunque el OCR la lea en varios renglones.
+  - «Unid.» = cantidad (salvo con otra columna de cantidad: unidad de medida), «Imp. Uni.» = precio, y dos trozos que solos no son
+    títulos y juntos sí se unen.
+  - Una línea escaneada que cuadra tal cual y también con la coma repuesta en alguna cifra (p. ej. «3750» / «075» por
+    «37,50» / «0,75»: 0,020 × 3750 = 75 cuadra igual) tiene dos lecturas: no se acepta ninguna; si otra lectura OCR de la fila cuadra sin ambigüedad,
+    se toman sus cifras (lectura falsa aceptada encontrada con un albarán real).
+  - Lo de la mejora diaria del 24 en DAFRICA Control: «N* / N? de Albarán» (el «º» mal leído) es la etiqueta del número, y el precio
+    sin título de columna caído al final de la descripción solo se separa si la línea cuadra.
+- `pruebas/tabla-con-rayas.test.js` (7) y las 3 pruebas de la mejora diaria en `pruebas/lote-b.test.js` (datos ficticios); `index.html`
+  con versión nueva de los cuatro ficheros. `npm test` 464/464. Nada publicado.
+
 ## 2026-11-24 · Lector: facturas escaneadas (lo mismo que DAFRICA Control y la aplicación 0.3.53)
 
 - `albaranes/extraer.js` vuelve a ser el MISMO que en DAFRICA Control y en la aplicación de administración (cambio del 23 por la
