@@ -11,64 +11,63 @@ Diseño y capacidades de STEL comprobadas: [`docs/sat-diseno.md`](../docs/sat-di
 ## 1. Uso diario
 
 ### Técnico (móvil)
-1. **Entrar**: con el mismo usuario de DAFRICA Control (la misma sesión y la verificación en dos pasos).
-   Instalar en el móvil: abrir `…/sat/` en Chrome o Safari → «Añadir a pantalla de inicio».
-2. **Parte rápido (por defecto, desde 0.3.0)**: **＋ Nuevo parte** → busca el cliente (nombre, NIF, teléfono o
-   dirección; los clientes de STEL ya están en el teléfono) y tócalo. En UNA pantalla:
-   - **● Grabar audio** contando qué le pasaba, qué has hecho, el material (con cantidades) y lo pendiente. Se
-     transcribe solo (o «adjuntar un audio del teléfono», o «Prefiero escribirlo»).
-   - **Fotos del trabajo** (antes / arreglado) y, si lo hay, **foto del albarán o ticket de compra**: se adjunta y
-     se leen sus materiales solos. Si quedan códigos o descripciones dudosos, la foto se lee otra vez con la hoja
-     enderezada (sale el texto mucho más limpio) y de ahí se proponen, siempre en duda, para compararlos con el papel
-     (tarda el doble: un minuto más o menos en el móvil).
-   - **¿Cómo queda?** (terminado, pendiente de presupuesto/repuestos/otra visita, o solo revisión), **horas de
-     trabajo** y **horas de desplazamiento** con botones (½ h, 1 h…, «Otra…»).
-   - **Firmar ✍️**: el texto del audio se ordena solo (avería, trabajos, pendiente; cada frase entera, sin
-     inventar) y los materiales salen del albarán y de lo dictado CON cantidad. Lo leído con dudas va marcado
-     «a confirmar por la oficina» (no impide firmar). Después, firmas y «Generar PDF y enviar».
-   - «Rellenar a mano (modo detallado)» pasa al parte por pasos de abajo.
-   Los avisos asignados por la oficina también se abren en el parte rápido.
-3. **Parte detallado (4 pasos)**, si se elige «Rellenar a mano» o con «Crear un aviso con todos los datos»
-   - *Datos*: tipo de visita (**diagnóstico**, **reparación finalizada** o **pendiente** de presupuesto,
-     repuestos o segunda visita), fecha y horas («Ahora»), cliente, dirección, contacto, equipo.
-   - *Dictado y fotos*: **● Grabar audio** (uno o varios). Se transcribe al momento si hay cobertura; si
-     no, el audio queda guardado. Corrige el texto y pulsa **Proponer el parte con el dictado**: cada frase
-     va tal cual a avería, comprobaciones, trabajos, materiales o pendientes. Los materiales solo salen con
-     la cantidad que dijiste; lo dudoso (referencias dictadas, cantidades no dichas) sale en ámbar para
-     confirmar. Fotos: **Hacer foto** o **Desde la galería**, con momento (antes/durante/después) y comentario.
-   - *Trabajo*: comprobaciones con resultado, avería, trabajos, materiales (cantidad, unidad, referencia y,
-     si lo sabes, el artículo de STEL), tiempos de trabajo y desplazamiento, estado final y pendientes.
-     **📷 Foto del albarán o ticket del proveedor**: la foto se adjunta al parte y al albarán de trabajo de STEL, y el
-     lector de albaranes (en el propio teléfono, sin enviar la foto a nadie) propone sus líneas como materiales:
-     referencia, descripción y cantidad; si la referencia está una sola vez en STEL, el artículo se elige solo. Lo leído
-     con dudas sale en ámbar para compararlo con el papel. La primera vez descarga el lector (unos 9 MB) y tarda alrededor
-     de un minuto por foto. Con proveedores que el lector no reconoce no salen líneas: se escriben a mano.
-   - *Revisar y firmar*: el parte completo y el texto del alcance. **Firma del técnico** y **firma del
-     responsable** (nombre y cargo) o **«No está o no quiere firmar…»** con el motivo. Con las dos, **Generar
-     PDF y enviar**. El PDF se puede enseñar o compartir al momento.
-4. **Si cambias algo después de firmar**, las firmas dejan de valer (lo avisa) y hay que volver a firmar.
-   La corrección queda registrada.
-5. **Sin cobertura** todo se guarda en el teléfono. Arriba se ve «Sin conexión · N por subir» o
-   «✓ Todo subido». Al tocarlo, la lista de lo pendiente. **No borres los datos de la aplicación** mientras
-   haya algo por subir.
-6. **Facturas**: la bandeja muestra las facturas emitidas de tus partes: Abrir, Descargar, Compartir (correo,
-   WhatsApp… del teléfono). Cuando la entregues, **Marcar como entregada** y elige cómo. Recibir la factura
-   no la marca como entregada.
+Lo que ve el técnico (usuario con permisos solo de técnico, rol TECNICO_SAT), al día con la 0.3.18:
+1. **Entrar**: con su usuario y contraseña; entra directo a sus avisos y la sesión queda guardada en el teléfono.
+   Instalar en el móvil: abrir `…/sat/` en Chrome o Safari → «Añadir a pantalla de inicio». No ve la oficina, las
+   facturas, el modo detallado ni «crear un aviso con todos los datos».
+2. **Mis avisos**: «▶ Seguir con el parte de …» si dejó uno a medias (aunque se cerrara la aplicación), **＋ Nuevo parte**
+   y sus avisos abiertos (los que le asigna la oficina se abren igual).
+3. **El parte, en UNA pantalla**: busca el cliente (nombre, NIF, teléfono o dirección; los clientes de STEL ya están en el
+   teléfono) y lo toca. Después:
+   - **● Grabar audio** contando qué le pasaba, qué ha hecho, el material (con cantidades) y lo pendiente. Se transcribe solo
+     (o «adjuntar un audio del teléfono», o «Prefiero escribirlo»).
+   - **Fotos del trabajo** (antes / arreglado).
+   - **Foto del albarán o ticket de compra** (si lo hay): se adjunta y se leen sus materiales solos (alrededor de un minuto;
+     si quedan códigos o descripciones dudosos, se lee otra vez con la hoja enderezada). **Entra en el parte todo lo leído con
+     cantidad** (usuario, 2026-11-24: «que el lector trate de ponerlo todo; si sale mal ya Dani lo arregla»): lo leído con dudas
+     sale con «lo revisa la oficina» y entra igual. «Corregir» (cantidad, descripción y código) y «Quitar», solo si ve algo
+     claramente mal; una línea sin cantidad no entra hasta que la pone. **Sin precios**: los precios y el porcentaje los pone la
+     oficina en STEL.
+   - **¿Cómo queda?** (terminado, pendiente de presupuesto/repuestos/otra visita, o solo revisión), **horas de trabajo** y
+     **horas de desplazamiento** con botones (½ h, 1 h…, «Otra…»).
+   - **Firmar ✍️**: ve el parte que va a firmar el cliente: **su descripción** (avería, trabajos y lo pendiente, ordenados del
+     audio, cada frase entera, sin inventar), **los materiales** (del albarán y de lo dictado, con cantidad; lo dudoso marcado
+     «a confirmar por la oficina») y **las horas de trabajo y de desplazamiento**, sin importes. Firma él y firma el
+     responsable (nombre y cargo) o **«No está o no quiere firmar…»** con el motivo → **Generar PDF y enviar a
+     administración**. El PDF se puede enseñar o compartir al momento.
+   - **🗑️ Descartar este parte**, si se equivocó y aún no lo ha enviado.
+4. **Al enviarlo**, sin hacer nada más: se crean en STEL la incidencia y el **albarán de trabajo** con todo lo del parte
+   (materiales a su coste, mano de obra y desplazamiento por horas, forma de pago y cuenta, el PDF firmado y las fotos). Lo que
+   la oficina tiene que mirar queda escrito en los comentarios privados del albarán (ver Administración).
+5. **Si cambia algo después de firmar**, las firmas dejan de valer (lo avisa) y hay que volver a firmar. La corrección queda
+   registrada.
+6. **Sin cobertura** todo se guarda en el teléfono. Arriba se ve «Sin conexión · N por subir» o «✓ Todo subido». Al tocarlo,
+   la lista de lo pendiente. **No borrar los datos de la aplicación** mientras haya algo por subir.
 7. Si la oficina **pide información**, el parte vuelve a abrirse con su nota: corrige, firma y envía.
+
+El **parte detallado** (4 pasos: datos, dictado y fotos, trabajo, revisar y firmar) y la **bandeja de facturas** solo los ven la
+oficina y facturación.
 
 ### Administración («Oficina», ordenador o móvil)
 - **Partes**: por revisar, por aprobar, facturados… Cada parte muestra datos, fotos, audios con su
   transcripción, firmas (válidas e invalidadas), versiones, PDF firmado, estado de STEL y registro completo.
 - **Cliente provisional**: «Vincular a cliente de STEL» (lo normal: no duplica) o «Crear en STEL» (antes busca
   por NIF y por nombre; si hay parecidos, se para y lo decides tú).
-- **Revisión económica**: «Proponer desde el parte» rellena los materiales a su **coste neto + margen** (30 % por
-  defecto, en Ajustes): el coste es el precio con los descuentos del albarán del proveedor (si la línea cuadra con su
+- **Albarán de trabajo en STEL**: se crea solo al enviar el parte, con TODO lo del parte. Sus **comentarios privados** dicen
+  qué mirar: «LEÍDO CON DUDAS» (comprobar con la foto del albarán del proveedor), «POR IDENTIFICAR» (líneas con el artículo
+  genérico «MATERIAL POR IDENTIFICAR (SAT)»: lo dictado, o un código repetido en STEL o que en STEL es de otro artículo: poner el
+  bueno), «ARTÍCULOS DADOS DE ALTA SIN COMPROBAR» (dados de alta con lo leído; en STEL llevan «ALTA SIN COMPROBAR» en sus
+  comentarios privados: revisar código y nombre), «SIN PRECIO» y «PRECIO SIN COMPROBAR». **El porcentaje** por encima lo pone la
+  oficina a mano en STEL (usuario, 2026-11-24): el margen de Ajustes está a 0 y los materiales van a su coste.
+- **Revisión económica**: «Proponer desde el parte» rellena los materiales (con el artículo con el que se creó el albarán de
+  trabajo) a su **coste neto + el margen de Ajustes** (hoy 0): el coste es el precio con los descuentos del albarán del proveedor (si la línea cuadra con su
   importe) o, con «Precios de materiales (compra + margen)», el precio de compra del artículo en STEL; si no hay ninguno, un
   coste estimado con lo leído del papel, en ámbar «sin comprobar». **Margen de cada material**: bajo el precio de cada línea
   con coste está la casilla «coste … + __ %»; cambiarla pone ese margen solo a esa línea (y lo respeta «Precios de
   materiales»); las demás siguen con el de Ajustes. Un material del albarán del proveedor sin código (una tasa, un envase)
-  se da de alta en STEL con una referencia propia «SR-…» fija (la misma cada vez: no se duplica). Lo que esté mal se corrige en la revisión, el técnico con
-  «Corregir» (precio y descuento del papel) o en el albarán de STEL y «Traer precios corregidos». La
+  se da de alta en STEL con una referencia propia «SR-…» fija (la misma cada vez: no se duplica). Lo que esté mal se corrige en la revisión o en el albarán de STEL
+  y «Traer precios corregidos». Ojo: «Precios de materiales» y llevar la revisión a STEL SUSTITUYEN las líneas del albarán de
+  trabajo: después de cambiar precios a mano en STEL, primero «Traer precios corregidos». La
   mano de obra y el desplazamiento **por horas** (minutos anotados por el técnico ÷ 60) al **precio fijo por hora** de
   Ajustes (50 € por defecto; vacío = precio del servicio de STEL). Un desplazamiento solo con km queda sin horas para
   completarlo. Completa artículo, precio, descuento e IVA. **Guardar revisión**.

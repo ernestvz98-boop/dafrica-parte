@@ -34,12 +34,23 @@ export function margenDe(ajustes) {
 }
 export function precioVenta(coste, margen) { return redondear2(Number(coste) * (1 + Number(margen) / 100)); }
 
-export function proponerLineas(contenido, articulos, ajustes) {
+/**
+ * Artículos con los que se creó el albarán de trabajo en STEL (id del material → artículo: el encontrado, el dado de alta o el
+ * genérico «por identificar»), de la operación ALBARAN_TRABAJO del detalle del parte.
+ */
+export function articulosDelAlbaran(detalle) {
+  const op = (detalle?.operaciones || []).find((o) => o.tipo === "ALBARAN_TRABAJO" && o.articulos && typeof o.articulos === "object");
+  return Object.fromEntries(Object.entries(op?.articulos || {}).filter(([, v]) => Number(v) > 0).map(([k, v]) => [k, Number(v)]));
+}
+
+export function proponerLineas(contenido, articulos, ajustes, resueltos = {}) {
   const porId = new Map((articulos || []).map((a) => [Number(a.stel_id), a]));
   const lineas = [];
   const margen = margenDe(ajustes);
   for (const m of contenido.materiales || []) {
-    const a = m.stel_item_id ? porId.get(Number(m.stel_item_id)) : null;
+    // El artículo del parte o, si no lo trae, el del albarán de trabajo ya creado (usuario, 2026-11-24: la oficina lo revisa).
+    const idArticulo = m.stel_item_id ?? resueltos[m.id] ?? null;
+    const a = idArticulo ? porId.get(Number(idArticulo)) : null;
     // Materiales comprados (usuario, 2026-11-23): coste NETO con los descuentos del albarán del proveedor (solo si la línea
     // cuadraba) más el margen. Sin ese neto, el precio queda vacío: «Precios de materiales (compra + margen)» lo trae del
     // precio de compra de STEL. Nunca el PRECIO bruto del papel (no lleva los descuentos).
@@ -49,7 +60,7 @@ export function proponerLineas(contenido, articulos, ajustes) {
     const coste = comprobado ? Number(m.precio_neto) : estimado ? Number(m.precio_neto_estimado) : null;
     const origen = comprobado ? (m.precio_comprobado === "TECNICO" ? "precio y descuento copiados del papel por el técnico" : "albarán del proveedor (con descuentos)")
       : `SIN COMPROBAR: ${m.neto_estimado_como || "leído del papel"}`;
-    lineas.push({tipo: "MATERIAL", material_id: m.id, stel_item_id: a ? a.stel_id : (m.stel_item_id ?? null),
+    lineas.push({tipo: "MATERIAL", material_id: m.id, stel_item_id: a ? a.stel_id : idArticulo,
       descripcion: [m.descripcion, m.referencia ? `Ref. ${m.referencia}` : ""].filter(Boolean).join(" "),
       cantidad: Number(m.cantidad) || null, precio: coste !== null ? precioVenta(coste, margen) : null, descuento_pct: 0, iva_pct: a?.iva_pct ?? 21,
       ...(coste !== null ? {coste, coste_origen: origen, coste_dudoso: estimado, margen_pct: margen} : {})});

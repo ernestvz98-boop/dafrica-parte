@@ -3,7 +3,7 @@
 import {rpc, funcion, urlFirmada, subirArchivo, SinConexion} from "./lib/api.js";
 import {sha256} from "./lib/almacen.js";
 import {nuevoId, resumenTipo, horasTexto, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
-import {proponerLineas, totales, totalLinea, euros, lineasIncompletas, margenDe, precioVenta} from "./lib/economia.js";
+import {proponerLineas, articulosDelAlbaran, totales, totalLinea, euros, lineasIncompletas, margenDe, precioVenta} from "./lib/economia.js";
 import {esc, $, $$, avisar, dialogo, confirmar, pedirTexto, elegir, fechaHora, fechaCorta, chipEstado} from "./lib/ui.js";
 
 let ctx;
@@ -57,7 +57,7 @@ async function detalle(raiz, id) {
   const audios = archivos.filter((a) => a.tipo === "AUDIO");
   const pdfParte = d.pdf_path ? url.get(d.pdf_path) : "";
   const editableEco = ["ENVIADO", "EN_REVISION", "PRESUPUESTAR", "PENDIENTE_APROBACION"].includes(d.estado) && puede("sat.administrar");
-  let lineas = structuredClone(d.revision || proponerLineas(c, precios, aj));
+  let lineas = structuredClone(d.revision || proponerLineas(c, precios, aj, articulosDelAlbaran(d)));
   // Mano de obra y desplazamiento guardados antes de elegir sus servicios en Ajustes: se completan con ellos (la factura
   // necesita el artículo de STEL de cada línea). Se guarda al pulsar «Guardar revisión».
   const servicioDe = {MANO_OBRA: aj?.stel_servicio_mano_obra_id, DESPLAZAMIENTO: aj?.stel_servicio_desplazamiento_id};
@@ -174,7 +174,7 @@ async function detalle(raiz, id) {
     });
     $$("[data-quitar]", eco).forEach((b) => b.onclick = () => { lineas.splice(Number(b.dataset.quitar), 1); pintarEco(); });
     $("#bLinea").onclick = () => { lineas.push({tipo: "OTRO", stel_item_id: null, descripcion: "", cantidad: 1, precio: null, descuento_pct: 0, iva_pct: 21}); pintarEco(); };
-    $("#bProponer").onclick = async () => { if (await confirmar("¿Sustituir las líneas por las propuestas desde el parte?", "Sustituir")) { lineas = proponerLineas(c, precios, aj); pintarEco(); } };
+    $("#bProponer").onclick = async () => { if (await confirmar("¿Sustituir las líneas por las propuestas desde el parte?", "Sustituir")) { lineas = proponerLineas(c, precios, aj, articulosDelAlbaran(d)); pintarEco(); } };
     $("#bMargen")?.addEventListener("click", async (ev) => {
       ev.target.disabled = true; ev.target.textContent = "Calculando…";
       try {

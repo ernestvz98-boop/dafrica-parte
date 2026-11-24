@@ -40,6 +40,9 @@ const FIN_PALABRA = "(?![\\wáéíóúüñ])";
 const RE_SE_TRABAJO = new RegExp(`\\b${SE_TRABAJO}${FIN_PALABRA}`, "i");
 const RE_SE_COMPROBACION = new RegExp(`\\b${SE_COMPROBACION}${FIN_PALABRA}`, "i");
 const esTrabajo = (f) => PATRONES.trabajo.test(f) || RE_SE_TRABAJO.test(f);
+// «Por falta de gas» es la causa de la avería, no algo pendiente (prueba del 2026-11-24: «La caldera no arrancaba por falta de gas»
+// salía en «Pendiente» de un trabajo terminado). «Falta cambiar el filtro» sí es pendiente.
+const esPendiente = (f) => PATRONES.pendiente.test(String(f).replace(/\bpor falta de\b/gi, "por causa de"));
 const esComprobacion = (f) => PATRONES.comprobacion.test(f) || RE_SE_COMPROBACION.test(f);
 const PIEZA =/\b(?:he cambiado|he sustituido|he puesto|he instalado|he montado|cambiad[oa]|sustituid[oa]|instalad[oa]|montad[oa])\s+(?:el|la|los|las|un|una|unos|unas)?\s*([a-záéíóúñü0-9][^,;:]{1,60}?)(?=\s+(?:por|y|que|porque|ya que|del|de la|en)\b|[,;:.]|$)/i;
 const REFERENCIA = /\b(?:referencia|ref\.?|c[oó]digo|modelo|n[uú]mero de serie)\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-./]{1,30}(?:\s+[0-9][A-Za-z0-9\-./]{0,20})?)/i;
@@ -120,7 +123,7 @@ export function organizarDictado(texto) {
       if (mats.length) { r.materiales.push(...mats); colocada = true; }
       else if (VAGOS.test(f)) r.avisos.push(`Cantidad no concreta en: «${f}»`);
     }
-    if (!colocada && PATRONES.pendiente.test(f)) { r.pendientes.push(f); colocada = true; }
+    if (!colocada && esPendiente(f)) { r.pendientes.push(f); colocada = true; }
     if (!colocada && esTrabajo(f)) {
       r.trabajos.push(f); colocada = true;
       const mats = materialesConCantidad(f);

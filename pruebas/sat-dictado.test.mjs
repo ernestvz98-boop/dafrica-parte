@@ -156,7 +156,10 @@ test("STEL: líneas del albarán de trabajo y texto para el cliente (sin importe
     {id: "b", descripcion: "Racor", cantidad: 1, stel_item_id: 6, origen: prov, precio_papel: 3}]};
   const pagoAj = {margen_materiales_pct: 30};
   x = lineasAlbaran(cm, null, pagoAj);
-  assert.deepEqual(x.faltan, ["precio de compra con descuentos de «Racor» (escríbelo en la revisión)"], "nunca el PRECIO bruto del papel");
+  // Sin coste: la línea va SIN precio (nunca el PRECIO bruto del papel) y se apunta para la oficina; el albarán no se para
+  // (usuario, 2026-11-24: «se cree el albarán de trabajo y ya Dani lo revise»).
+  assert.deepEqual([x.faltan, x.sinPrecio], [[], ["Racor"]]);
+  assert.ok(!("item-base-price" in x.lineas[1]), "sin el precio bruto del papel");
   x = lineasAlbaran(cm, null, pagoAj, new Map(), new Map([["b", 1.5]]));
   assert.deepEqual(x.lineas.map((l) => [l["item-base-price"], l["discount-percentage"]]), [[9.36, 0], [1.95, 0]], "neto del papel o compra de STEL, + 30 %");
   x = lineasAlbaran(cm, [{material_id: "a", precio: 11, descuento_pct: 5}, {material_id: "b", precio: 2}], pagoAj);
@@ -170,4 +173,11 @@ test("STEL: líneas del albarán de trabajo y texto para el cliente (sin importe
   assert.equal(textoAlbaran(c).split("\n")[0], "Intervención pendiente de repuestos");
   assert.equal(fechaStel("2026-11-16", "09:05"), "2026-11-16T09:05:00+0100");
   assert.equal(fechaStel("2026-07-01", "09:05"), "2026-07-01T09:05:00+0200");
+});
+
+test("dictado: «por falta de …» es la causa (avería), no algo pendiente; «falta cambiar …» sí es pendiente", () => {
+  const r = organizarDictado("La caldera no arrancaba por falta de gas. Se ha cargado el circuito. Falta cambiar el filtro.");
+  assert.deepEqual(r.averia, ["La caldera no arrancaba por falta de gas."]);
+  assert.deepEqual(r.pendientes, ["Falta cambiar el filtro."]);
+  assert.deepEqual(r.trabajos, ["Se ha cargado el circuito."]);
 });

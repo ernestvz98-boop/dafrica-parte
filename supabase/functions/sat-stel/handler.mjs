@@ -98,7 +98,7 @@ export const FALTA_PAGO = "Falta: forma de pago y cuenta bancaria (Ajustes)";
  * devuelve `faltan`. `costesStel`: precio de compra en STEL de los materiales sin neto del papel (id del material → €).
  */
 export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map(), costesStel = new Map()) {
-  const lineas = [], faltan = [], sinComprobar = [];
+  const lineas = [], faltan = [], sinComprobar = [], sinPrecio = [];
   const porMaterial = new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id]));
   // Precio de cada línea: el de la revisión de la oficina si la hay; si no, materiales a su coste neto más el margen
   // (usuario, 2026-11-23) y mano de obra y desplazamiento al precio por hora de Ajustes.
@@ -115,9 +115,10 @@ export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map(
     if (precio !== null) dto = Number((revision || []).find((l) => l.material_id === m.id)?.descuento_pct) || 0;
     else {
       const c = costeDe(m, costesStel);
-      // Comprado al proveedor sin coste con descuentos comprobado: nunca el PRECIO bruto del papel (no lleva los descuentos).
-      if (!c && esDelProveedor(m)) { faltan.push(`precio de compra con descuentos de «${m.descripcion}» (escríbelo en la revisión)`); continue; }
+      // Sin coste (ni neto del papel, ni compra de STEL, ni estimado): la línea va SIN precio y se apunta para la oficina
+      // (usuario, 2026-11-24: el albarán se crea igual y Dani lo completa). Nunca el PRECIO bruto del papel (no lleva los descuentos).
       if (c) precio = precioVenta(c.coste, margen);
+      else sinPrecio.push(m.descripcion);
       if (c?.dudoso) sinComprobar.push(m.descripcion);
     }
     // El descuento de la revisión también va al albarán (antes se perdía); el coste + margen ya lleva los del proveedor.
@@ -142,7 +143,7 @@ export function lineasAlbaran(contenido, revision, ajustes, resueltos = new Map(
       ...conPrecio(porHora("DESPLAZAMIENTO", "precio_hora_desplazamiento")), ...dtoRevision("DESPLAZAMIENTO")});
   }
   if (!lineas.length && !faltan.length) faltan.push("al menos un material, tiempo de trabajo o desplazamiento");
-  return {lineas, faltan, sinComprobar};
+  return {lineas, faltan, sinComprobar, sinPrecio};
 }
 
 const canonRef = (s) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -159,17 +160,31 @@ export function mismaReferencia(stel, ref) {
 }
 /**
  * Material que la función puede buscar o dar de alta en STEL sola (usuario, 2026-11-20: «necesito que cree el albarán»):
- * leído del albarán del PROVEEDOR, sin dudas o comparado con el papel por el técnico, con referencia y descripción. Lo
- * dictado (una referencia dictada no es fiable) no se da de alta solo: lo asigna la oficina en la revisión.
+ * leído del albarán del PROVEEDOR, con referencia y descripción. También lo leído con dudas (usuario, 2026-11-24: «que el lector
+ * de albarán trate de ponerlo todo; si sale mal ya Dani lo arregla»): se busca igual y, si no está, se da de alta marcado «ALTA SIN
+ * COMPROBAR» y apuntado en el albarán para la oficina (`dudoso`). Lo dictado (una referencia dictada no es fiable) no se da de
+ * alta: va con el artículo genérico «por identificar» y lo asigna la oficina.
  */
 export function materialDelProveedor(m) {
   const origen = typeof m?.origen === "object" && m.origen ? m.origen.tipo : m?.origen;
   // Sin código en el papel (una tasa o un envase): vale si la descripción se puede usar como nombre;
   // se le pone una referencia propia fija (`referenciaPropia`), como hace el robot de compras con los artículos sin código.
   const sinCodigo = !String(m?.referencia ?? "").trim() && String(m?.descripcion || "").trim().length >= 3;
-  return origen === "ALBARAN_PROVEEDOR" && (m.comprobado === "TECNICO" || !(m.dudas || []).length)
-    && (canonRef(m.referencia).length >= 3 || sinCodigo) && String(m.descripcion || "").trim().length >= 2;
+  return origen === "ALBARAN_PROVEEDOR" && (canonRef(m.referencia).length >= 3 || sinCodigo) && String(m.descripcion || "").trim().length >= 2;
 }
+/** ¿Leído con dudas y sin comprobar por el técnico ni puesto por la oficina? */
+export const dudoso = (m) => (m?.dudas || []).length > 0 && m.comprobado !== "TECNICO" && m.comprobado !== "OFICINA";
+const trigramas = (s) => { const t = canonRef(s), out = new Set(); for (let i = 0; i + 3 <= t.length; i++) out.add(t.slice(i, i + 3)); return out; };
+/** Parecido de dos textos (0 a 1): trigramas comunes sobre los del más corto. */
+export function parecidoTexto(a, b) {
+  const x = trigramas(a), y = trigramas(b);
+  if (!x.size || !y.size) return 0;
+  let n = 0;
+  for (const t of x) if (y.has(t)) n++;
+  return n / Math.min(x.size, y.size);
+}
+/** Artículo genérico de STEL para los materiales sin artículo (dictados o que no se pueden dar de alta): la oficina pone el bueno. */
+export const GENERICO = {referencia: "SAT-POR-IDENTIFICAR", nombre: "MATERIAL POR IDENTIFICAR (SAT)"};
 /**
  * Referencia propia FIJA de un material sin código en el papel: «SR-» + 8 cifras hexadecimales de la huella del proveedor y la
  * descripción (la misma cada vez, para encontrarlo después y no duplicarlo). Antes de crearlo se busca por el nombre exacto.
@@ -340,21 +355,39 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     if (!pago) throw new Bloqueo(FALTA_PAGO);
     const sinServicio = lineasAlbaran({...c, materiales: []}, p.revision, ctx.ajustes).faltan.filter((f) => /servicio/.test(f));
     if (sinServicio.length) throw new Bloqueo("Falta: " + sinServicio.join("; "));
-    // Materiales del albarán del proveedor sin artículo de STEL: se busca o se da de alta (regla del robot de albaranes).
+    // Materiales sin artículo de STEL (usuario, 2026-11-24: «que cuando lo envíe se cree el albarán de trabajo y ya Dani en la
+    // oficina lo revise y actualice todo; que el lector trate de ponerlo todo, si sale mal ya Dani lo arregla»): los del albarán del
+    // proveedor se buscan o se dan de alta (regla del robot de albaranes), también los leídos con dudas; lo que no se puede (dictado,
+    // referencia repetida en STEL, código que en STEL es de otro artículo) va con el artículo genérico «por identificar». Nada de eso
+    // para el albarán: todo queda apuntado en sus comentarios privados para la oficina.
     const conRevision = new Set((p.revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => l.material_id));
-    const resueltos = new Map(), altas = [];
+    const resueltos = new Map(), altas = [], porIdentificar = [], altasDudosas = [];
     for (const m of c.materiales || []) {
-      if (m.stel_item_id || conRevision.has(m.id) || !materialDelProveedor(m)) continue;
-      const r = await articuloParaMaterial(m, p, ctx.ajustes);
+      if (m.stel_item_id || conRevision.has(m.id)) continue;
+      let r = null, motivo = "dictado";
+      if (materialDelProveedor(m)) {
+        try { r = await articuloParaMaterial(m, p, ctx.ajustes, {dudoso: dudoso(m)}); }
+        catch (e) { if (!(e instanceof Bloqueo)) throw e; motivo = e.message.slice(0, 90); }
+      } else if (esDelProveedor(m)) motivo = "sin código ni descripción útiles";
+      if (!r) { r = await articuloGenerico(altas); porIdentificar.push(`${m.descripcion} (${motivo})`); }
       resueltos.set(m.id, r.id);
-      if (r.creado) altas.push({material_id: m.id, referencia: String(m.referencia ?? "").trim() || await referenciaPropia(m), nombre: String(m.descripcion).trim().slice(0, 250), stel_id: r.id,
-        ...(Number(m.precio_neto) > 0 ? {precio: precioVenta(m.precio_neto, margenDe(ctx.ajustes))} : {})});
+      if (!r.creado) continue;
+      const referencia = String(m.referencia ?? "").trim() || await referenciaPropia(m), nombre = String(m.descripcion).trim().slice(0, 250);
+      altas.push({material_id: m.id, referencia, nombre, stel_id: r.id, ...(Number(m.precio_neto) > 0 ? {precio: precioVenta(m.precio_neto, margenDe(ctx.ajustes))} : {})});
+      if (dudoso(m)) altasDudosas.push(`${referencia} «${nombre}»`);
     }
     const costes = await costesDeStel(c.materiales, p.revision, resueltos, new Set(altas.map((x) => x.material_id)));
-    const {lineas, faltan, sinComprobar} = lineasAlbaran(c, p.revision, ctx.ajustes, resueltos, costes);
+    const {lineas, faltan, sinComprobar, sinPrecio} = lineasAlbaran(c, p.revision, ctx.ajustes, resueltos, costes);
     if (faltan.length) throw new Bloqueo("Falta: " + faltan.join("; "));
-    // Precio estimado con lo leído del papel: se avisa en los comentarios PRIVADOS (no los ve el cliente) para revisarlo.
-    const notaPrecios = sinComprobar.length ? ` · PRECIO SIN COMPROBAR (revisar con el albarán del proveedor): ${sinComprobar.join(", ")}` : "";
+    // Para la oficina, en los comentarios PRIVADOS (no los ve el cliente): lo que hay que mirar.
+    const leidosConDudas = (c.materiales || []).filter(dudoso).map((m) => m.descripcion);
+    const notaPrecios = [
+      leidosConDudas.length ? `LEÍDO CON DUDAS (comprobar con la foto del albarán del proveedor): ${leidosConDudas.join(", ")}` : "",
+      porIdentificar.length ? `POR IDENTIFICAR (poner el artículo): ${porIdentificar.join(", ")}` : "",
+      altasDudosas.length ? `ARTÍCULOS DADOS DE ALTA SIN COMPROBAR: ${altasDudosas.join(", ")}` : "",
+      sinPrecio.length ? `SIN PRECIO: ${sinPrecio.join(", ")}` : "",
+      sinComprobar.length ? `PRECIO SIN COMPROBAR (revisar con el albarán del proveedor): ${sinComprobar.join(", ")}` : ""]
+      .filter(Boolean).map((t) => " · " + t).join("");
     const titulo = `${p.codigo} · ${a.motivo}`.slice(0, 150);
     const version = Number(ctx.op.detalle?.version || p.version);
     // 1. ¿Ya existe? Por el id guardado o por el título (el código del parte va al principio).
@@ -421,7 +454,27 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     const final = primero(lista(await stel("GET", `workDeliveryNotes/${id}`)));
     return {stel_id: id, detalle: {referencia: final?.["full-reference"] || final?.reference || null, version, accion, adjuntos: adjuntados,
       adjuntos_total: adjuntar.length, articulos: Object.fromEntries(resueltos), ...(altas.length ? {articulos_creados: altas} : {}),
-      ...(sinComprobar.length ? {precios_sin_comprobar: sinComprobar} : {})}};
+      ...(sinComprobar.length ? {precios_sin_comprobar: sinComprobar} : {}), ...(leidosConDudas.length ? {leidos_con_dudas: leidosConDudas} : {}),
+      ...(porIdentificar.length ? {por_identificar: porIdentificar} : {}), ...(sinPrecio.length ? {sin_precio: sinPrecio} : {}),
+      ...(altasDudosas.length ? {altas_sin_comprobar: altasDudosas} : {})}};
+  }
+
+  /**
+   * Artículo genérico «por identificar» (GENERICO): se busca por su referencia y, si no está, se da de alta una vez (sin precio). Si se
+   * crea, va en `altas` para la copia del catálogo de la oficina.
+   */
+  let genericoId = null;
+  async function articuloGenerico(altas = []) {
+    if (genericoId) return {id: genericoId, creado: false};
+    const mio = (x) => canonRef(x.reference) === canonRef(GENERICO.referencia);
+    const ya = lista(await stel("GET", "products", {query: {reference: GENERICO.referencia, limit: 10}})).filter(mio).sort((a, b) => Number(a.id) - Number(b.id));
+    if (ya.length) { genericoId = idDe(ya[0]); return {id: genericoId, creado: false}; }
+    const creado = await stel("POST", "products", {body: {name: GENERICO.nombre, reference: GENERICO.referencia, "serial-number-id": -2,
+      "private-comments": "Genérico de DAFRICA SAT: materiales del parte sin artículo (dictados o que no se pudieron dar de alta). La oficina pone el artículo bueno en el albarán de trabajo."}});
+    genericoId = idDe(creado) || idDe(lista(await stel("GET", "products", {query: {reference: GENERICO.referencia, limit: 5}})).filter(mio));
+    if (!genericoId) throw new Error("STEL no devolvió el artículo genérico «por identificar» (se buscará en el siguiente intento)");
+    altas.push({material_id: null, referencia: GENERICO.referencia, nombre: GENERICO.nombre, stel_id: genericoId});
+    return {id: genericoId, creado: false};
   }
 
   /**
@@ -430,11 +483,15 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
    * → se usa; si no, se da de alta con nombre, referencia y, si la línea cuadraba, el precio neto como compra y venta base
    * (regla del robot, usuario 2026-10-30). Reintentar no duplica: la siguiente vez lo encuentra por la referencia.
    */
-  async function articuloParaMaterial(m, p, ajustes) {
+  async function articuloParaMaterial(m, p, ajustes, {dudoso: esDudoso = false} = {}) {
     const ref = String(m.referencia ?? "").trim() || await referenciaPropia(m), nombre = String(m.descripcion).trim().slice(0, 250);
     const porRef = lista(await stel("GET", "products", {query: {reference: ref, limit: 20}})).filter((x) => mismaReferencia(x.reference, ref));
     if (porRef.length > 1) throw new Bloqueo(`La referencia ${ref} está ${porRef.length} veces en STEL: elige el artículo en la revisión`);
-    if (porRef.length === 1) return {id: idDe(porRef), creado: false};
+    if (porRef.length === 1) {
+      // Leído con dudas: una cifra mal leída puede dar el código de OTRO artículo. Solo se usa si su nombre se parece a lo leído.
+      if (esDudoso && parecidoTexto(porRef[0].name, nombre) < 0.3) throw new Bloqueo(`la referencia ${ref} es de «${String(porRef[0].name || "").slice(0, 50)}» en STEL`);
+      return {id: idDe(porRef), creado: false};
+    }
     const porNombre = lista(await stel("GET", "products", {query: {name: nombre, limit: 20}})).filter((x) => canonRef(x.name) === canonRef(nombre));
     if (porNombre.length > 1) throw new Bloqueo(`«${nombre}» está ${porNombre.length} veces en STEL: elige el artículo en la revisión`);
     if (porNombre.length === 1) return {id: idDe(porNombre), creado: false};
@@ -445,7 +502,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
     // La referencia es la del papel: serie MANUAL (-2), si no STEL rechaza las que llevan letras o pone la suya (E000191).
     const creado = await stel("POST", "products", {body: {name: nombre, reference: ref, "serial-number-id": -2,
       ...(neto > 0 ? {"purchase-price": neto, "sales-price": precioVenta(neto, margenDe(ajustes))} : {}),
-      "private-comments": `Alta de DAFRICA SAT ${p.codigo}: albarán del proveedor ${[o.proveedor, o.numero].filter(Boolean).join(" ")}`.slice(0, 500)}});
+      "private-comments": `${esDudoso ? "ALTA SIN COMPROBAR (revisar el código y el nombre con el albarán del proveedor) · " : ""}Alta de DAFRICA SAT ${p.codigo}: albarán del proveedor ${[o.proveedor, o.numero].filter(Boolean).join(" ")}`.slice(0, 500)}});
     let id = idDe(creado);
     if (!id) id = idDe(lista(await stel("GET", "products", {query: {reference: ref, limit: 5}})).filter((x) => mismaReferencia(x.reference, ref)));
     if (!id) throw new Error(`STEL no devolvió el artículo creado (${ref}); se buscará en el siguiente intento`);
@@ -645,6 +702,11 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       }
       if (!parteId) return responder({error: "Falta el parte"}, 400);
       const det = await rpc("sat_parte_detalle", {p_id: parteId}, {usuario: true});
+      // Artículos con los que se creó el albarán de trabajo (el encontrado, el dado de alta o el genérico «por identificar»): valen
+      // para los materiales a los que la revisión no les pone otro (sat_parte_json, 20261124_sat_articulos_en_operaciones.sql).
+      const articulosAlbaran = new Map(Object.entries((det.operaciones || []).find((o) => o.tipo === "ALBARAN_TRABAJO" && o.articulos)?.articulos || {})
+        .filter(([, v]) => Number(v) > 0).map(([k, v]) => [k, Number(v)]));
+      const conArticulosAlbaran = (rev) => new Map([...articulosAlbaran, ...(rev || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id])]);
       if (cuerpo.accion === "borrar_albaran") {
         // Solo un parte que la oficina ya marcó NO FACTURABLE y sin factura (duplicado, prueba…): se borra su albarán de
         // trabajo y, si el aviso no tiene otro parte, su incidencia.
@@ -712,8 +774,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
         const margen = margenDe(aj);
         const mats = new Map(contenidoTotal.materiales.map((m) => [m.id, m]));
         const sinPrecio = (revision || []).map((l) => (l.tipo === "MATERIAL" ? {...l, precio: null} : l));
-        const costes = await costesDeStel([...mats.values()], sinPrecio,
-          new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id])));
+        const costes = await costesDeStel([...mats.values()], sinPrecio, conArticulosAlbaran(revision));
         const sinCoste = [];
         revision = revision.map((l) => {
           if (l.tipo !== "MATERIAL" || !l.material_id || !mats.has(l.material_id)) return l;
@@ -735,7 +796,7 @@ export async function handler(req, {env, fetcher = fetch, dormir = (ms) => new P
       if (!doc) return responder({error: "El albarán de trabajo ya no está en STEL"}, 404);
       const pago = pagoDe(aj);
       if (!pago) return responder({error: FALTA_PAGO}, 409);
-      const resueltos = new Map((revision || []).filter((l) => l.material_id && l.stel_item_id).map((l) => [l.material_id, l.stel_item_id]));
+      const resueltos = conArticulosAlbaran(revision);
       const {lineas, faltan} = lineasAlbaran(contenidoTotal, revision, aj, resueltos, await costesDeStel(contenidoTotal.materiales, revision, resueltos));
       if (faltan.length) return responder({error: "Falta: " + faltan.join("; "), ...(recalculado ? {recalculado} : {})}, 409);
       // PUT con «lines» sustituye TODAS las líneas por las que se mandan (especificación de STEL).

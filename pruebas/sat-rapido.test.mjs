@@ -24,8 +24,9 @@ test("parte rápido: cada frase del audio va entera al parte; materiales solo co
   assert.equal(c.modo, "RAPIDO");
   assert.equal(c.tipo_visita, "PENDIENTE", "si se dice que queda algo pendiente, se propone pendiente");
   assert.deepEqual(c.comprobaciones, [], "en el parte rápido no hay resultados que rellenar");
-  // Albarán: solo lo leído sin dudas; el dudoso y el de cantidad ilegible NO entran en lo firmado (nunca se inventa).
-  assert.deepEqual(c.materiales.filter((m) => m.origen === "ALBARAN_PROVEEDOR").map((m) => [m.id, m.cantidad, m.dudas.length]), [["alb-1", 1, 0]]);
+  // Albarán (usuario, 2026-11-24: «que el lector trate de ponerlo todo»): entra todo lo leído con cantidad, el dudoso con sus dudas
+  // (a confirmar por la oficina); el de cantidad ilegible NO entra (nunca se inventa una cantidad).
+  assert.deepEqual(c.materiales.filter((m) => m.origen === "ALBARAN_PROVEEDOR").map((m) => [m.id, m.cantidad, m.dudas.length]), [["alb-1", 1, 0], ["alb-2", 3, 1]]);
   // Dictado: «dos metros de tubo» sí; «he cambiado el termostato» (sin cantidad) no se convierte en material.
   const dictados = c.materiales.filter((m) => m.origen === "DICTADO");
   assert.deepEqual(dictados.map((m) => [m.id, m.cantidad, m.unidad]), [["dictado-1", 2, "m"]]);
@@ -44,7 +45,8 @@ test("parte rápido: para firmar hacen falta texto, cómo queda y las horas; lo 
   assert.ok(vacio.some((p) => /desplazamiento/.test(p)));
   const c = contenidoRapido(base(), {textos: ["He cambiado el termostato."], organizar: organizarDictado, horaFin: "10:00",
     materialesAlbaran: [{id: "a", descripcion: "CODO", cantidad: 2, unidad: "ud", dudas: ["dudoso"]}], nuevoId});
-  assert.deepEqual(c.materiales, [], "lo dudoso del albarán del proveedor no entra en lo firmado");
+  assert.deepEqual(c.materiales.map((m) => [m.id, m.dudas, m.comprobado]), [["a", ["dudoso"], undefined]], "lo dudoso entra, marcado para la oficina");
+  assert.deepEqual(problemasParaFirmar({...c, tipo_visita: "REPARACION_FINALIZADA", tiempo_trabajo_min: 60, desplazamiento_min: 0}), [], "y no impide firmar");
   // Confirmado por el técnico: entra con sus precios (comprobado, estimado y lo leído) para la oficina.
   const conf = contenidoRapido(base(), {textos: ["He cambiado el codo."], organizar: organizarDictado, horaFin: "10:00", nuevoId,
     materialesAlbaran: [{id: "a", descripcion: "CODO", cantidad: 2, unidad: "ud", dudas: ["dudoso"], confirmado: true, precio_leido: 3, dto_leido: 20, precio_neto_estimado: 2.4, neto_estimado_como: "precio del papel − 20 %"}]});
@@ -106,13 +108,17 @@ test("dictado en impersonal («se hace», «se arregla», «se instalan»): trab
   assert.deepEqual(r.materiales, [], "«llaves y manómetros» sin cantidad no se convierten en materiales");
 });
 
-test("albarán del proveedor: lo dudoso entra solo si el técnico lo ha comparado con el papel", () => {
+test("albarán del proveedor: todo lo leído con cantidad entra; lo corregido por el técnico, comprobado; sin descripción, su código", () => {
   const albaran = [
     {id: "a1", descripcion: "CODO FICTICIO 25", referencia: "9990000001", cantidad: 3, unidad: "ud", dudas: ["Albarán leído con dudas en conjunto"]},
-    {id: "a2", descripcion: "TE FICTICIA 25", referencia: "9990000002", cantidad: 1, unidad: "ud", dudas: ["Albarán leído con dudas en conjunto"], confirmado: true, stel_item_id: 77}];
+    {id: "a2", descripcion: "TE FICTICIA 25", referencia: "9990000002", cantidad: 1, unidad: "ud", dudas: ["Albarán leído con dudas en conjunto"], confirmado: true, stel_item_id: 77},
+    {id: "a3", descripcion: "", referencia: "9990000003", cantidad: 2, unidad: "ud", dudas: ["No se leyó la descripción: escríbela"]},
+    {id: "a4", descripcion: "SIN CANTIDAD FICTICIA", referencia: "9990000004", cantidad: null, unidad: "ud", dudas: ["No se leyó la cantidad: escríbela"]}];
   const c = contenidoRapido(base(), {textos: ["He cambiado el codo."], organizar: organizarDictado, materialesAlbaran: albaran, horaFin: "10:00", nuevoId});
   const alb = c.materiales.filter((m) => m.origen === "ALBARAN_PROVEEDOR");
-  assert.deepEqual(alb.map((m) => [m.id, m.cantidad, m.dudas.length, m.comprobado, m.stel_item_id]), [["a2", 1, 0, "TECNICO", 77]]);
+  assert.deepEqual(alb.map((m) => [m.id, m.cantidad, m.dudas.length, m.comprobado, m.stel_item_id]),
+    [["a1", 3, 1, undefined, null], ["a2", 1, 0, "TECNICO", 77], ["a3", 2, 1, undefined, null]]);
+  assert.equal(alb[2].descripcion, "Ref. 9990000003");
 });
 
 test("precios del albarán del proveedor: PRECIO si se leyó con seguridad; neto solo si la línea cuadra con su importe", async () => {
@@ -139,8 +145,13 @@ test("precios del albarán del proveedor: PRECIO si se leyó con seguridad; neto
   assert.deepEqual(camposDePrecio({precio_neto: 3.6, precio_comprobado: "TECNICO", precio_neto_estimado: 0, otro: 1}), {precio_neto: 3.6, precio_comprobado: "TECNICO"});
 });
 
-test("sat-stel: solo da de alta lo leído del albarán del proveedor y comprobado; referencias con el prefijo del proveedor", async () => {
-  const {materialDelProveedor, mismaReferencia, referenciaPropia} = await import("../supabase/functions/sat-stel/handler.mjs");
+test("sat-stel: da de alta lo leído del albarán del proveedor (también lo dudoso, marcado); referencias con el prefijo del proveedor", async () => {
+  const {materialDelProveedor, mismaReferencia, referenciaPropia, dudoso, parecidoTexto} = await import("../supabase/functions/sat-stel/handler.mjs");
+  assert.equal(dudoso({dudas: ["x"]}), true);
+  assert.equal(dudoso({dudas: ["x"], comprobado: "TECNICO"}), false, "corregido por el técnico");
+  assert.equal(dudoso({dudas: [], comprobado: undefined}), false);
+  assert.ok(parecidoTexto("KG GAS FICTICIO R999 (CARGA 10KG)", "KG GASS FICTICIO R999 CARGA 10KG") >= 0.3, "el mismo artículo mal leído se parece");
+  assert.ok(parecidoTexto("TUBO MULTICAPA 20", "VALVULA ESFERA 1/2") < 0.3, "otro artículo, no");
   const o = {tipo: "ALBARAN_PROVEEDOR"};
   // Sin código en el papel (una tasa): vale con descripción, con referencia propia fija «SR-» (misma entrada, misma referencia).
   const tasa = {origen: {...o, proveedor: "Proveedor Ficticio"}, referencia: "", descripcion: "TASA FICTICIA", dudas: []};
@@ -152,7 +163,7 @@ test("sat-stel: solo da de alta lo leído del albarán del proveedor y comprobad
   assert.ok(!materialDelProveedor({...tasa, descripcion: "TA"}), "sin descripción útil, no");
   assert.ok(materialDelProveedor({origen: o, referencia: "9990000002", descripcion: "TE FICTICIA", dudas: []}));
   assert.ok(materialDelProveedor({origen: o, referencia: "9990000002", descripcion: "TE FICTICIA", dudas: ["x"], comprobado: "TECNICO"}));
-  assert.ok(!materialDelProveedor({origen: o, referencia: "9990000002", descripcion: "TE FICTICIA", dudas: ["x"]}), "dudoso sin comprobar, no");
+  assert.ok(materialDelProveedor({origen: o, referencia: "9990000002", descripcion: "TE FICTICIA", dudas: ["x"]}), "dudoso sin comprobar, también (usuario, 2026-11-24)");
   assert.ok(!materialDelProveedor({origen: "DICTADO", referencia: "TER 01", descripcion: "Termostato", dudas: []}), "lo dictado, no");
   assert.ok(!materialDelProveedor({origen: o, referencia: "12", descripcion: "Código cortado", dudas: []}), "código de menos de 3, no");
   assert.ok(mismaReferencia("H8953- 1255087035", "1255087035"));

@@ -7,7 +7,7 @@ import {organizarDictado} from "./lib/dictado.js";
 import {contenidoNuevo, normalizar, iguales, problemasParaFirmar, minutosEntre, nuevoId, hoy, ahoraHora, resumenTipo, contenidoRapido,
   horasTexto, minutosDeHoras, TIPOS_VISITA, PENDIENTE_DE, RESULTADOS, MOMENTOS, PRIORIDADES} from "./lib/contenido.js";
 import {PanelFirma, comprimirFoto, grabarAudio, extensionAudio} from "./lib/medios.js";
-import {articuloPorReferencia, camposDePrecio, descuentoTexto} from "./lib/materiales-albaran.js";
+import {articuloPorReferencia, camposDePrecio} from "./lib/materiales-albaran.js";
 import {generarPdfParte, huellaContenido} from "./lib/pdf.js";
 import {esc, $, $$, avisar, dialogo, confirmar, pedirTexto, elegir, fechaHora, fechaCorta, chipEstado, abrirBlob, descargarBlob, compartirBlob} from "./lib/ui.js";
 
@@ -638,33 +638,26 @@ async function pasoRapido(p, raiz, editable) {
     : d.texto ? `<p class="texto-dictado">${esc(d.texto)}</p><button type="button" class="boton mini sec" data-corregir="${esc(a.id)}" data-editar>Corregir el texto</button>`
     : `<p class="${d.error ? "alerta ambar" : "suave"}">${esc(d.error ? "No transcrito: " + d.error : "Sin transcribir todavía")}</p>
        <button type="button" class="boton mini" data-transcribir="${esc(a.id)}" data-editar>Transcribir</button>`;
-  // Precio y descuento leídos del papel (usuario, 2026-11-23: si el lector se equivoca, «lo modifica el técnico o en el STEL»).
-  // No van al PDF ni a la firma: solo para que el técnico los compare con el papel y los corrija con «Corregir».
-  const eur = (x) => String(Math.round(Number(x) * 10000) / 10000).replace(".", ",");
-  // Solo se enseña cuando hace falta mirarlo: precio leído pero sin comprobar (si cuadra, nada que hacer).
-  const precioLinea = (m) => {
-    const precio = m.precio_papel ?? m.precio_leido, dto = m.dto_leido;
-    if (Number(m.precio_neto) > 0 || !(Number(precio) > 0)) return "";
-    return `<div class="suave peq">Precio ${esc(eur(precio))} €${Number(dto) > 0 ? ` · dto ${esc(eur(dto))} %` : ""} <span class="chip ambar">mira el precio</span></div>`;
-  };
+  // El técnico no ve precios (usuario, 2026-11-24: el porcentaje y los precios los pone la oficina en STEL). Los precios leídos
+  // del papel siguen yendo con cada material a la oficina y al albarán de trabajo (a su coste).
   const estadoAlb = (fid) => {
     const x = alb[fid];
     if (!x || x.estado === "LEYENDO") return `<p class="suave">⏳ Leyendo el albarán… (alrededor de un minuto)</p>`;
     const releer = `<button type="button" class="boton mini sec" data-alb-releer="${esc(fid)}" data-editar>↻ Volver a leer</button>`;
     if (x.estado === "ERROR") return `<p class="alerta ambar">No se pudo leer (${esc(x.error)}). La foto va adjunta: la oficina la lee y pasa los materiales.</p>${releer}`;
-    // Entran en el parte las líneas leídas sin dudas y las que el técnico ha comparado con el papel (misma regla que
-    // contenidoRapido). Las dudosas se enseñan para comparar: «Coinciden con el papel», «Corregir» o «Quitar».
+    // Entra en el parte todo lo leído con cantidad (misma regla que contenidoRapido; usuario, 2026-11-24: «que el lector trate de
+    // ponerlo todo; si sale mal ya Dani lo arregla»). Lo dudoso entra igual, marcado para la oficina. «Corregir» y «Quitar», solo
+    // si el técnico ve algo claramente mal.
     if (!x.materiales.length) return `<p class="alerta ambar">No se han podido leer las líneas de esta foto. No pasa nada: la foto va adjunta al parte y la oficina pasa los materiales. Si quieres, repite la foto (el papel entero, plano y con luz) o pulsa «Volver a leer».</p>${releer}`;
-    const entra = (m) => Number(m.cantidad) > 0 && m.descripcion && (!m.dudas.length || m.confirmado);
-    const pendientes = x.materiales.filter((m) => !entra(m));
-    const linea = (m) => `<li class="${entra(m) ? "" : "dudosa"}"><b>${m.cantidad === null ? "¿cantidad?" : esc(String(m.cantidad).replace(".", ","))} ${esc(m.unidad)}</b> · ${esc(m.descripcion || "¿descripción?")}
-      ${m.referencia ? ` <span class="suave">(${esc(m.referencia)})</span>` : ""}${m.confirmado ? ` <span class="chip verde">comprobado</span>` : !m.dudas.length ? "" : ` <span class="chip ambar">comprobar</span>`}
-      ${precioLinea(m)}
+    const entra = (m) => Number(m.cantidad) > 0 && Boolean(m.descripcion || m.referencia);
+    const sinCantidad = x.materiales.filter((m) => !entra(m)).length, dudosas = x.materiales.filter((m) => entra(m) && m.dudas.length && !m.confirmado).length;
+    const linea = (m) => `<li class="${entra(m) && (!m.dudas.length || m.confirmado) ? "" : "dudosa"}"><b>${m.cantidad === null ? "¿cantidad?" : esc(String(m.cantidad).replace(".", ","))} ${esc(m.unidad)}</b> · ${esc(m.descripcion || "¿descripción?")}
+      ${m.referencia ? ` <span class="suave">(${esc(m.referencia)})</span>` : ""}${!entra(m) ? ` <span class="chip ambar">falta la cantidad</span>` : m.confirmado ? ` <span class="chip verde">corregido</span>` : !m.dudas.length ? "" : ` <span class="chip ambar">lo revisa la oficina</span>`}
       <span class="fila" style="margin-top:4px"><button type="button" class="boton mini sec" data-alb-corregir="${esc(fid)}|${esc(m.id)}" data-editar>Corregir</button>
       <button type="button" class="boton mini sec" data-alb-quitar="${esc(fid)}|${esc(m.id)}" data-editar>Quitar</button></span></li>`;
     return `<p class="peq"><b>${esc(x.proveedor || "Albarán leído")}</b></p><ul class="materiales">${x.materiales.map(linea).join("")}</ul>
-      ${pendientes.length ? `<p class="alerta ambar peq">${pendientes.length} línea(s) leídas con dudas (en ámbar). Compáralas con el papel: si están bien, pulsa «Coinciden»; si no, «Corregir» o «Quitar». Lo que no confirmes no entra en lo que firma el cliente (la oficina lo pasa con la foto).</p>
-        <button type="button" class="boton verde ancho" data-alb-confirmar="${esc(fid)}" data-editar>✓ Coinciden con el papel</button>` : `<p class="peq">✓ Estas líneas entran en el parte.</p>`}`;
+      <p class="peq">✓ Estas líneas entran en el parte.${dudosas ? ` Las de «lo revisa la oficina» se leyeron con dudas: entran igual y la oficina las comprueba con la foto.` : ""} Si ves alguna claramente mal, «Corregir» o «Quitar».</p>
+      ${sinCantidad ? `<p class="alerta ambar peq">${sinCantidad} línea(s) sin cantidad: no entran hasta que pongas la cantidad con «Corregir» (o la oficina las pasa con la foto).</p>` : ""}`;
   };
   const tTrab = h(c.tiempo_trabajo_min), tDesp = h(c.desplazamiento_min);
   raiz.innerHTML = `<div class="tarjeta"><h2>📍 ${esc(c.cliente?.nombre || "Cliente")}</h2>
@@ -755,13 +748,6 @@ async function pasoRapido(p, raiz, editable) {
     const {articulo} = articuloPorReferencia(m.referencia, S.catalogo.articulos || []);
     return articulo ? {...m, stel_item_id: articulo.stel_id, articulo_stel: articulo.nombre} : m;
   };
-  $$("[data-alb-confirmar]", raiz).forEach((b) => b.onclick = async () => {
-    const x = (await partes.get(p.id)).albaranes?.[b.dataset.albConfirmar];
-    const sinDatos = (x?.materiales || []).filter((m) => !(Number(m.cantidad) > 0) || !m.descripcion);
-    if (sinDatos.length) return avisar(`${sinDatos.length} línea(s) sin cantidad o sin descripción: corrígelas o quítalas antes.`, {error: true});
-    if (!(await confirmar("¿Has comparado cada línea (cantidad, descripción y referencia) con el papel y están bien?", "Sí, coinciden", "Todavía no"))) return;
-    cambiarLineas(b.dataset.albConfirmar, (x2) => { x2.materiales = x2.materiales.map((m) => conArticulo({...m, confirmado: true})); });
-  });
   $$("[data-alb-releer]", raiz).forEach((b) => b.onclick = async () => {
     const a = await archivos.get(b.dataset.albReleer);
     if (!a?.blob) return avisar("La foto ya no está en el teléfono: la lee la oficina.", {error: true});
@@ -778,21 +764,13 @@ async function pasoRapido(p, raiz, editable) {
     const d = await dialogo(`<h2>Corregir la línea</h2><p class="suave">Cópiala tal cual del papel.</p>
       <label>Cantidad</label><input id="cCant" inputmode="decimal" value="${esc(m.cantidad ?? "")}">
       <label>Descripción</label><input id="cDesc" value="${esc(m.descripcion || "")}">
-      <label>Referencia</label><input id="cRef" value="${esc(m.referencia || "")}">
-      <div class="fila"><div class="crece"><label>Precio por unidad (€)</label><input id="cPrecio" inputmode="decimal" value="${esc(m.precio_papel ?? m.precio_leido ?? "")}"></div>
-      <div class="crece"><label>Descuento (%)</label><input id="cDto" inputmode="decimal" placeholder="60+10" value="${esc(m.dto_texto ?? m.dto_leido ?? "")}"></div></div>
-      <p class="suave peq">Precio y descuento no salen en lo que firma el cliente: son para la oficina. Varios descuentos: «60+10».</p>`,
-    [{texto: "Cancelar", valor: null}, {texto: "Guardar", valor: (x) => ({cantidad: Number(String($("#cCant", x).value).replace(",", ".")), descripcion: $("#cDesc", x).value.trim(), referencia: $("#cRef", x).value.trim(),
-      precio: $("#cPrecio", x).value.trim(), dto: $("#cDto", x).value.trim()}),
-      validar: (x) => Number(String($("#cCant", x).value).replace(",", ".")) > 0 && $("#cDesc", x).value.trim().length > 1
-        && ($("#cPrecio", x).value.trim() === "" || Number($("#cPrecio", x).value.trim().replace(",", ".")) > 0) && descuentoTexto($("#cDto", x).value) !== null}]);
+      <label>Referencia</label><input id="cRef" value="${esc(m.referencia || "")}">`,
+    [{texto: "Cancelar", valor: null}, {texto: "Guardar", valor: (x) => ({cantidad: Number(String($("#cCant", x).value).replace(",", ".")), descripcion: $("#cDesc", x).value.trim(), referencia: $("#cRef", x).value.trim()}),
+      validar: (x) => Number(String($("#cCant", x).value).replace(",", ".")) > 0 && $("#cDesc", x).value.trim().length > 1}]);
     if (!d) return;
-    // Precio y descuento copiados del papel por el técnico: el neto queda comprobado por él.
-    const precio = d.precio === "" ? null : Number(d.precio.replace(",", ".")), dto = descuentoTexto(d.dto);
-    const precios = precio > 0 ? {precio_papel: precio, precio_neto: Math.round(precio * (1 - dto / 100) * 10000) / 10000, precio_comprobado: "TECNICO",
-      dto_leido: dto > 0 ? dto : undefined, dto_texto: d.dto || undefined, precio_neto_estimado: undefined, neto_estimado_como: undefined} : {};
-    const {precio: _p, dto: _d, ...campos} = d;
-    cambiarLineas(fid, (x) => { x.materiales = x.materiales.map((y) => y.id === mid ? conArticulo({...y, ...campos, ...precios, stel_item_id: campos.referencia === y.referencia ? y.stel_item_id : null, confirmado: true}) : y); });
+    // Cantidad, descripción y código copiados del papel por el técnico: la línea queda comprobada por él. Los precios leídos
+    // del papel no se tocan (van a la oficina).
+    cambiarLineas(fid, (x) => { x.materiales = x.materiales.map((y) => y.id === mid ? conArticulo({...y, ...d, stel_item_id: d.referencia === y.referencia ? y.stel_item_id : null, confirmado: true}) : y); });
   });
   $$("[data-quitar-foto]", raiz).forEach((b) => b.onclick = async () => {
     if (!(await confirmar("¿Quitar esta foto del parte?", "Quitar"))) return;

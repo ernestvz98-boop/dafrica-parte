@@ -3,6 +3,30 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-24 · DAFRICA SAT 0.3.18: el técnico solo cuenta, fotografía y firma; el albarán de trabajo se crea con todo (sat-stel v12)
+
+- Usuario: «que en el parte a firmar aparezcan su descripción y los materiales que utilizó así como el tiempo de trabajo y
+  desplazamiento y que cuando lo envíe se cree el albarán de trabajo y ya Dani en la oficina lo revise y actualice todo (pero que el
+  lector de albarán trate de ponerlo todo); si sale mal ya Dani lo arregla. Solo que el porcentaje por encima lo calcula Dani».
+- La pantalla de firma y el PDF ya llevaban descripción, materiales y horas de trabajo y desplazamiento: sin cambios.
+- Técnico (`sat/app.js`, `sat/lib/contenido.js`): entra en el parte TODO lo leído del albarán del proveedor con cantidad (antes,
+  solo lo leído sin dudas o lo que el técnico confirmaba con «Coinciden con el papel»); lo dudoso, con «lo revisa la oficina» en la
+  pantalla y «a confirmar por la oficina» en lo firmado. Sin descripción, su código. Ya no hay que confirmar: «Corregir» (cantidad,
+  descripción y código) y «Quitar», solo si se ve algo claramente mal. Sin precios en su pantalla.
+- Albarán de trabajo (`sat-stel` v12): nada lo para por los materiales. Lo leído con dudas se busca o se da de alta igual (marcado
+  «ALTA SIN COMPROBAR» en el artículo de STEL), salvo si su código es en STEL de un artículo con otro nombre (una cifra mal leída) o
+  está repetido; eso y lo dictado van con el artículo genérico «MATERIAL POR IDENTIFICAR (SAT)» (ref SAT-POR-IDENTIFICAR, se da de
+  alta una vez). Sin coste, la línea va sin precio. Los comentarios privados del albarán dicen qué mirar: LEÍDO CON DUDAS, POR
+  IDENTIFICAR, ARTÍCULOS DADOS DE ALTA SIN COMPROBAR, SIN PRECIO, PRECIO SIN COMPROBAR.
+- Oficina: la revisión propuesta después de crearse el albarán ya trae el artículo con el que se creó cada material
+  (`supabase/propuestas/20261124_sat_articulos_en_operaciones.sql`: `sat_parte_json` incluye `articulos` en la operación del
+  albarán de trabajo; `articulosDelAlbaran`, y las acciones de precios de sat-stel los usan si la revisión no trae otro).
+- Margen de los materiales a 0 en producción desde hoy (ajuste; el porcentaje lo pone la oficina a mano en STEL).
+- Verificación: `npm run test:sat` (prueba nueva de punta a punta: dudoso dado de alta y marcado, código de otro artículo → genérico,
+  dictado → genérico, sin precio, notas para la oficina, la revisión propuesta con los artículos; la de punta a punta, con el albarán
+  creado al enviar) y `npm test`.
+- Producción: la migración (solo lectura: una clave más en el JSON del parte), `sat-stel` v12 (copia de la v11) y la web.
+
 ## 2026-11-24 · Lector: dos lecturas fiables distintas no se aceptan; SAT 0.3.17 lee la foto enderezada
 
 - Fallo real (foto de un albarán de un técnico, privada): la descripción de una línea (una tasa) salía ACEPTADA sin su última letra

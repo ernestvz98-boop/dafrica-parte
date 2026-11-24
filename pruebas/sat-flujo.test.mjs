@@ -84,15 +84,34 @@ test("SAT: flujo completo de punta a punta con STEL falso", {timeout: 120000}, a
   const enviado = await rpc("tecnico", "sat_parte_enviar", {p_id: parteId, p_pdf_path: `${parteId}/parte-v1-${pdfId}.pdf`, p_pdf_sha256: sha(pdf)});
   assert.equal(enviado.estado, "ENVIADO");
 
-  // 4. STEL: la incidencia se crea; el albarán se bloquea porque «Codo 16» no tiene artículo de STEL.
+  // 4. STEL: al enviar se crean la incidencia y el albarán de trabajo (usuario, 2026-11-24: «que cuando lo envíe se cree el albarán
+  // de trabajo y ya Dani en la oficina lo revise»). «Codo 16», escrito a mano y sin artículo de STEL, va con el artículo genérico
+  // «por identificar» y queda apuntado para la oficina. STEL pierde la respuesta del POST del albarán: el siguiente intento lo encuentra.
   await stel("tecnico2", {accion: "procesar", parte_id: parteId}, {esperar: 403});
+  e.stel.estado.perderRespuesta.add("POST workDeliveryNotes");
   let r = await stel("tecnico", {accion: "procesar", parte_id: parteId});
-  assert.deepEqual(r.operaciones.map((o) => [o.tipo, o.estado]), [["INCIDENCIA", "OK"], ["ALBARAN_TRABAJO", "BLOQUEADA"]]);
-  assert.match(r.operaciones[1].error, /Codo 16/);
+  assert.deepEqual(r.operaciones.map((o) => [o.tipo, o.estado]), [["INCIDENCIA", "OK"], ["ALBARAN_TRABAJO", "ERROR"]]);
   assert.equal(e.stel.datos.incidents.length, 1);
   assert.equal(e.stel.datos.incidents[0]["external-id"], "DAFRICA-SAT-" + aviso.id);
+  assert.equal(e.stel.datos.workDeliveryNotes.length, 1, "el POST se hizo aunque se perdió la respuesta");
+  r = await stel("tecnico", {accion: "procesar", parte_id: parteId});
+  assert.equal(r.operaciones[0].estado, "OK", JSON.stringify(r));
+  assert.equal(r.operaciones[0].detalle.accion, "reutilizado");
+  assert.equal(e.stel.datos.workDeliveryNotes.length, 1, "sin duplicar el albarán de trabajo");
+  const genericos = e.stel.datos.products.filter((x) => x.reference === "SAT-POR-IDENTIFICAR");
+  assert.equal(genericos.length, 1, "el artículo genérico se da de alta una sola vez");
+  assert.deepEqual(r.operaciones[0].detalle.por_identificar, ["Codo 16 (dictado)"]);
+  const wdn = e.stel.datos.workDeliveryNotes[0];
+  assert.equal(wdn["account-id"], e.semilla.c1.id);
+  assert.equal(wdn["parent-incident-id"], e.stel.datos.incidents[0].id);
+  assert.ok(wdn.title.startsWith(enviado.codigo + " "));
+  assert.deepEqual(wdn.lines.map((l) => [l["item-id"], l.units]), [[e.semilla.p1.id, 1], [genericos[0].id, 3], [e.semilla.s1.id, 1.5], [e.semilla.s2.id, 0.33]]); // desplazamiento en horas (20 min)
+  assert.match(wdn["private-comments"], /POR IDENTIFICAR \(poner el artículo\): Codo 16/);
+  // La oficina ve en el parte el artículo con el que se creó cada material (para proponer la revisión).
+  const conArt = await rpc("admin", "sat_parte_detalle", {p_id: parteId});
+  assert.deepEqual(conArt.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO").articulos, {m2: genericos[0].id});
 
-  // 5. Administración asigna el artículo en la revisión; STEL pierde la respuesta del POST del albarán.
+  // 5. Administración revisa: pone el artículo bueno y los precios, y los lleva al albarán de trabajo de STEL.
   const lineas = [
     {tipo: "MATERIAL", material_id: "m1", stel_item_id: e.semilla.p1.id, descripcion: "Termostato digital", cantidad: 1, precio: 40, descuento_pct: 0, iva_pct: 21},
     {tipo: "MATERIAL", material_id: "m2", stel_item_id: e.semilla.p2.id, descripcion: "Codo 16", cantidad: 3, precio: 2.5, descuento_pct: 10, iva_pct: 21},
@@ -102,19 +121,10 @@ test("SAT: flujo completo de punta a punta con STEL falso", {timeout: 120000}, a
   const rev = await rpc("admin", "sat_revision_guardar", {p_id: parteId, p_lineas: lineas, p_nota: "Precios de tarifa"});
   // 40 + 6,75 + 52,5 + 25 = 124,25 de base; con IVA por línea: 48,40 + 8,17 + 63,53 + 30,25 = 150,35.
   assert.equal(Number(rev.total_revision), 150.35);
-  e.stel.estado.perderRespuesta.add("POST workDeliveryNotes");
-  r = await stel("admin", {accion: "procesar", parte_id: parteId});
-  assert.equal(r.operaciones[0].estado, "ERROR");
-  assert.equal(e.stel.datos.workDeliveryNotes.length, 1, "el POST se hizo aunque se perdió la respuesta");
-  r = await stel("admin", {accion: "procesar", parte_id: parteId});
-  assert.equal(r.operaciones[0].estado, "OK");
-  assert.equal(r.operaciones[0].detalle.accion, "reutilizado");
-  assert.equal(e.stel.datos.workDeliveryNotes.length, 1, "sin duplicar el albarán de trabajo");
-  const wdn = e.stel.datos.workDeliveryNotes[0];
-  assert.equal(wdn["account-id"], e.semilla.c1.id);
-  assert.equal(wdn["parent-incident-id"], e.stel.datos.incidents[0].id);
-  assert.ok(wdn.title.startsWith(enviado.codigo + " "));
-  assert.deepEqual(wdn.lines.map((l) => [l["item-id"], l.units]), [[e.semilla.p1.id, 1], [e.semilla.p2.id, 3], [e.semilla.s1.id, 1.5], [e.semilla.s2.id, 0.33]]); // desplazamiento en horas (20 min)
+  const pa = await stel("admin", {accion: "precios_albaran", parte_id: parteId});
+  assert.equal(pa.ok, true, JSON.stringify(pa));
+  assert.deepEqual(wdn.lines.map((l) => [l["item-id"], l.units, l["item-base-price"], l["discount-percentage"] ?? 0]),
+    [[e.semilla.p1.id, 1, 40, 0], [e.semilla.p2.id, 3, 2.5, 10], [e.semilla.s1.id, 1.5, 35, 0], [e.semilla.s2.id, 0.33, 25, 0]]);
   assert.deepEqual(e.stel.datos.entityAttachments.map((a) => a.name).sort(),
     [`${enviado.codigo}_foto_despues_${fotoId.slice(0, 8)}.jpg`, `${enviado.codigo}_parte_firmado_v1.pdf`].sort());
   assert.equal(Buffer.from(e.stel.datos.entityAttachments.find((a) => a.name.endsWith(".pdf"))._base64, "base64").toString(), pdf.toString());
@@ -577,4 +587,73 @@ test("SAT: material del proveedor SIN código (una tasa) → referencia propia S
   assert.equal(rc.ok, true, JSON.stringify(rc));
   assert.deepEqual(rc.recalculado.materiales.map((m) => m.precio), [4.5], "margen de la línea (50 %), no el de Ajustes");
   assert.equal(e.stel.datos.workDeliveryNotes.at(-1).lines[0]["item-base-price"], 4.5);
+});
+
+test("SAT: el albarán de trabajo se crea con TODO lo del parte (lo dudoso, lo dictado, sin precio) y deja la lista para la oficina", {timeout: 120000}, async (t) => {
+  // Usuario, 2026-11-24: «que cuando lo envíe se cree el albarán de trabajo y ya Dani en la oficina lo revise y actualice todo (pero que
+  // el lector de albarán trate de ponerlo todo); si sale mal ya Dani lo arregla». Datos inventados.
+  const e = await crearEmulador({demo: true});
+  t.after(() => e.cerrar());
+  const tec = await e.entrar("tecnico@prueba.local"), adm = await e.entrar("admin@prueba.local");
+  const rpc = async (tok, fn, args) => {
+    const r = await fetch(`${e.origen}/rest/v1/rpc/${fn}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json"}, body: JSON.stringify(args)});
+    const x = await r.text(); assert.equal(r.status, 200, fn + ": " + x); return x ? JSON.parse(x) : null;
+  };
+  const fn = async (tok, cuerpo) => (await fetch(`${e.origen}/functions/v1/sat-stel`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": "application/json", Origin: e.origen}, body: JSON.stringify(cuerpo)})).json();
+  const subir = (tok, ruta, b, tipo) => fetch(`${e.origen}/storage/v1/object/sat-archivos/${ruta}`, {method: "POST", headers: {Authorization: "Bearer " + tok, "Content-Type": tipo}, body: b});
+  const aviso = (await rpc(tec, "sat_avisos_listar", {}))[0];
+  const cli = (await rpc(tec, "sat_catalogo", {})).clientes.find((c) => c.id === aviso.cliente_id);
+  const ter = e.stel.datos.products.find((x) => x.reference === "TER-01"), tubo = e.stel.datos.products.find((x) => x.reference === "TUB-16");
+  // Como en producción desde el 2026-11-24: sin margen (el porcentaje lo pone la oficina a mano en STEL).
+  await rpc(adm, "sat_ajuste_guardar", {p_clave: "margen_materiales_pct", p_valor: 0});
+  const origen = (linea) => ({tipo: "ALBARAN_PROVEEDOR", proveedor: "Proveedor Ficticio", numero: "A-7", linea});
+  const duda = ["Albarán leído con dudas en conjunto: compara esta línea con el papel"];
+  const contenido = {tipo_visita: "REPARACION_FINALIZADA", fecha: "2026-11-24", hora_inicio: "08:00", hora_fin: "10:00", modo: "RAPIDO",
+    cliente: {id: cli.id, stel_id: cli.stel_id, nombre: cli.nombre}, direccion: {texto: "x"}, trabajos: "Recarga y cambio de piezas", fotos: [],
+    tiempo_trabajo_min: 90, desplazamiento_min: 30, materiales: [
+      // Leído con dudas y que no está en STEL: se da de alta igual, marcado «ALTA SIN COMPROBAR»; sin precio en el papel.
+      {id: "d1", descripcion: "VALVULA FICTICIA 3/4", referencia: "9990000071", cantidad: 2, unidad: "ud", dudas: duda, origen: origen(1)},
+      // Leído con dudas con un código que en STEL es de OTRO artículo (una cifra mal leída): genérico, para la oficina.
+      {id: "d2", descripcion: "MANGUITO ELECTRICO FICTICIO", referencia: "TER-01", cantidad: 1, unidad: "ud", dudas: duda, origen: origen(2), precio_neto_estimado: 4},
+      // Leído con dudas con un código de STEL cuyo nombre se parece: ese artículo.
+      {id: "d3", descripcion: "TUBO MULTICAPA 16 MM METRO", referencia: "TUB-16", cantidad: 5, unidad: "m", dudas: duda, origen: origen(3), precio_neto: 1.2},
+      // Dictado: genérico.
+      {id: "dictado-1", descripcion: "Cinta de teflón", referencia: "", cantidad: 1, unidad: "ud", dudas: [], origen: "DICTADO"}]};
+  const parteId = uuid(), fid = uuid(), pid = uuid(), pdf = Buffer.from("%PDF parte");
+  await rpc(tec, "sat_parte_guardar", {p_parte: {id: parteId, aviso_id: aviso.id, contenido}});
+  await subir(tec, `${parteId}/f-${fid}.png`, Buffer.from("png"), "image/png");
+  await rpc(tec, "sat_archivo_registrar", {p: {id: fid, parte_id: parteId, tipo: "FIRMA", storage_path: `${parteId}/f-${fid}.png`}});
+  const b = {parte_id: parteId, texto_alcance: "A", firmado_en: new Date().toISOString(), contenido};
+  await rpc(tec, "sat_firma_registrar", {p: {...b, id: uuid(), rol: "TECNICO", imagen_path: `${parteId}/f-${fid}.png`}});
+  await rpc(tec, "sat_firma_registrar", {p: {...b, id: uuid(), rol: "CLIENTE", ausente_motivo: "No había nadie responsable en el local"}});
+  await subir(tec, `${parteId}/p-${pid}.pdf`, pdf, "application/pdf");
+  await rpc(tec, "sat_archivo_registrar", {p: {id: pid, parte_id: parteId, tipo: "PDF_PARTE", storage_path: `${parteId}/p-${pid}.pdf`, sha256: sha(pdf)}});
+  await rpc(tec, "sat_parte_enviar", {p_id: parteId, p_pdf_path: `${parteId}/p-${pid}.pdf`, p_pdf_sha256: sha(pdf)});
+  const r = await fn(tec, {accion: "procesar", parte_id: parteId});
+  const alb = r.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO");
+  assert.equal(alb.estado, "OK", JSON.stringify(r));
+  const nueva = e.stel.datos.products.filter((x) => x.reference === "9990000071");
+  const generico = e.stel.datos.products.filter((x) => x.reference === "SAT-POR-IDENTIFICAR");
+  assert.equal(nueva.length, 1);
+  assert.match(nueva[0]["private-comments"], /^ALTA SIN COMPROBAR/);
+  assert.equal(generico.length, 1);
+  assert.deepEqual(alb.detalle.articulos, {d1: nueva[0].id, d2: generico[0].id, d3: tubo.id, "dictado-1": generico[0].id});
+  const wdn = e.stel.datos.workDeliveryNotes.at(-1);
+  assert.deepEqual(wdn.lines.slice(0, 4).map((l) => [l["item-id"], l.units, l["item-base-price"]]),
+    [[nueva[0].id, 2, 0], [generico[0].id, 1, 4], [tubo.id, 5, 1.2], [generico[0].id, 1, 0]], "a su coste; sin precio, el que ponga STEL (aquí 0)");
+  const notas = wdn["private-comments"];
+  for (const re of [/LEÍDO CON DUDAS \(comprobar con la foto del albarán del proveedor\): VALVULA FICTICIA 3\/4, MANGUITO ELECTRICO FICTICIO, TUBO MULTICAPA 16 MM METRO/,
+    /POR IDENTIFICAR \(poner el artículo\): MANGUITO ELECTRICO FICTICIO \(la referencia TER-01 es de «Termostato digital» en STEL\), Cinta de teflón \(dictado\)/,
+    /ARTÍCULOS DADOS DE ALTA SIN COMPROBAR: 9990000071 «VALVULA FICTICIA 3\/4»/, /SIN PRECIO: VALVULA FICTICIA 3\/4, Cinta de teflón/]) assert.match(notas, re);
+  assert.ok(!/TER-01/.test(JSON.stringify(wdn.lines.map((l) => l["item-id"]))) && !wdn.lines.some((l) => l["item-id"] === ter.id), "nunca el artículo de otro código");
+  // La oficina propone la revisión con los artículos con los que se creó el albarán (no le salen vacíos).
+  const {proponerLineas, articulosDelAlbaran} = await import("../sat/lib/economia.js");
+  const det = await rpc(adm, "sat_parte_detalle", {p_id: parteId});
+  const prop = proponerLineas(det.contenido, [], {}, articulosDelAlbaran(det));
+  assert.deepEqual(prop.filter((l) => l.tipo === "MATERIAL").map((l) => [l.material_id, l.stel_item_id]),
+    [["d1", nueva[0].id], ["d2", generico[0].id], ["d3", tubo.id], ["dictado-1", generico[0].id]]);
+  // Reintentar no duplica ni el artículo dado de alta ni el genérico.
+  await rpc(adm, "sat_stel_reintentar", {p_op: det.operaciones.find((o) => o.tipo === "ALBARAN_TRABAJO").id});
+  await fn(adm, {accion: "procesar", parte_id: parteId});
+  assert.equal(e.stel.datos.products.filter((x) => ["9990000071", "SAT-POR-IDENTIFICAR"].includes(x.reference)).length, 2);
 });
