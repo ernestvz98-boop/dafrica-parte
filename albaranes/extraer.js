@@ -253,7 +253,12 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=In
   if(derecha)candidatos.push({texto:limpiarValor(derecha.texto),celda:derecha});
   // Renglón «etiqueta | valor» a dos columnas (factura real 2026-11-24: el número a 9 alturas de su etiqueta): con parClaveValor, la
   // ÚNICA celda con texto a la derecha de la etiqueta en su renglón, aunque esté lejos (lo demás lo decide «aceptar»).
-  else if(parClaveValor){const der=linea.celdas.slice(ci+1).filter(c=>c.x0>=celda.x1-1&&limpiarValor(c.texto));if(der.length===1)candidatos.push({texto:limpiarValor(der[0].texto),celda:der[0]});}
+  // Con varias (2026-11-25: «Factura | 1100000111 | CLIENTE, S.L.», la otra es la columna del cliente), la primera si
+  // es la columna de valores de un bloque «etiqueta | valor»: en un renglón cercano, otra etiqueta en la misma x con su valor en la
+  // misma x («Fecha | 15.10.2026»). Nunca el código postal de la dirección de al lado («FACTURA | 24999 | POBLACIÓN»).
+  else if(parClaveValor){const der=linea.celdas.slice(ci+1).filter(c=>c.x0>=celda.x1-1&&limpiarValor(c.texto));
+   const bloque=v=>lineas.slice(Math.max(0,li-3),li+4).some(l2=>l2!==linea&&l2.celdas.some((x,xi)=>xi>0&&Math.abs(x.x0-v.x0)<=3&&Math.abs(l2.celdas[xi-1].x0-celda.x0)<=5));
+   if(der.length===1||(der.length>1&&bloque(der[0])))candidatos.push({texto:limpiarValor(der[0].texto),celda:der[0]});}
   // El OCR puede partir la fila de valores en varias líneas (bases distintas): se miran hasta
   // tres líneas y se sigue bajando si la celda hallada no tiene forma de valor válido.
   for(const abajo of lineas.slice(li+1,li+4)){
@@ -807,6 +812,12 @@ function leerTablaPagina(pagina,perfil=null){
    ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Duración del alquiler (no es el total ni un artículo)"});
    yAnterior=linea.y;continue;
   }
+  // Suma de la hoja anterior al principio de una hoja de continuación (2026-11-25: «SUMA ANTERIOR ........> 100,00» cortaba la
+  // tabla de la 2.ª hoja y su línea se perdía): ni el final de la tabla ni un artículo; la tabla sigue.
+  if(/^SUMA ANTERIOR\b/.test(clave(linea.texto||""))){
+   ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Suma de la hoja anterior (no es el final de la tabla ni un artículo)"});
+   yAnterior=linea.y;continue;
+  }
   if(RE_PIE.test(primera)||/^PESO (BRUTO|NETO|TOTAL)\b/.test(clave(linea.texto||""))||linea.celdas.some(c=>RE_PIE_CUALQUIERA.test(clave(c.texto)))||separacion>3.2*altoFila+16){
    fin=true;pie.push(linea);
    if(!RE_PIE.test(primera)){
@@ -978,16 +989,50 @@ function valorPie(lineas,re,opcionesNumero){
  * los valores se devuelven en REVISAR; con varias combinaciones distintas, AMBIGUO.
  */
 const ETIQ_TOTALES={
- base:/^(BASE IMPONIBLE|BASE|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES)\b|^HONORARIOS$/,
- pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA)\b|^%$/,
- cuota:/^(CUOTA ?[IL1]VA|TOTAL ?[IL1]VA|IMPORTE ?I ?V ?A|I V A|IVA)\b|^[L1] ?V ?A$/,
+ // «TOTAL BASE IMPONIBLE», «BASES IMPONIBLES», «BASE IVA» (banco de facturas, 2026-11-25).
+ base:/^(BASES? IMPONIBLES?|BASE|BASES|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES|TOTAL BASES?( IMPONIBLES?)?)\b|^HONORARIOS$/,
+ // El % dentro de la etiqueta también vale («IVA 21%», «IVA21%», «21 % IVA», «Impuesto IVA 21%», «21% sobre la base imponible»).
+ pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA|IMPUESTOS?( DE)? IVA)\b|^%$|^IVA(?= ?\d)|^\d{1,2}([.,]\d+)? ?% ?(DE )?(IVA|SOBRE)\b/,
+ // «Cuota» sola (columna del desglose «Base IVA | % | Cuota») y «Total impuesto(s)»: la combinación decide.
+ cuota:/^(CUOTAS? ?(DE )?[IL1] ?V ?A|TOTAL ?(DE )?[ILT1] ?V ?A|IMP(ORTE)? ?(DEL? )?I ?V ?A|I V A|IVA|IMPUESTOS?( DE)? IVA|TOTAL IMPUESTOS?)\b|^[L1] ?V ?A$|^CUOTAS?$|^IVA(?= ?\d)|^\d{1,2}([.,]\d+)? ?% ?(DE )?(IVA|SOBRE)\b/,
  // Gastos suplidos de una gestoría (2026-11-24: «GASTOS | HONORARIOS | % | I.V.A. | TOTAL FACTURA»): fuera de la base, sin IVA.
  exento:/^(GASTOS|SUPLIDOS|GASTOS SUPLIDOS|TOTAL SUPLIDOS)$/,
  // «A INGRESAR» (gestoría, 2026-11-24): el total otra vez, en su casilla; solo se toma si cuadra con base, IVA y suplidos.
- total:/^(TOTAL A PAGAR|TOTAL ALBARAN|IMPORTE TOTAL|TOTAL EUR|TOTAL|A INGRESAR)\b/
+ // Banco de facturas (2026-11-25): «Importe final», «Importe de la factura», «Importe del abono», «EURO TOTAL», «Importe neto total con
+ // impuestos», «Invoice total», «Total payable», «TOTALABONO» (total a abonar = a pagar) y «T O T A L» (letras separadas).
+ total:/^(TOTAL A PAGAR|TOTAL ALBARAN|IMPORTE TOTAL|TOTAL EUR|TOTAL|A INGRESAR|IMPORTE FINAL|IMPORTE (DE LA |DEL? )?(FACTURA|ABONO)|EUROS? TOTAL|INVOICE TOTAL|TOTAL PAYABLE|IMPORTE A PAGAR|LIQUIDO A (PAGAR|PERCIBIR)|IMPORTE( NETO)? TOTAL CON (IMPUESTOS?|IVA)|TOTALABONO)\b/,
+ // Retención (IRPF de un profesional): se resta del total («A deducir IRPF15% 6,00»).
+ retencion:/^(A DEDUCIR )?(RETENCION( IRPF)?|RET IRPF|IRPF)\b|^(A DEDUCIR )?IRPF(?= ?\d)/,
+ // «SUBTOTAL»: solo como base de una combinación que cuadre, nunca por sí solo.
+ subtotal:/^(SUBTOTAL|SUB TOTAL)\b/
 };
-const EXCLUIR_TOTAL=/^TOTAL ?(L ?[IÍ1L]? ?N ?E ?A ?S|[IL1] ?[IÍ1L]? ?N ?E ?A ?S|[IL1]VA|RE|NETO|BRUTO)\b/;
-function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={}){
+// No son el total de la factura: recuentos y medidas («Total m²», «Total posiciones», «Total bultos»), el IVA, la base, lo que se
+// descuenta o compensa, el pedido y lo certificado a origen (banco de facturas, 2026-11-25: «Total m²: 543,21» aceptado como total).
+const EXCLUIR_TOTAL=/^TOTAL ?(L ?[IÍ1L]? ?N ?E ?A ?S|[IL1] ?[IÍ1L]? ?N ?E ?A ?S|(DE )?[ILT1] ?V ?A|RE|NETO|BRUTO|M ?[23²³]|M|ML|MTS|KGS?|KILOS|PESO|BULTOS|UDS|UNIDADES|PIEZAS|CANTIDAD(ES)?|POSICIONES|PARTIDAS|ARTICULOS|HORAS|LITROS|COMPENSACION|PEDIDO|DTOS?|DESCUENTOS?|PUNTOS|IMPUESTOS?|RECARGO|RETENCION|IRPF|BASES?|(FACTURA )?A ORIGEN|CERTIFICAD[OA]S?|VAT)(?![A-Z0-9])/;
+// En una factura, el total de cada albarán que cita no es el de la factura.
+const EXCLUIR_TOTAL_FACTURA=new RegExp(EXCLUIR_TOTAL.source+"|^TOTAL (DEL? )?ALBAR[AE]N(ES)?(?![A-Z0-9])");
+// Base con impuestos («IMPORTE NETO TOTAL CON IMPUESTOS») o cuota «incluida»: no son base ni cuota.
+const EXCLUIR_BASE=/\bCON (IMPUESTOS?|IVA)\b|\bIVA INCL/;
+const EXCLUIR_CUOTA=/\bINCLUID|\bINCL\b|\bINC\b/;
+// «T O T A L», «I V A»: letras sueltas separadas por espacios, juntas.
+const colapsarLetras=t=>t.replace(/\b[A-Z](?: [A-Z]\b){2,}/g,m=>m.replace(/ /g,""));
+const claveTotales=t=>colapsarLetras(clave(t));
+// Lo que sigue a la etiqueta en la misma casilla: se cuentan sus letras y cifras (la clave quita signos y espacios).
+function restoTras(texto,etiqueta){
+ const n=(etiqueta.match(/[A-Z0-9%²³]/g)||[]).length,s=N().sinAcentos(String(texto||""));
+ let i=0,vistos=0;
+ while(i<s.length&&vistos<n){if(/[A-Z0-9%²³]/.test(s[i]))vistos++;i++;}
+ return String(texto||"").slice(i).replace(/^[\s:€()]+/,"").trim();
+}
+// Cifras de una casilla: «1.234,56 €», «21,000 %», «-12,34», «12,34-», «€5.67», «21% ( Euros )».
+const piezasNumero=t=>String(t||"").replace(/€|\bEUR(OS)?\b/gi," ").split(/\s+(?=[-\d])/)
+ .map(p=>(p.trim().match(/^-?\d[\d.,]*-?(?: ?%)?/)||[""])[0].trim()).filter(Boolean);
+// ¿La casilla es una etiqueta (una palabra de tres letras o más, sin contar «EUR» ni «Euros», también pegado: «123,45Eur»)? «de 100,00»
+// no lo es.
+const esEtiqueta=t=>/[A-ZÑ]{3,}/.test(N().sinAcentos(String(t||"")).replace(/EUR(OS)?\b|€/g,""));
+// ¿Solo una cifra en la casilla? (para seguir una columna de cifras hacia abajo).
+const soloCifra=t=>{const s=String(t||"").replace(/€|\bEUR(OS)?\b/gi,"").trim();return /^-?\d[\d.,]*-?$/.test(s);};
+function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false,factura=false}={}){
  const out=[];
  lineas.forEach((linea,li)=>{let saltar=-1;linea.celdas.forEach((celda0,ci)=>{
   if(ci<=saltar)return;
@@ -995,56 +1040,115 @@ function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false}={})
   const sig=linea.celdas[ci+1];
   let celda=celda0,usadas=0;
   if(sig&&sig.x0-celda0.x1<1.5*celda0.alto){
-   const k2=clave(celda0.texto+" "+sig.texto);
-   if(re.test(k2)&&k2.match(re)[0].length>(clave(celda0.texto).match(re)?.[0].length||0)){
+   const k2=claveTotales(celda0.texto+" "+sig.texto);
+   if(re.test(k2)&&k2.match(re)[0].length>(claveTotales(celda0.texto).match(re)?.[0].length||0)){
     celda={...celda0,texto:celda0.texto+" "+sig.texto,x1:sig.x1};usadas=1;
    }
   }
-  const k=clave(celda.texto);const m=k.match(re);
+  const k=claveTotales(celda.texto);const m=k.match(re);
   // La exclusión mira también la palabra siguiente («Total» «Iíneas:» del OCR no es el total).
-  if(!m||(excluir&&(excluir.test(k)||(sig&&excluir.test(clave(celda0.texto+" "+sig.texto))))))return;
+  if(!m||(excluir&&(excluir.test(k)||(sig&&excluir.test(claveTotales(celda0.texto+" "+sig.texto))))))return;
   saltar=ci+usadas;
-  const resto=celda.texto.slice(m[0].length).replace(/^[\s:€]+/,"").trim();
-  const textos=[resto,...linea.celdas.slice(ci+1+usadas,ci+4+usadas).map(c=>c.texto)];
-  // Valor debajo: la primera celda solapada en horizontal en los tres renglones siguientes.
-  for(const l2 of lineas.slice(li+1,li+4)){
+  // Las cifras de una casilla que es otra etiqueta no son de esta («IVA | R.equiv. | IRPF 0 % | Total factura»: el 0 % es del IRPF).
+  const textos=[restoTras(celda.texto,m[0]),...linea.celdas.slice(ci+1+usadas,ci+4+usadas).filter(c=>!esEtiqueta(c.texto)).map(c=>c.texto)];
+  // Valor debajo: la primera celda solapada en horizontal en los tres renglones siguientes. Sin ninguna solapada, la de la columna
+  // del título, hasta el título siguiente: cifra alineada a la derecha bajo un título a la izquierda (2026-11-25:
+  // «BASE IMPONIBLE | % | I.V.A. | % | R. EQUIV. | TOTAL» y debajo «200,00 | 21,00 | 42,00 | 242,00», ninguna solapada).
+  const derecha=linea.celdas[ci+1+usadas];
+  const enColumna=c=>{const cx=(c.x0+c.x1)/2;return cx>=celda.x0&&cx<(derecha?derecha.x0:Infinity)&&
+   !linea.celdas.some(o=>o!==celda0&&!(usadas&&o===sig)&&Math.min(c.x1,o.x1)-Math.max(c.x0,o.x0)>0);};
+  // Sin solaparse, solo una cifra: un texto suelto en la columna (una mancha que el OCR lee «e») no para la búsqueda (albarán escaneado,
+  // 2026-11-25: la base dejaba de encontrarse).
+  const deColumna=l2=>l2.celdas.find(c=>Math.min(c.x1,celda.x1)-Math.max(c.x0,celda.x0)>0)||l2.celdas.find(c=>enColumna(c)&&/\d/.test(c.texto)&&!esEtiqueta(c.texto));
+  const siguientes=lineas.slice(li+1);
+  for(const [j,l2] of siguientes.slice(0,3).entries()){
    if(l2.y-linea.y>4.5*Math.max(linea.alto,celda.alto))break;
-   const abajo=l2.celdas.find(c=>Math.min(c.x1,celda.x1)-Math.max(c.x0,celda.x0)>0);
-   if(abajo&&/\d/.test(abajo.texto)){textos.push(abajo.texto);break;}
+   const abajo=deColumna(l2);
+   if(abajo&&/\d/.test(abajo.texto)&&!esEtiqueta(abajo.texto)){
+    textos.push(abajo.texto);
+    // Columna de cifras (desglose por tipos de IVA y su fila de totales): también las de debajo, mientras sigan siendo solo cifras.
+    let y=l2.y;
+    if(soloCifra(abajo.texto))for(const l3 of siguientes.slice(j+1,j+7)){
+     if(l3.y-y>2.5*Math.max(l3.alto,linea.alto))break;
+     const otra=deColumna(l3);
+     if(!otra||!soloCifra(otra.texto))break;
+     textos.push(otra.texto);y=l3.y;
+    }
+    break;
+   }
    if(abajo)break;
   }
+  // % dentro de la etiqueta («21 % IVA», «IVA 21%»).
+  if(porcentaje){const p=m[0].match(/(\d{1,2}(?:[.,]\d+)?) ?%/);if(p){const n=N().numero(p[1],{...opcionesNumero,porcentaje:true});
+   if(n.estado==="OK"&&n.valor>0&&n.valor<=30)out.push({...n,etiqueta:celda.texto,caja:caja(celda),fila:li,orden:-1});}}
+  let orden=0;
   for(const bruto of textos){
-   for(const parte of String(bruto||"").split(/\s+(?=\d)/)){
-    const t=parte.replace(/€|EUR/gi,"").trim();
-    if(!t)continue;
+   for(const t of piezasNumero(bruto)){
     const esPct=/%/.test(t);
     if(porcentaje!==esPct&&!(porcentaje&&/^\d{1,2}([.,]0+)?$/.test(t)))continue;
-    const n=N().numero(t,{...opcionesNumero,porcentaje});
-    if(n.estado==="OK"&&(!porcentaje||(n.valor>=0&&n.valor<=30)))out.push({...n,etiqueta:celda.texto,caja:caja(celda)});
+    // Ni «0012» (el IBAN bajo «A ingresar») ni, en una factura, una cifra sin decimales (un año, un código) son importes.
+    if(!porcentaje&&(/^-?0\d/.test(t)||(factura&&!/[.,]\d{2,4}-?$/.test(t))))continue;
+    const n=N().numero(porcentaje?t.replace(/ ?%$/,""):t,{...opcionesNumero,porcentaje});
+    if(n.estado==="OK"&&(!porcentaje||(n.valor>=0&&n.valor<=30)))out.push({...n,etiqueta:celda.texto,caja:caja(celda),fila:li,orden:orden++});
    }
   }
  });});
  return out;
 }
-function leerTotales(lineas,opcionesNumero){
+function leerTotales(lineas,opcionesNumero,{factura=false}={}){
  const vacio=()=>({literal:"",valor:null,estado:"VACIO",motivos:[]});
  const res={base_imponible:vacio(),iva_porcentaje:vacio(),cuota_iva:vacio(),total:vacio(),validacion:null};
- const B=candidatos(lineas,ETIQ_TOTALES.base,opcionesNumero),P=candidatos(lineas,ETIQ_TOTALES.pct,opcionesNumero,{porcentaje:true});
- const C=candidatos(lineas,ETIQ_TOTALES.cuota,opcionesNumero),T=candidatos(lineas,ETIQ_TOTALES.total,opcionesNumero,{excluir:EXCLUIR_TOTAL});
- const E=candidatos(lineas,ETIQ_TOTALES.exento,opcionesNumero);
+ const o={factura};
+ const B=candidatos(lineas,ETIQ_TOTALES.base,opcionesNumero,{...o,excluir:EXCLUIR_BASE}),P=candidatos(lineas,ETIQ_TOTALES.pct,opcionesNumero,{...o,porcentaje:true});
+ let C=candidatos(lineas,ETIQ_TOTALES.cuota,opcionesNumero,{...o,excluir:EXCLUIR_CUOTA});
+ const T=candidatos(lineas,ETIQ_TOTALES.total,opcionesNumero,{...o,excluir:factura?EXCLUIR_TOTAL_FACTURA:EXCLUIR_TOTAL});
+ const E=candidatos(lineas,ETIQ_TOTALES.exento,opcionesNumero,o),R=candidatos(lineas,ETIQ_TOTALES.retencion,opcionesNumero,o);
+ const S=candidatos(lineas,ETIQ_TOTALES.subtotal,opcionesNumero,o);
+ // Totales impresos en negativo («Importe del abono -12,34»): prueba de abono para quien llama.
+ Object.defineProperty(res,"_negativos",{value:T.filter(t=>t.valor<0),enumerable:false});
+ // Fila del IVA con su % y dos importes (2026-11-25: «IVA repercutido | 21,000 % | 740,00 | 155,40 EUR»): el primero es la
+ // base si base × % = el segundo; si no, las dos cifras siguen como posibles cuotas (y la combinación decide).
+ for(const fila of new Set(C.map(x=>x.fila))){
+  const deFila=C.filter(x=>x.fila===fila).sort((a,b)=>a.orden-b.orden),pcts=P.filter(p=>p.fila===fila);
+  if(deFila.length!==2||!pcts.length)continue;
+  const [a,b]=deFila;
+  if(pcts.some(p=>Math.abs(redondear(a.valor*p.valor/100)-b.valor)<=0.011)){
+   B.push({...a,notas:[...(a.notas||[]),"Base de la fila del IVA («"+a.etiqueta+"»): base × % = cuota"]});C=C.filter(x=>x!==a);
+  }
+ }
  const unicos=a=>[...new Map(a.map(x=>[x.valor,x])).values()];
+ const signo=x=>Math.sign(x.valor);
+ // «SUBTOTAL» solo de un renglón con una sola cifra: «SUBTOTAL | base | cuota | con IVA» es el de un grupo de líneas (factura de
+ // combustible, 2026-11-25: el grupo al 10 % cuadraba solo y se aceptaba como la factura).
+ const subtotales=S.filter(s=>S.filter(x=>x.fila===s.fila).length===1);
+ const bases=[...unicos(B),...unicos(subtotales).filter(s=>!B.some(b=>b.valor===s.valor))];
  const combos=[];
- // Con gastos suplidos impresos: base + cuota + suplidos = total (la cuota solo de la base).
- for(const e of [null,...unicos(E)])for(const b of unicos(B))for(const c of unicos(C))for(const t of unicos(T))
-  if(Math.abs(b.valor+c.valor+(e?.valor||0)-t.valor)<=0.021&&t.valor>0)combos.push({b,c,t,...(e?{e}:{})});
- const conPct=combos.flatMap(x=>unicos(P).filter(p=>Math.abs(x.b.valor*p.valor/100-x.c.valor)<=0.021).map(p=>({...x,p})));
- const elegidos=conPct.length?conPct:combos;
+ // Con gastos suplidos impresos: base + cuota + suplidos = total (la cuota solo de la base). Con retención (IRPF): − retención.
+ // Abono con los importes en negativo: los tres del mismo signo.
+ // Suplidos o retención a cero («IRPF: 0,00») son lo mismo que ninguno: no son otra combinación.
+ for(const e of [null,...unicos(E).filter(x=>x.valor)])for(const r of [null,...unicos(R).filter(x=>x.valor)])for(const b of bases)for(const c of unicos(C))for(const t of unicos(T)){
+  if(!t.valor||signo(b)!==signo(t)||(c.valor&&signo(c)!==signo(t))||(r&&t.valor<0))continue;
+  if(Math.abs(b.valor+c.valor+(e?.valor||0)-(r?Math.abs(r.valor):0)-t.valor)<=0.021)combos.push({b,c,t,...(e?{e}:{}),...(r?{r}:{})});
+ }
  // Base y cuota se imprimen a veces con 4 y con 2 decimales (48,0000 y 48,00): al céntimo
  // son la misma combinación; se conserva la que tiene los importes en céntimos.
  const cent=v=>Math.round(v*100);
+ const claveCombo=x=>[cent(x.b.valor),cent(x.c.valor),cent(x.t.valor),x.e?cent(x.e.valor):"",x.r?cent(x.r.valor):""].join("|");
+ // Desglose por tipos de IVA (2026-11-25: una fila por tipo y la fila de totales; cada fila sola cuadra y es solo un tipo):
+ // vale la combinación que es la suma de todas las demás.
+ const todas=[...new Map(combos.map(x=>[claveCombo(x),x])).values()];
+ const sumaDe=(xs,k)=>xs.reduce((n,x)=>n+x[k].valor,0);
+ const desglose=todas.length>=3?todas.filter(X=>{const otras=todas.filter(y=>y!==X),tol=0.011*otras.length;
+  return ["b","c","t"].every(k=>Math.abs(sumaDe(otras,k)-X[k].valor)<=tol);}):[];
+ let elegidos;
+ if(desglose.length===1)elegidos=[{...desglose[0],desglose:todas.length-1}];
+ else{
+  const conPct=combos.flatMap(x=>unicos(P).filter(p=>Math.abs(x.b.valor*p.valor/100-x.c.valor)<=0.021).map(p=>({...x,p})));
+  elegidos=conPct.length?conPct:combos;
+ }
  const decs=x=>[x.b,x.c].reduce((n,y)=>n+((String(y.literal).match(/,(\d+)/)||[,""])[1].length>2?1:0),0);
  const grupos=new Map();
- for(const x of elegidos){const k=[cent(x.b.valor),cent(x.c.valor),cent(x.t.valor),x.e?cent(x.e.valor):""].join("|");const y=grupos.get(k);if(!y||decs(x)<decs(y))grupos.set(k,x);}
+ for(const x of elegidos){const k=claveCombo(x);const y=grupos.get(k);if(!y||decs(x)<decs(y))grupos.set(k,x);}
  const distintos=[...grupos.values()];
  const marcar=(x,estado,motivo)=>({...x,estado,motivos:motivo?[motivo]:[]});
  if(distintos.length===1){
@@ -1053,7 +1157,9 @@ function leerTotales(lineas,opcionesNumero){
   if(x.p)res.iva_porcentaje=marcar(x.p,"VERIFICADO");
   else if(unicos(P).length===1)res.iva_porcentaje=marcar(unicos(P)[0],"OK");
   if(x.e)res.exento=marcar(x.e,"VERIFICADO");
-  res.validacion={estado:"OK",detalle:"Base "+x.b.literal+" + IVA "+x.c.literal+(x.e?" + suplidos "+x.e.literal:"")+" = total "+x.t.literal+(x.p?" (IVA "+x.p.valor+" %)":"")};
+  if(x.r)res.retencion=marcar(x.r,"VERIFICADO");
+  res.validacion={estado:"OK",detalle:"Base "+x.b.literal+" + IVA "+x.c.literal+(x.e?" + suplidos "+x.e.literal:"")+(x.r?" − retención "+x.r.literal:"")+
+   " = total "+x.t.literal+(x.p?" (IVA "+x.p.valor+" %)":"")+(x.desglose?" (suma del desglose de "+x.desglose+" tipos de IVA)":"")};
   return res;
  }
  if(distintos.length>1){
@@ -1061,16 +1167,119 @@ function leerTotales(lineas,opcionesNumero){
   res.validacion={estado:"FALLO",detalle:"Varias combinaciones de base, IVA y total"};
   return res;
  }
+ // Factura sin combinación por las etiquetas (2026-11-25: cada importe impreso un renglón por debajo de su etiqueta, y la
+ // cuota leída como base): base, cuota y total por sus cifras, solo con una única terna impresa con base × % = cuota y
+ // base + cuota = total (el % impreso), y si las cifras de las etiquetas son de esa terna.
+ if(factura){
+  const x=ternaDelPie(lineas,opcionesNumero,unicos(P).map(p=>p.valor)),vals=x?[x.b,x.c,x.t]:[];
+  if(x&&[...B,...C,...T].every(y=>vals.some(z=>Math.abs(z.valor-y.valor)<0.006))){
+   const nota="Por las cifras impresas: "+x.b.literal+" × "+x.p+" % = "+x.c.literal+" y "+x.b.literal+" + "+x.c.literal+" = "+x.t.literal;
+   const poner=z=>({...z,estado:"VERIFICADO",motivos:[],notas:[nota],resolucion:{metodo:"terna_cifras_pie",evidencias:[nota]}});
+   res.base_imponible=poner(x.b);res.cuota_iva=poner(x.c);res.total=poner(x.t);
+   res.iva_porcentaje={literal:x.p+" %",valor:x.p,estado:"VERIFICADO",motivos:[],notas:[nota]};
+   res.validacion={estado:"OK",detalle:nota};
+   return res;
+  }
+ }
  // Sin combinación que cuadre. Si están los tres importes, se contradicen: REVISAR.
- // Si falta alguno, no hay contraste posible: lo leído queda como OK (no verificado).
+ // Si falta alguno, no hay contraste posible: lo leído queda como OK (no verificado; en una factura, a revisión al final).
  const completos=B.length&&C.length&&T.length;
- const uno=(a,k)=>{const u=unicos(a);
+ // Base y total a 0 de las filas vacías de un desglose («0,00 | 21% | 0,00»), si hay otro valor: no cuentan (2026-11-25).
+ const uno=(a,k)=>{const u0=unicos(a),u=["base_imponible","total"].includes(k)&&u0.some(x=>x.valor)?u0.filter(x=>x.valor):u0;
   if(u.length===1)res[k]=completos?marcar(u[0],"REVISAR","Los totales no cuadran entre sí"):marcar(u[0],"OK");
   else if(u.length>1)res[k]={...vacio(),estado:"AMBIGUO",motivos:["Varios valores: "+u.map(x=>x.literal).join(" | ")]};};
  uno(B,"base_imponible");uno(P,"iva_porcentaje");uno(C,"cuota_iva");uno(T,"total");
+ // Factura con total 0 (2026-11-25: «TOTAL COMPENSACION 0,00» aceptado como total).
+ if(factura&&res.total.estado==="OK"&&!res.total.valor)res.total=marcar(res.total,"REVISAR","Total 0");
  if(completos)res.validacion={estado:"FALLO",detalle:"Base + IVA no coincide con el total impreso"};
  else if(B.length||C.length||T.length)res.validacion={estado:"NO_APLICA",detalle:"Faltan importes para contrastar base + IVA = total"};
  return res;
+}
+/*
+ * Terna base, cuota y total por las cifras del pie (solo facturas, sin combinación por etiquetas): importes con dos decimales y un %
+ * impreso (21, 10, 5 o 4) con base × % = cuota y base + cuota = total. Solo si hay UNA terna así; con dos (un desglose por tipos,
+ * subtotales por albarán), ninguna.
+ */
+function ternaDelPie(lineas,opcionesNumero,pctsEtiqueta=[]){
+ // También el % leído bajo su etiqueta («%» de la casilla del IVA, sin el signo en la cifra: 2026-11-25).
+ const montos=[],pcts=new Set(pctsEtiqueta.filter(p=>[21,10,5,4].includes(p)));
+ for(const l of lineas)for(const c of l.celdas){
+  const txt=String(c.texto||"");
+  for(const m of txt.matchAll(/(\d{1,2}(?:[.,]\d{1,3})?) ?%/g)){
+   const n=N().numero(m[1],{...opcionesNumero,porcentaje:true});
+   if(n.estado==="OK"&&[21,10,5,4].includes(n.valor))pcts.add(n.valor);
+  }
+  for(const t of piezasNumero(txt)){
+   if(/%/.test(t)||!/[.,]\d{2}$/.test(t)||/^-?0\d/.test(t))continue;
+   const n=N().numero(t,opcionesNumero);
+   if(n.estado==="OK"&&n.valor>0)montos.push({...n,caja:caja(c)});
+  }
+ }
+ const u=[...new Map(montos.map(x=>[Math.round(x.valor*100),x])).values()];
+ const ternas=[];
+ for(const p of pcts)for(const b of u){
+  const q=Math.round(b.valor*p)/100;
+  for(const c of u){
+   if(c===b||Math.abs(q-c.valor)>0.011)continue;
+   for(const t of u)if(t!==b&&t!==c&&Math.abs(b.valor+c.valor-t.valor)<=0.011)ternas.push({b,c,t,p});
+  }
+ }
+ return ternas.length===1?ternas[0]:null;
+}
+/*
+ * Forma de número de factura: serie de letras opcional y cifras («A 000123», «FV26-001234»), con la serie detrás («12345678 RX»), o un
+ * código de letras y cifras con dos cifras o más («ES12AB34CDEF»). Nunca una fecha, un año suelto de estos años («2026» encima de
+ * «F/000123» o bajo «Período de facturación»: 2026-11-25) ni una matrícula («1234BCD» bajo «FACTURA TALLER»).
+ */
+function esNumeroDeFactura(t){
+ const s=String(t||"").trim();
+ return (/^[A-Z]{0,4}[ \/-]?\d[\d.\/ -]{2,}( ?[A-Z]{1,3})?$/i.test(s)||/^(?=(?:[A-Z]*\d){2})[A-Z0-9]{8,20}$/i.test(s))&&
+  !/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(s)&&!/^20[1-3]\d$/.test(s)&&!/^\d{4} ?[BCDFGHJKLMNPRSTVWXYZ]{3}$/i.test(s);
+}
+/*
+ * ¿Factura de abono? Título de abono en la parte de arriba de la primera página («Abono», «Factura de abono», «Nota de abono»,
+ * «Nota de crédito»), solo o con su número; nunca «abono en cuenta» (forma de pago) ni «TOTAL ABONO» (total a abonar = a pagar).
+ * «Factura rectificativa» solo con un total impreso en negativo (una rectificativa también puede subir el importe).
+ */
+const RE_TITULO_ABONO=/^(ABONO|FACTURA (DE )?ABONO|NOTA (DE )?ABONO|NOTA DE CREDITO|CREDIT NOTE)(?: N\S{0,3})?(?: \S*\d\S*)?$/;
+const RE_TITULO_RECTIFICATIVA=/^(FACTURA )?RECTIFICATIVA(?: N\S{0,3})?(?: \S*\d\S*)?$/;
+// Casilla suelta en su renglón (sin otra a menos de dos alturas): un título, no una palabra dentro de una frase.
+const celdaSuelta=(l,i)=>{const c=l.celdas[i],a=l.celdas[i-1],b=l.celdas[i+1],h=Math.max(c.alto||0,4);
+ return (!a||c.x0-a.x1>=2*h)&&(!b||b.x0-c.x1>=2*h);};
+// Número del abono o de la rectificativa junto a su título («Abono | RA-26000111», «Factura rectificativa | 1500000111»): en la misma
+// casilla o la primera a su derecha con forma de número; arriba (encima de la tabla o en el 40 % de la primera página) y título suelto.
+function numeroDeTituloDeAbono(p,yTabla=null){
+ if(!p)return null;
+ // La casilla es solo el título y el número va en la de su derecha: ni «ABONO DIFERENCIA» (una línea de la factura) ni
+ // «ABONO ES000…» bajo «REFERENCIA DEL CLIENTE» (la factura que abona) lo son (2026-11-25).
+ const RE=/^(ABONO|FACTURA (DE )?ABONO|NOTA (DE )?ABONO|NOTA DE CREDITO|CREDIT NOTE|(FACTURA )?RECTIFICATIVA)( N\S{0,3})?$/;
+ for(const l of p.lineas){
+  if(l.y>=(yTabla??0.4*(p.alto||842)))continue;
+  for(const [i,c] of l.celdas.entries()){
+   if(!RE.test(clave(c.texto))||!celdaSuelta(l,i))continue;
+   const der=l.celdas.slice(i+1).find(x=>limpiarValor(x.texto));
+   if(der&&esNumeroDeFactura(limpiarValor(der.texto)))return {texto:limpiarValor(der.texto),celda:der,etiqueta:c.texto};
+  }
+ }
+ return null;
+}
+function abonoImpreso(paginas,T,yTabla=null){
+ const p=paginas[0];if(!p)return null;
+ // Encima de la tabla de artículos (sin tabla, en el 40 % de arriba), como renglón propio o casilla suelta: nunca una palabra dentro de
+ // una frase («***** 15% ABONO MARCA PROMO …» en una factura normal, 2026-11-25).
+ const arriba=p.lineas.filter(l=>l.y<(yTabla??0.4*(p.alto||842)))
+  .flatMap(l=>[clave(l.texto),...l.celdas.map((c,i)=>celdaSuelta(l,i)?clave(c.texto):null)]).filter(Boolean);
+ const abono=arriba.find(k=>RE_TITULO_ABONO.test(k));
+ if(abono)return "título impreso «"+abono+"»";
+ const negativo=T?._negativos?.[0],rect=arriba.find(k=>RE_TITULO_RECTIFICATIVA.test(k));
+ if(rect&&negativo)return "«"+rect+"» con el total impreso en negativo («"+negativo.literal+"»)";
+ return null;
+}
+function ponerEnNegativo(T,evidencia){
+ for(const k of ["base_imponible","cuota_iva","total","exento"]){
+  const x=T[k];if(!x||x.valor==null||!(x.valor>0))continue;
+  T[k]={...x,valor:-x.valor,notas:[...(x.notas||[]),"Abono ("+evidencia+"): importe en negativo"]};
+ }
 }
 
 /* --------------------------- Campos y comprobaciones ------------------------ */
@@ -1658,14 +1867,31 @@ function extraerDePaginas(paginas,opciones={}){
   for(const l of primera.p.lineas)for(const m of N().sinAcentos(l.texto||"").toUpperCase().matchAll(/ALBARAN\s*(?:N[ºO°]?\.?|NUM(?:ERO)?\.?)?\s*[:.]?\s*([0-9A-Z][0-9A-Z.\/-]{2,})/g))
    if(/\d/.test(m[1]))citados.add(N().canon(m[1]));
   // «Número de la factura» (factura real 2026-11-24) y nunca el de la factura ORIGINAL que cita una rectificativa.
-  const h=[...new Map(valoresEtiquetados(primera.p.lineas,/^(N(º|O)? ?(DE )?FACTURA|NUM(ERO)? (DE (LA )?)?FACTURA|FACTURA( N(º|O)?)?|NUMERO|NUM)(\b|$)/i,
-   /ALBARAN|PEDIDO|CLIENTE|PROVEEDOR|RECTIFICA|ORIGINAL|PAGINA|CUENTA|IBAN|TELEF|OBRA|CIF|NIF/,
+  // «Nº documento» (factura de taller, 2026-11-25) también; nunca la factura «corregida», «rectificada» o de «origen» que cita un abono
+  // («Nº factura corregida | A-…» se aceptaba como el número del abono).
+  const h=[...new Map(valoresEtiquetados(primera.p.lineas,/^(N(º|O)? ?(DE )?FACTURA|NUM(ERO)? (DE (LA )?)?FACTURA|FACTURA( N(º|O)?)?|NUMERO|NUM|N(º|O)? ?(DE )?DOCUMENTO)(\b|$)/i,
+   /ALBARAN|PEDIDO|CLIENTE|PROVEEDOR|RECTIFICA|ORIGINAL|CORREGID|ABONAD|ANULAD|ORIGEN|PAGINA|CUENTA|IBAN|TELEF|OBRA|CIF|NIF/,
    // Forma de número de documento: serie de letras opcional y cifras («A 000123», «FV26-001234»), también con la serie detrás
    // («12345678 RX», factura real 2026-11-24), o un código de letras y cifras con al menos dos cifras («ES12AB34CDEF»); nunca una
    // fecha ni una dirección.
-   t=>(/^[A-Z]{0,4}[ \/-]?\d[\d.\/ -]{2,}( ?[A-Z]{1,3})?$/i.test(t.trim())||/^(?=(?:[A-Z]*\d){2})[A-Z0-9]{8,20}$/i.test(t.trim()))&&
-    !/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(t.trim())&&!citados.has(N().canon(t)),
+   t=>esNumeroDeFactura(t)&&!citados.has(N().canon(t)),
    {huecoDerecha:8,unirDerecha:true,parClaveValor:true}).map(x=>[x.texto,x])).values()];
+  // Una palabra «Factura» que empieza una frase («Factura generada para facturar el ticket …», con otra cifra debajo: 2026-11-25) no es
+  // la etiqueta del número: con el valor debajo, lo que sigue a la etiqueta (en su casilla o en la de al lado, pegada) no puede ser
+  // una palabra en minúsculas.
+  const frase=t=>/^[a-zñáéíóú]{3,}/.test(t)&&!/^(n[º°o]|num|n[uú]mero|del?|la|factura|documento)\b/i.test(t);
+  for(let i=h.length-1;i>=0;i--){
+   const x=h[i],l=primera.p.lineas[x.indiceLinea],j=l?l.celdas.indexOf(x.celdaEtiqueta):-1,sig=j>=0?l.celdas[j+1]:null;
+   if(j<0||l.celdas.includes(x.celda))continue;
+   // Sin las palabras de la etiqueta («Número factura», «Nº de factura», «Factura nº»).
+   const tras=String(x.celdaEtiqueta.texto||"").trim().replace(/^((n[º°o]\.?|n[uú]mero|num\.?|de|la|del|factura|documento)(?![a-zñáéíóú])\s*[:.#]?\s*)+/i,"");
+   if(frase(tras)||(sig&&frase(String(sig.texto||"").trim())&&sig.x0-x.celdaEtiqueta.x1<=1.5*(x.celdaEtiqueta.alto||10)))h.splice(i,1);
+  }
+  // Abono o rectificativa (2026-11-25: «Abono | RA-26000111» arriba y, más abajo, «Nº factura corregida | A-…»): su número es
+  // el de su título.
+  const tabla1=tablas.find(x=>x.t&&x.p===primera.p);
+  const delTitulo=numeroDeTituloDeAbono(primera.p,tabla1?tabla1.p.lineas[tabla1.t.indiceCabecera].y-tabla1.p.lineas[tabla1.t.indiceCabecera].alto:null);
+  if(delTitulo&&!citados.has(N().canon(delTitulo.texto)))h.splice(0,h.length,delTitulo);
   // El título «FACTURA» encima de la casilla «NÚMERO» da las mismas cifras sin la serie («000123» y «A 000123»): si todas las
   // lecturas son las mismas cifras, vale la más completa.
   const cifras=t=>t.replace(/\D/g,"");
@@ -1701,9 +1927,12 @@ function extraerDePaginas(paginas,opciones={}){
   // Sin un solo número tras la etiqueta de la factura, el que tomó el lector por otra etiqueta («Nº doc CRM 26XXXX», factura real
   // 2026-11-24: se aceptaba como número de la factura) nunca se da por bueno.
   else if(salida.numero?.estado==="OK"){
-   const lit=String(salida.numero.literal||salida.numero.valor||"").trim();
-   const suya=lit&&primera.p.lineas.find(l=>String(l.texto||"").includes(lit));
-   if(h.length>1||!suya||!/FACTURA/.test(N().sinAcentos(suya.texto||"").toUpperCase()))
+   const lit=String(salida.numero.literal||salida.numero.valor||"").trim(),cj=salida.numero.caja;
+   // Su renglón por la posición de la casilla leída; por el texto solo sin posición (2026-11-25: «2026» de «Nº99 | 2026»
+   // valía porque «Fecha de la factura— ene 10, 2026» también lo contiene).
+   const suya=lit&&(cj?primera.p.lineas.find(l=>Math.abs(l.y-cj[1])<1&&l.celdas.some(c=>Math.abs(c.x0-cj[0])<1)):null)||
+    (!cj&&lit?primera.p.lineas.find(l=>String(l.texto||"").includes(lit)):null);
+   if(h.length>1||!suya||!/FACTURA/.test(N().sinAcentos(suya.texto||"").toUpperCase())||!esNumeroDeFactura(lit))
     salida.numero={...salida.numero,estado:"REVISAR",motivos:[...(salida.numero.motivos||[]),h.length>1?"Varios números tras la etiqueta de la factura ("+h.map(x=>x.texto).join(" / ")+")":
      "No está tras «Nº factura»"+(suya?" (está en «"+String(suya.texto).slice(0,40)+"»)":"")+": compruébalo con el papel"]};
   }
@@ -1810,7 +2039,12 @@ function extraerDePaginas(paginas,opciones={}){
  // «Total líneas: 21,77» (Saltoki) es la suma de importes, no un recuento.
  const totalLineas=leido&&leido.estado==="OK"&&Number.isInteger(leido.valor)&&!/,/.test(leido.literal)?leido:null;
  const sumaLineasImpresa=leido&&leido.estado==="OK"&&!totalLineas?leido:null;
- salida.totales=leerTotales(pie,opcionesNumero);
+ salida.totales=leerTotales(pie,opcionesNumero,{factura:!!opciones.numeroDeFactura});
+ // Factura de abono (banco de facturas, 2026-11-25: «Abono RA-…» o «Abono» con los importes impresos en positivo; en
+ // STEL van en negativo): los importes positivos pasan a negativo.
+ const tabla1=tablas.find(x=>x.t&&x.p===paginas[0]);
+ const abonoFactura=opciones.numeroDeFactura?abonoImpreso(paginas,salida.totales,tabla1?tabla1.p.lineas[tabla1.t.indiceCabecera].y-tabla1.p.lineas[tabla1.t.indiceCabecera].alto:null):null;
+ if(abonoFactura)ponerEnNegativo(salida.totales,abonoFactura);
  const base=salida.totales.base_imponible.estado!=="VACIO"&&salida.totales.base_imponible.valor!==null?salida.totales.base_imponible:sumaLineasImpresa;
  salida.pie={total_lineas:totalLineas,suma_lineas_impresa:sumaLineasImpresa,base_imponible:base};
  // Geometría de las tablas (para relecturas por zonas en documentos escaneados).
@@ -1832,9 +2066,10 @@ function extraerDePaginas(paginas,opciones={}){
  const claseImpresa=tituloPedido&&!tituloAlbaran?"PEDIDO":tituloAlbaran&&!tituloPedido?"ALBARAN":null;
  Object.defineProperty(salida,"_ctx",{enumerable:false,writable:true,value:{
   perfil,perfilNumero,totalLineas,base,tipoImpreso,claseImpresa,hayTabla:tablas.some(x=>x.t),columnas:primera.t?.cabecera||[],opcionesNumero,precioPor,
-  // Cifras impresas en el pie (para completar totales cuya etiqueta no se ha leído).
+  factura:!!opciones.numeroDeFactura,abonoFactura,
+  // Cifras impresas en el pie (para completar totales cuya etiqueta no se ha leído), con el texto de su renglón.
   cifrasPie:pie.flatMap(l=>l.celdas.flatMap(c=>String(c.texto).split(/\s+/).map(t=>t.replace(/[€%]/g,"").trim()).filter(t=>/\d/.test(t))
-   .map(t=>({literal:t,...N().numero(t,opcionesNumero),caja:caja(c),conf:c.conf??null})).filter(x=>x.estado==="OK"))),
+   .map(t=>({literal:t,...N().numero(t,opcionesNumero),caja:caja(c),conf:c.conf??null,renglon:clave(l.texto)})).filter(x=>x.estado==="OK"))),
   dudosas:tablas.flatMap(x=>x.t?x.t.dudosasTrasFin:[]),incidenciasBase:[...incidencias],
   sinPrecio:!!(cabeceraPrecio&&!cabeceraPrecio.includes("precio"))}});
  return finalizar(salida);
@@ -1849,8 +2084,11 @@ function completarTotales(salida,ctx){
  const T=salida.totales,cifras=ctx.cifrasPie||[];
  if(!T||!cifras.length)return;
  const ok=c=>["OK","VERIFICADO"].includes(c?.estado)&&c.valor!=null;
+ // Nunca una cifra de un renglón que dice lo que es y no es base, IVA ni total (2026-11-25: «A deducir certificaciones
+ // anteriores 12.000,00» tomada como cuota porque total − base daba esa cifra).
+ const ajeno=/DEDUCIR|DESCONTAR|ANTICIPO|A CUENTA|RETENCION|IRPF|CERTIFICACION|DESCUENTO|PRONTO PAGO|SALDO|PENDIENTE|COMPENSACION|RECARGO|A ORIGEN/;
  const impreso=(valor,{porcentaje=false}={})=>{
-  const x=cifras.filter(c=>Math.abs(c.valor-valor)<0.006&&(porcentaje||/[.,]\d{2}$/.test(c.literal)));
+  const x=cifras.filter(c=>Math.abs(c.valor-valor)<0.006&&(porcentaje||/[.,]\d{2}$/.test(c.literal))&&!ajeno.test(c.renglon||""));
   const lits=[...new Set(x.map(c=>c.valor))];
   return lits.length===1?x[0]:null;
  };
@@ -1858,7 +2096,10 @@ function completarTotales(salida,ctx){
   resolucion:{metodo:"cifra_impresa_validada",evidencias:[evidencia,"Impreso «"+c.literal+"» en el pie"]}};};
  // Base = suma de líneas verificadas, si esa suma está impresa.
  const lineas=salida.lineas;
- if(!ok(T.base_imponible)&&lineas.length&&lineas.every(l=>l.cuadre?.estado==="VERIFICADO")){
+ // En una factura, solo sin ninguna base impresa: la suma de las líneas puede ser la de antes de portes o cargos (2026-11-25:
+ // «Total Neto 100,00» y el IVA «de 115,00») o la de un solo tipo de IVA (líneas al 21 y al 10 %, con una sin leer).
+ const baseLeida=!!ctx.factura&&T.base_imponible?.estado!=="VACIO";
+ if(!ok(T.base_imponible)&&!baseLeida&&lineas.length&&lineas.every(l=>l.cuadre?.estado==="VERIFICADO")){
   const suma=Math.round(lineas.reduce((n,l)=>n+l.importe.valor,0)*100)/100;
   const c=impreso(suma);
   if(c)poner("base_imponible",c,"coincide con la suma de las líneas verificadas ("+suma+")");
@@ -1896,7 +2137,15 @@ function separadorDelNumero(numero,perfil){
 }
 
 /* Validaciones de documento, confianza y estado. Se puede repetir tras combinar lecturas. */
+// Factura: base, cuota o total leídos sin nada que los cuadre (base + IVA = total, la suma de las líneas o la terna de cifras) no se
+// aceptan (banco de facturas, 2026-11-25: 31 de 187 totales así eran de otra cosa: «Total m²», «Total posiciones», el IBAN…).
+const SIN_CUADRE="Sin base + IVA = total ni suma de líneas que lo confirme";
 function finalizar(salida){
+ // Se puede repetir: lo que la vez anterior pasó a revisión por falta de cuadre vuelve a estar como leído.
+ if(salida._ctx?.factura&&salida.totales)for(const k of ["base_imponible","cuota_iva","total"]){
+  const x=salida.totales[k];
+  if(x?.sin_cuadre&&x.estado==="REVISAR"){const {sin_cuadre,...y}=x;salida.totales[k]={...y,estado:"OK",motivos:(y.motivos||[]).filter(m=>m!==SIN_CUADRE)};}
+ }
  verificarServicios(salida);
  const ctx=salida._ctx,incidencias=[...ctx.incidenciasBase];
  // Formato de número del proveedor, también tras combinar lecturas OCR (prueba real 2026-10-28: «0.01»,
@@ -1917,7 +2166,8 @@ function finalizar(salida){
  // Tipo: impreso («ABONO») o deducido de importes y cantidades negativos (devolución).
  const negativos=salida.lineas.length>0&&salida.lineas.every(l=>l.cantidad.valor<0||l.importe.valor<0);
  salida.clase_impresa=ctx.claseImpresa||null;
- salida.tipo_documento=ctx.tipoImpreso?{valor:"ABONO",evidencia:"Impreso «"+ctx.tipoImpreso+"» en el documento"}:
+ salida.tipo_documento=ctx.abonoFactura?{valor:"ABONO",evidencia:"Factura de abono: "+ctx.abonoFactura}:
+  ctx.tipoImpreso?{valor:"ABONO",evidencia:"Impreso «"+ctx.tipoImpreso+"» en el documento"}:
   negativos?{valor:"ABONO",evidencia:"Todas las líneas tienen cantidad o importe negativo"}:{valor:"ALBARAN",evidencia:null};
  salida.validaciones=[];salida.incidencias=incidencias;
  const v=(nombre,estado,detalle)=>salida.validaciones.push({nombre,estado,detalle});
@@ -1931,7 +2181,13 @@ function finalizar(salida){
  const conImporte=salida.lineas.filter(l=>["VERIFICADO","OK"].includes(l.importe.estado));
  if(base&&["OK","VERIFICADO"].includes(base.estado)&&conImporte.length&&conImporte.length===salida.lineas.length){
   const suma=redondear(conImporte.reduce((s,l)=>s+l.importe.valor,0));
-  v("suma_importes",Math.abs(suma-base.valor)<=0.02?"OK":"FALLO","Suma de líneas "+suma+" / impreso «"+base.literal+"»");
+  // Abono con las líneas en positivo y la base ya en negativo: el mismo valor con otro signo.
+  const sumaOk=Math.abs(suma-base.valor)<=0.02||(!!ctx.abonoFactura&&Math.abs(suma+base.valor)<=0.02);
+  v("suma_importes",sumaOk?"OK":"FALLO","Suma de líneas "+suma+" / impreso «"+base.literal+"»");
+  // Factura: la base que suman las líneas está comprobada.
+  const bi=salida.totales?.base_imponible;
+  if(ctx.factura&&sumaOk&&bi?.estado==="OK"&&Math.abs(bi.valor-base.valor)<0.006)
+   salida.totales.base_imponible={...bi,estado:"VERIFICADO",notas:[...(bi.notas||[]),"Base = suma de las líneas ("+suma+")"]};
  }else v("suma_importes","NO_APLICA",base?"No todas las líneas tienen importe válido":"No hay base imponible impresa");
  if(salida.lineas.some(l=>l.cuadre.estado==="DESCUADRE"))v("cuadre_lineas","FALLO","Hay líneas cuyo importe no cuadra");
  completarTotales(salida,ctx);
@@ -1943,7 +2199,8 @@ function finalizar(salida){
  const lineasConImporte=salida.lineas.filter(l=>["VERIFICADO","OK"].includes(l.importe.estado));
  if(t&&t.validacion?.estado!=="OK"&&["OK","VERIFICADO"].includes(t.total?.estado)&&salida.lineas.length&&lineasConImporte.length===salida.lineas.length){
   const suma=redondear(lineasConImporte.reduce((n,l)=>n+l.importe.valor,0));
-  const tipo=[21,10,4,0].find(x=>Math.abs(redondear(suma+redondear(suma*x/100))-t.total.valor)<=0.021);
+  const conIva=x=>redondear(suma+redondear(suma*x/100));
+  const tipo=[21,10,4,0].find(x=>Math.abs(conIva(x)-t.total.valor)<=0.021||(!!ctx.abonoFactura&&Math.abs(conIva(x)+t.total.valor)<=0.021));
   if(tipo!==undefined){
    t.total={...t.total,estado:"VERIFICADO",notas:[...(t.total.notas||[]),"Total = suma de líneas "+suma+" + IVA "+tipo+" %"]};
    v("total_con_lineas","OK","Suma de líneas "+suma+" + IVA "+tipo+" % = total «"+t.total.literal+"»");
@@ -1960,6 +2217,11 @@ function finalizar(salida){
   v("cuota_iva","FALLO","Cuota «"+t.cuota_iva.literal+"» ≠ base × IVA");
  }
  if(ctx.dudosas.length)v("fin_de_tabla","FALLO","Posibles artículos después del final detectado de la tabla: "+ctx.dudosas.map(t=>"«"+t+"»").join("; "));
+ // Factura: lo que sigue sin cuadre, a revisión (se marca para poder repetir la comprobación).
+ if(ctx.factura&&t)for(const k of ["base_imponible","cuota_iva","total"]){
+  const x=t[k];
+  if(x?.estado==="OK"&&x.valor!=null)t[k]={...x,estado:"REVISAR",sin_cuadre:true,motivos:[...(x.motivos||[]).filter(m=>m!==SIN_CUADRE),SIN_CUADRE]};
+ }
  for(const x of salida.validaciones_extra||[])salida.validaciones.push(x);
  // Estado final.
  const camposCabecera=[["proveedor",salida.proveedor],["numero",salida.numero],["fecha",salida.fecha]];
