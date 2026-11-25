@@ -247,10 +247,14 @@ function validarCodigos(lecturas,ctx={}){
  * Código de pedido a proveedor (PAP) escrito a mano. La visión puede darlo como tipo PAP o, antes de
  * conocer ese tipo, como OTRO. Aquí solo se lee: lo valida después validarPedido con el pedido de
  * STEL (mismo proveedor y sus artículos). Sin validar queda en REVISAR o AMBIGUO.
+ * El OCR local de la aplicación solo compara con los códigos de obra: un PAP lo devuelve como NOTA con
+ * su lectura libre (fallo real 2026-11-25: un PAP escrito a mano en boli negro, leído como «PAPO9 876» (ficticio), se
+ * perdía y el albarán no ofrecía su pedido). Vale si TODA la lectura es «PAP» + 5 cifras (con las letras
+ * que se confunden con cifras); nunca se valida solo: se propone y lo decide la persona o STEL.
  */
 function leerPedido(lecturas){
  const deTexto=l=>[l.texto_literal,...(l.lecturas||[]).map(x=>x.codigo)].map(normalizarPedido).filter(Boolean);
- const vistas=(lecturas||[]).filter(l=>(l.tipo==="PAP"||l.tipo==="OTRO")&&deTexto(l).length);
+ const vistas=(lecturas||[]).filter(l=>(l.tipo==="PAP"||l.tipo==="OTRO"||l.tipo==="NOTA")&&deTexto(l).length);
  const limpias=vistas.filter(l=>!l.tachado),tachadas=vistas.filter(l=>l.tachado).map(l=>l.texto_literal);
  if(!limpias.length)return {...vacio(tachadas.length?["Solo hay pedidos tachados: "+tachadas.join(", ")]:[]),literal:tachadas.join(" | ")};
  const cand=new Map();
@@ -727,7 +731,8 @@ async function leerManuscritos(paginas,resultado,vision,ctx={}){
  const todas=(resultado._pags||[]).flatMap(pg=>pg.lineas||[]);
  const impreso=[...todas.flatMap(l=>String(l.texto||"").split(/[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/)),...String(resultado.proveedor?.nombre||"").split(/\s+/)].filter(Boolean);
  const vocabulario=(resultado.lineas||[]).flatMap(l=>String(l.descripcion?.valor??l.descripcion?.literal??"").split(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]+/)).filter(w=>w.length>=3);
- const notas=[...new Set(lecturas.filter(l=>l.tipo==="NOTA"&&!l.tachado).filter(l=>{
+ // Un pedido escrito a mano (leído como NOTA por el OCR local) es el pedido del albarán, no una nota del título.
+ const notas=[...new Set(lecturas.filter(l=>l.tipo==="NOTA"&&!l.tachado&&!normalizarPedido(l.texto_literal)).filter(l=>{
   const r=recortes[l.indice];if(!r)return false;
   const lineasPag=(resultado._pags||[]).filter(x=>x.numero===r.pagina).flatMap(pg=>pg.lineas);
   return !enZonaDeFirma(r.caja.map(n=>n/(r.escala||1)),lineasPag);

@@ -83,6 +83,38 @@ test("escaneo inclinado: se endereza y la fila no se parte; código y descripci�
  assert.equal(r.lineas[0].descripcion.literal,"SELLANTE 255 FIJACION");
 });
 
+// Fallo real 2026-11-25: hoja escaneada de lado y torcida 3,5° (pendiente 0,061). Las posiciones se siguen enderezando solo hasta 0,05:
+// más torcida, se gira la imagen antes de leerla (escaneado.js, con pendienteDeLineas; prueba en lote-b.test.js). Datos ficticios.
+test("pendiente de las líneas sin límite; las posiciones solo se enderezan hasta 0,05",()=>{
+ const {pendienteDeLineas}=require("../albaranes/ocr.js");
+ const cx=297.5,inclinar=(ps,m)=>ps.map(p=>{const d=m*((p.x0+p.x1)/2-cx);return {...p,y0:p.y0+d,y1:p.y1+d};});
+ const pagina=()=>[...cabeceraDoc(),...etiquetas("009902","13/10/2026"),
+  ...fila(200,["CANTIDAD",40],["CONCEPTO",110],["DTO.",380],["PRECIO",440],["IMPORTE",520]),
+  ...fila(218,["12,00",40],["CEMENTO",110],["FICTICIO",160],["25",205],["KG",220],["4,63",440],["55,56",525]),
+  ...fila(236,["2,00",40],["ARENA",110],["FICTICIA",150],["SACA",200],["35,00",440],["70,00",525])];
+ for(const m of [0.06,0.12]){const ps=inclinar(pagina(),m);
+  assert.ok(Math.abs(pendienteDeLineas(ps,595)-m)<0.003,String(m));
+  assert.equal(estimarInclinacion(ps,595),0,String(m));}
+ assert.ok(Math.abs(estimarInclinacion(inclinar(pagina(),0.03),595)-0.03)<0.003);
+ assert.equal(pendienteDeLineas([],595),0);
+});
+
+// Fallo real 2026-11-25: el aviso del proveedor dos renglones bajo el artículo («Material fuera de stock. No admitiremos su devolución…»),
+// con renglones impresos apartados entre medias («Ref.Prov: …»), acababa en la descripción y STEL no podía dar de alta el artículo.
+test("descripción: un renglón de texto con un renglón impreso apartado entre medias ya no es su continuación; pegado debajo, sí",()=>{
+ const cab=fila(200,["CODIGO",40],["DESCRIPCION",120],["CANTIDAD",330],["PRECIO",400],["DTO.",450],["IMPORTE",530]);
+ const r=leer([...cabeceraDoc(),...etiquetas("009903","13/10/2026"),...cab,
+  ...fila(214,["7700001",40],["TUBO",120],["FICTICIO",145],["1/2\"",190],["1,00",350],["100,00",400],["50,00",455],["50,00",540]),
+  ...fila(230,["COAS",120],["X0001",150]),
+  ...fila(240,["Aviso",120],["ficticio",150],["sin",195],["devolución.",215])]);
+ assert.equal(r.lineas.length,1);
+ assert.equal(r.lineas[0].descripcion.literal,"TUBO FICTICIO 1/2\"");
+ const s=leer([...cabeceraDoc(),...etiquetas("009904","13/10/2026"),...cab,
+  ...fila(214,["7700001",40],["TUBO",120],["FICTICIO",145],["1,00",350],["100,00",400],["50,00",455],["50,00",540]),
+  ...fila(224,["GRIS",120],["10M",150])]);
+ assert.equal(s.lineas[0].descripcion.literal,"TUBO FICTICIO GRIS 10M");
+});
+
 test("título «Descrinción» mal leído y cifras dentro de la descripción («… 1,22 x 19 mm»)",()=>{
  const r=leer([...cabeceraDoc(),...etiquetas("26/09001","31-07-2026"),
   ...fila(200,["Cod. Artículo",60,59,{ancho:60}],["Descrinción",130,46],["Cantidad",380],["Precio",430],["Dto.",480],["Importe",520]),

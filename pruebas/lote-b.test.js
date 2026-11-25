@@ -228,6 +228,31 @@ test("página escaneada de lado: se prueba el giro y se lee enderezada",async()=
  assert.equal(r.lineas.length,2);
 });
 
+// Fallo real 2026-11-25: hoja escaneada torcida 3,5° (más de lo que se endereza con las posiciones): sin ninguna línea; y con las
+// posiciones enderezadas, los recortes que se vuelven a leer (número, escrito a mano) salían desplazados. Se gira la imagen.
+test("hoja torcida más de 2,9°: se endereza la imagen antes de leerla; poco o demasiado torcida, no",async()=>{
+ const palabras=[...cabeceraDoc(),...etiquetas(),...titulos(),...filaPrecio(218),...filaPrecio(232,"1300000009")];
+ const cx=297.5,inclinar=m=>palabras.map(p=>{const d=m*((p.x0+p.x1)/2-cx);return {...p,y0:p.y0+d,y1:p.y1+d};});
+ const motor=m=>{const pedidas=[];
+  const pagina=(ps,enderezada)=>({numero:1,anchoPx:595,altoPx:842,dpi:72,rotacion:0,
+   async ocr({region=null}={}){
+    if(!region)return ps;
+    const [x,y,ww,h]=region;
+    return ps.filter(p=>p.x0>=x&&p.x1<=x+ww&&p.y0>=y&&p.y1<=y+h).map(p=>({...p,x0:p.x0-x,x1:p.x1-x,y0:p.y0-y,y1:p.y1-y}));
+   },
+   // Girada de lado, nada legible: se queda la página tal cual.
+   rotada(){return pagina([],true);},
+   ...(enderezada?{}:{enderezada(pend){pedidas.push(pend);return pagina(palabras,true);}})});
+  return {paginas:[pagina(inclinar(m),false)],pedidas};};
+ const t=motor(0.08),r=await extraerEscaneado(t.paginas,{registro:registroCon(),hoy:HOY});
+ assert.equal(t.pedidas.length,1);assert.ok(Math.abs(t.pedidas[0]-0.08)<0.003,String(t.pedidas[0]));
+ assert.deepEqual(r.orientacion,[{pagina:1,grados:0,torcida:4.6}]);
+ assert.equal(r.lineas.length,2);
+ assert.match(r.incidencias.join(" "),/torcida 4,6°/);
+ // Hasta 0,05 se enderezan las posiciones, como siempre; más de 0,15, nada.
+ for(const m of [0.03,0.2]){const u=motor(m);await extraerEscaneado(u.paginas,{registro:registroCon(),hoy:HOY});assert.equal(u.pedidas.length,0,String(m));}
+});
+
 /* ------------------------- Escaneado: segunda fase ------------------------- */
 // Motor con relecturas por recorte: «recortes» decide qué devuelve cada estrategia en la casilla.
 function motorRecortes(pagina,recortes){

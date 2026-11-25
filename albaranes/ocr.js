@@ -85,11 +85,19 @@ function paginaDesdePalabras(palabras,{numero=1,anchoPx,altoPx,dpi=300,desplazam
 /*
  * Pendiente del escaneo (dy/dx) a partir de las líneas que el propio OCR agrupa:
  * mediana de las pendientes de las líneas largas de palabras fiables. 0 si es despreciable
- * o no hay datos (el motor no indica a qué línea pertenece cada palabra).
+ * o no hay datos (el motor no indica a qué línea pertenece cada palabra). Las posiciones se
+ * enderezan así hasta 0,05 (2,9°); una hoja más torcida se endereza girando la imagen antes de
+ * leerla (escaneado.js, pendienteDeLineas sin límite), porque los recortes que se vuelven a
+ * leer salen de la imagen y con más inclinación quedarían desplazados.
  */
 function estimarInclinacion(palabras,anchoPx){
+ const m=pendienteDeLineas(palabras,anchoPx);
+ return Math.abs(m)>=0.002&&Math.abs(m)<=0.05?m:0;
+}
+// La mediana de las pendientes de las líneas largas, sin límite (0 sin al menos 3 líneas).
+function pendienteDeLineas(palabras,anchoPx){
  const grupos=new Map();
- for(const p of palabras){
+ for(const p of palabras||[]){
   if(p.linea==null||!(p.conf>=70)||!/\w{2,}/.test(String(p.texto||"")))continue;
   if(!grupos.has(p.linea))grupos.set(p.linea,[]);
   grupos.get(p.linea).push(p);
@@ -106,8 +114,7 @@ function estimarInclinacion(palabras,anchoPx){
  }
  if(pendientes.length<3)return 0;
  pendientes.sort((a,b)=>a-b);
- const m=pendientes[Math.floor(pendientes.length/2)];
- return Math.abs(m)>=0.002&&Math.abs(m)<=0.05?m:0;
+ return pendientes[Math.floor(pendientes.length/2)];
 }
 
 /* Tesseract TSV (nivel 5 = palabra) → palabras. */
@@ -183,5 +190,5 @@ function unirLineas(ls){
  return {y:base.y,alto:Math.max(...orden.map(l=>l.alto)),celdas,texto:celdas.map(c=>c.texto).join(" "),unida:orden.length};
 }
 
-return {paginaDesdePalabras,palabrasDesdeTsv,palabrasDesdeTesseractJs,estimarInclinacion,unirFilasEntreRayas};
+return {paginaDesdePalabras,palabrasDesdeTsv,palabrasDesdeTesseractJs,estimarInclinacion,pendienteDeLineas,unirFilasEntreRayas};
 });

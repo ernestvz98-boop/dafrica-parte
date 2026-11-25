@@ -762,12 +762,28 @@ async function orientar(p){
  // Solo se gira con una mejora clara; si no, se lee tal cual (y el resultado irá a revisión).
  return mejor.grados&&mejor.calidad>=Math.max(15,2*q0)?mejor:{pagina:p,grados:0,calidad:q0};
 }
+/*
+ * Hoja escaneada más torcida de lo que se endereza con las posiciones (ocr.estimarInclinacion, hasta 0,05 = 2,9°; fallo real
+ * 2026-11-25: una hoja de lado y torcida 3,5° salía sin ninguna línea): se gira la IMAGEN antes de leerla, para que la tabla y los
+ * recortes que se vuelven a leer (número, fecha, lo escrito a mano) cuadren con la imagen (enderezar solo las posiciones los dejaba
+ * desplazados: el número salía cortado y el texto impreso parecía escrito a mano). Con la lectura de la orientación (sin OCR de más).
+ * Hasta 0,15 (8,5°); más, no se toca.
+ */
+async function enderezarPagina(p){
+ if(typeof p.enderezada!=="function")return {pagina:p,pendiente:0};
+ const m=M("ocr").pendienteDeLineas(await p.ocr({psm:4}),p.anchoPx);
+ if(!(Math.abs(m)>0.05&&Math.abs(m)<=0.15))return {pagina:p,pendiente:0};
+ return {pagina:p.enderezada(m),pendiente:m};
+}
 
 async function extraerEscaneado(paginas,opciones={}){
  const {extraerDePaginas,finalizar}=M("extraer"),{paginaDesdePalabras}=M("ocr");
  const lecturas=[],resumen=[],orientacion=[];
  const orientadas=[];
- for(const p of paginas){const o=await orientar(p);orientadas.push(o.pagina);orientacion.push({pagina:p.numero,grados:o.grados});}
+ for(const p of paginas){
+  const o=await orientar(p),e=await enderezarPagina(o.pagina);orientadas.push(e.pagina);
+  orientacion.push({pagina:p.numero,grados:o.grados,...(e.pendiente?{torcida:Math.round(Math.atan(e.pendiente)*1800/Math.PI)/10}:{})});
+ }
  paginas=orientadas;
  for(const conf of LECTURAS){
   const pags=[];
@@ -1039,8 +1055,9 @@ async function extraerEscaneado(paginas,opciones={}){
   }catch(e){principal.incidencias=[...(principal.incidencias||[]),"No se han podido leer las etiquetas QR: "+String(e?.message||e).slice(0,120)];}
  }
  principal.orientacion=orientacion;
- const giradas=orientacion.filter(o=>o.grados);
- if(giradas.length)principal.incidencias.push("Página(s) escaneada(s) girada(s) y enderezada(s): "+giradas.map(o=>o.pagina+" ("+o.grados+"°)").join(", "));
+ const giradas=orientacion.filter(o=>o.grados||o.torcida);
+ if(giradas.length)principal.incidencias.push("Página(s) escaneada(s) girada(s) y enderezada(s): "+giradas.map(o=>o.pagina+" ("+
+  [o.grados?o.grados+"°":null,o.torcida?"torcida "+String(o.torcida).replace(".",",")+"°":null].filter(Boolean).join(", ")+")").join(", "));
  principal.lecturas_ocr=resumen;
  principal.lectura_principal=principal._lectura;
  return principal;

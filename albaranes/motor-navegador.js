@@ -52,6 +52,16 @@ function girar(lienzo,grados){
  x.drawImage(lienzo,-lienzo.width/2,-lienzo.height/2);
  return c;
 }
+// Lienzo enderezado: girado lo justo para que las líneas, con pendiente «pendiente» (dy/dx, y hacia abajo), queden horizontales
+// (hoja escaneada torcida, 2026-11-25). Mismo tamaño y fondo blanco: con pocos grados, lo que se sale es margen.
+function enderezar(lienzo,pendiente){
+ const c=document.createElement("canvas");c.width=lienzo.width;c.height=lienzo.height;
+ const x=c.getContext("2d",{alpha:false});
+ x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);
+ x.translate(c.width/2,c.height/2);x.rotate(-Math.atan(pendiente));
+ x.drawImage(lienzo,-lienzo.width/2,-lienzo.height/2);
+ return c;
+}
 // Banda oscura con texto claro (títulos de tabla): contraste, inversión, binarizado, borrado de
 // las rayas de la tabla y margen blanco. Misma receta que pruebas/motor-comun.js.
 const MARGEN_INVERTIDA=30;
@@ -184,6 +194,14 @@ function paginaOcr(n,lienzos,clave,rotacion,alProgresar,contador,base){
    const kk=n+"@"+g;
    if(!lienzos.has(kk))lienzos.set(kk,girar(lienzos.get(n),g));
    return paginaOcr(n,lienzos,kk,g,alProgresar,contador,base);
+  },
+  // Hoja escaneada torcida (2026-11-25): esta misma página (ya girada, si lo estaba) enderezada; todo lo que se lee o se recorta
+  // después sale de la imagen derecha. La clave empieza por «n@» para que liberar(n) también la suelte.
+  enderezada(pendiente){
+   const kk=n+"@"+(rotacion||0)+"~"+Number(pendiente).toFixed(4);
+   if(!lienzos.has(kk))lienzos.set(kk,enderezar(lienzos.get(clave),pendiente));
+   const pg=paginaOcr(n,lienzos,kk,rotacion,alProgresar,contador,base);pg.enderezado=Number(pendiente);
+   return pg;
   }};
  return yo;
 }

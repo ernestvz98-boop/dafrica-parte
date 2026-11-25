@@ -456,6 +456,26 @@ test("pedido PAP escrito a mano: se lee (también como OTRO y con O por 0) y que
  M.aplicarEstado(s);assert.equal(s.estado,"AUTO_OK");
 });
 
+// Fallo real 2026-11-25: un PAP escrito a mano en boli negro; el OCR local (solo compara con las obras) lo devolvió como NOTA con su
+// lectura libre (letras por cifras) y el albarán no ofrecía su pedido. Códigos ficticios.
+test("pedido PAP en la lectura libre del OCR local (NOTA): se propone, sin validar, y no va a las notas del título",async()=>{
+ const M=require("../albaranes/manuscritos.js");
+ const v=M.validarCodigos([{indice:0,texto_literal:"PAPO9 876",tachado:false,tipo:"NOTA",lecturas:[]}]);
+ assert.equal(v.pedido.valor,"PAP09876");assert.equal(v.pedido.estado,"REVISAR");
+ // Solo si TODA la lectura es el pedido: una nota con otras palabras, o sin el «PAP» entero, no.
+ for(const t of ["Pablo 09876","PAP09876 recoge Juan","PA 09876","PAPO9 87"])
+  assert.equal(M.validarCodigos([{indice:0,texto_literal:t,tachado:false,tipo:"NOTA",lecturas:[]}]).pedido.estado,"VACIO",t);
+ // Una nota tachada no cuenta.
+ assert.equal(M.validarCodigos([{indice:0,texto_literal:"PAPO9 876",tachado:true,tipo:"NOTA",lecturas:[]}]).pedido.valor,null);
+ // De principio a fin: el pedido leído y ninguna «nota a mano» con él para el título.
+ const g=lienzo();escribir(g,300,400);
+ const pagina={numero:1,anchoPx:2480,altoPx:3508,gris:()=>g,recortePng:()=>"data:image/png;base64,AAAA"};
+ const resultado={_pags:[{numero:1,lineas:[]}],lineas_ignoradas:[],lineas:[],proveedor:{id:"A"}};
+ const m=await M.leerManuscritos([pagina],resultado,async pngs=>pngs.map((_,i)=>({indice:i,tipo:"NOTA",texto_literal:"PAPO9 876",tachado:false,lecturas:[]})));
+ assert.equal(m.pedido.valor,"PAP09876");assert.equal(m.pedido.estado,"REVISAR");
+ assert.deepEqual(m.notas,[]);
+});
+
 test("pedido PAP validado con STEL: mismo proveedor y con los artículos del albarán; si no, o con dos candidatos, no",async()=>{
  const M=require("../albaranes/manuscritos.js");
  const base=alt=>({numero:{valor:"700.001"},proveedor:{account_id:77},

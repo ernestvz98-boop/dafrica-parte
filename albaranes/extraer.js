@@ -881,7 +881,7 @@ function leerTablaPagina(pagina,perfil=null){
    // Si a su altura hay una anotación («Retirado por: NOMBRE …»), es parte de ella, no de la descripción.
    const junto=pagina.lineas.some(l=>l!==linea&&Math.abs(l.y-linea.y)<=1.2*Math.max(linea.alto,l.alto)&&RE_ANOTACION.test(clave(l.texto)));
    if(actual&&desc&&!junto&&linea.celdas.every(c=>c.x0>=desc.ini&&c.x1<=desc.fin)&&linea.y-yAnterior<=2*Math.max(linea.alto,altoFila)){
-    actual.continuacionesDudosas=[...(actual.continuacionesDudosas||[]),linea.texto];
+    actual.continuacionesDudosas=[...(actual.continuacionesDudosas||[]),linea.texto];actual.yUltima=linea.y;
     yAnterior=linea.y;continue;
    }
    // Primer renglón de un artículo, impreso pero leído con poca confianza (fallo real 2026-11-25: «código  TEXTO … 300» con las
@@ -955,7 +955,7 @@ function leerTablaPagina(pagina,perfil=null){
     !RE_ANOTACION.test(textoLinea)&&/^[(\-\/.]/.test(celdas.referencia.texto.trim())){
    actual.continuacionRef=[...(actual.continuacionRef||[]),celdas.referencia.texto.trim()];
    if(celdas.descripcion)actual.continuaciones.push(celdas.descripcion.texto);
-   yAnterior=linea.y;continue;
+   actual.yUltima=linea.y;yAnterior=linea.y;continue;
   }
   const soloPalabra=tieneRef&&!tieneCantidad&&!tieneImportes&&!celdas.descripcion&&!/\d/.test(celdas.referencia.texto);
   if(soloPalabra){
@@ -974,7 +974,7 @@ function leerTablaPagina(pagina,perfil=null){
    if(texto)actual.continuaciones.push(texto);
    for(const [k,c] of Object.entries(celdas))if(!["referencia","descripcion"].includes(k))actual.celdas[k]=c;
    actual.conflictos=[...actual.conflictos,...conflictos];actual.partida=actual.partida||partida;actual.textoEstimado=actual.textoEstimado||textoEstimado;
-   actual.cifrasEnSegundoRenglon=true;
+   actual.cifrasEnSegundoRenglon=true;actual.yUltima=linea.y;
    yAnterior=linea.y;continue;
   }
   // «Albarán: 26/0001  Fecha: …» dentro de la tabla de una factura (fallo real 2026-11-23): es la cabecera de las líneas de ese
@@ -1003,10 +1003,15 @@ function leerTablaPagina(pagina,perfil=null){
    filas.push(actual);
   }else{
    const soloTexto=Object.keys(celdas).every(k=>["descripcion","referencia","otra","unidad"].includes(k));
+   // Con un renglón impreso apartado entre el artículo y este («Ref.Prov: …», «Nº PRODUCTOR …»), este ya no es su descripción (fallo real
+   // 2026-11-25: el aviso «Material fuera de stock. No admitiremos su devolución…», dos renglones más abajo, acabó en la descripción y STEL
+   // no pudo dar de alta el artículo). No cortan: lo escrito a mano, el ruido del margen y las motas.
+   const apartadoEntre=actual&&ignoradas.some(v=>v.pagina===pagina.numero&&v.y>(actual.yUltima??actual.y)&&v.y<linea.y&&
+    !/baja confianza|margen|sin artículo ni cifras/.test(v.motivo||""));
    // «ALBARÁN Nº …» dentro de una factura es la cabecera del albarán siguiente, nunca el final de la descripción de arriba (2026-11-23).
-   if(actual&&soloTexto&&celdas.descripcion&&!celdas.referencia&&linea.y-yAnterior<=1.8*linea.alto&&
+   if(actual&&soloTexto&&celdas.descripcion&&!celdas.referencia&&linea.y-yAnterior<=1.8*linea.alto&&!apartadoEntre&&
      !RE_ANOTACION.test(clave(celdas.descripcion.texto))&&!/^ALBARAN\b/.test(clave(celdas.descripcion.texto))){
-    actual.continuaciones.push(celdas.descripcion.texto);
+    actual.continuaciones.push(celdas.descripcion.texto);actual.yUltima=linea.y;
    }else{
     const ig={pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Línea sin cantidad dentro de la tabla"};
     Object.defineProperties(ig,{_sinCantidad:{value:!!celdas.descripcion},_fila:{value:filas.length},_y:{value:linea.y},_x:{value:linea.celdas[0]?.x0??0},
