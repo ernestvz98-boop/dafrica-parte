@@ -1605,9 +1605,10 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  }
  if(c.descuento2)f.notas.push("Dos columnas de descuento aplicadas en cascada");
  // «NETO» (sin descuento) de la columna del descuento leído al final de la descripción (prueba real
- // 2026-10-28): no es parte de la descripción; el cuadre de la línea decide.
- if(f.descuento.estado==="VACIO"&&!f.descuento.literal&&/\sNETO$/.test(f.descripcion.literal||"")&&(c.precio||c.importe)){
-  f.descripcion={...f.descripcion,literal:f.descripcion.literal.replace(/\s+NETO$/,""),valor:f.descripcion.literal.replace(/\s+NETO$/,""),
+ // 2026-10-28): no es parte de la descripción; el cuadre de la línea decide. También leído «NETO:» o «NETO.» (albarán real
+ // 2026-11-25: la descripción acababa en «… NETO:» y la línea no casaba con la de su pedido).
+ if(f.descuento.estado==="VACIO"&&!f.descuento.literal&&/\sNETO[:.]?$/.test(f.descripcion.literal||"")&&(c.precio||c.importe)){
+  f.descripcion={...f.descripcion,literal:f.descripcion.literal.replace(/\s+NETO[:.]?$/,""),valor:f.descripcion.literal.replace(/\s+NETO[:.]?$/,""),
    notas:[...(f.descripcion.notas||[]),"«NETO» de la columna del descuento separado de la descripción"]};
   f.descuento={...campoDescuento({texto:"NETO"},opcionesNumero),caja:null,conf_ocr:null,notas:["«NETO» impreso: precio neto, sin descuento"]};
  }

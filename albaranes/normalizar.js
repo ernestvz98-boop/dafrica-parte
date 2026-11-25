@@ -75,11 +75,11 @@ function numero(literal,opciones={}){
  return r;
 }
 
-/* Descuentos: «20», «20,00», «20%», «20+5», «20+5+3». Vacío o «NETO» = sin descuento. */
+/* Descuentos: «20», «20,00», «20%», «20+5», «20+5+3». Vacío o «NETO» (también leído «NETO:» o «NETO.») = sin descuento. */
 function descuento(literal,opciones={}){
  const r=resultado(limpiar(literal));
  r.porcentajes=[];r.factor=1;
- if(!r.literal||/^[-–—]$/.test(r.literal)||/^NETO$/i.test(r.literal))return r;
+ if(!r.literal||/^[-–—]$/.test(r.literal)||/^NETO[:.]?$/i.test(r.literal))return r;
  const partes=r.literal.replace(/\s+/g,"").split("+");
  for(const parte of partes){
   const n=numero(parte,{...opciones,porcentaje:true});
