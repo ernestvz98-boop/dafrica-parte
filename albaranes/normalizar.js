@@ -100,7 +100,9 @@ function descuento(literal,opciones={}){
 
 const MESES={ENE:1,ENERO:1,FEB:2,FEBRERO:2,MAR:3,MARZO:3,ABR:4,ABRIL:4,MAY:5,MAYO:5,JUN:6,JUNIO:6,
  JUL:7,JULIO:7,AGO:8,AGOSTO:8,SEP:9,SEPT:9,SEPTIEMBRE:9,SETIEMBRE:9,OCT:10,OCTUBRE:10,
- NOV:11,NOVIEMBRE:11,DIC:12,DICIEMBRE:12};
+ NOV:11,NOVIEMBRE:11,DIC:12,DICIEMBRE:12,
+ // Facturas en inglés (2026-11-25: «February 12, 2026», «Oct 9, 2026»).
+ JAN:1,JANUARY:1,FEBRUARY:2,MARCH:3,APR:4,APRIL:4,JUNE:6,JULY:7,AUG:8,AUGUST:8,OCTOBER:10,NOVEMBER:11,DEC:12,DECEMBER:12};
 const iso=(a,m,d)=>String(a).padStart(4,"0")+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0");
 function fechaReal(a,m,d){
  const f=new Date(Date.UTC(a,m-1,d));
@@ -130,6 +132,8 @@ function fecha(literal,opciones={}){
   if(!m){r.estado="INVALIDO";r.motivos.push("Mes no reconocido: "+m2[2]);return r;}
   if(m2[3].length===2){a+=2000;r.notas.push("Año impreso con dos cifras");}
  }
+ // El mes delante («nov 3, 2026», «February 12, 2026» en inglés): solo con el año de cuatro cifras.
+ else if((m2=s.match(/^([A-Z]{3,10})\.? (\d{1,2}),? (\d{4})$/))&&MESES[m2[1]]){m=MESES[m2[1]];d=+m2[2];a=+m2[3];}
  else{r.estado="INVALIDO";r.motivos.push("Formato de fecha no reconocido: «"+r.literal+"»");return r;}
  if(!fechaReal(a,m,d)){r.estado="INVALIDO";r.motivos.push("Fecha inexistente: «"+r.literal+"»");return r;}
  r.valor=iso(a,m,d);r.estado="OK";

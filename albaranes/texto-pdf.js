@@ -96,7 +96,9 @@ async function leerPagina(pdfjs,page,numero){
  const fragmentos=[];
  let rotado=0;
  for(const item of contenido.items){
-  const texto=String(item.str||"").replace(/\s+/g," ");
+  // Caracteres de control en el texto del PDF («ABCDEFGH␀0012» de una factura en inglés, 2026-11-25): un espacio (mismo largo).
+  const str=String(item.str||"").replace(/[\u0000-\u001f]/g," ");
+  const texto=str.replace(/\s+/g," ");
   if(!texto.trim())continue;
   const t=pdfjs.Util.transform(vista.transform,item.transform);
   const alto=Math.hypot(t[2],t[3])||Number(item.height)||10;
@@ -104,7 +106,7 @@ async function leerPagina(pdfjs,page,numero){
   if(Math.abs(t[1])>0.01*alto||Math.abs(t[2])>0.01*alto){rotado++;continue;}
   const x0=t[4],ancho=(Number(item.width)||0)*escala;
   // crudo: texto original con sus espacios, que ocupa exactamente [x0,x1].
-  fragmentos.push({texto:texto.trim(),crudo:String(item.str),x0,x1:x0+ancho,y:t[5],alto});
+  fragmentos.push({texto:texto.trim(),crudo:str,x0,x1:x0+ancho,y:t[5],alto});
  }
  const caracteres=fragmentos.reduce((n,f)=>n+f.texto.replace(/\s/g,"").length,0);
  const imagen=await fraccionImagen(pdfjs,page,vista.width,vista.height);
