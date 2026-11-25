@@ -207,7 +207,11 @@ const UNIDADES="UD|UDS|UN|UNI|UND|UNDS|U|M|ML|MT|MTS|M2|M3|KG|KGS|G|GR|L|LT|LTS|
 const UNIDADES_AMBOS=UNIDADES.split("|").map(u=>u.split("").map(c=>/[A-Z]/.test(c)?"["+c+c.toLowerCase()+"]":c).join("")).join("|");
 const RE_CANTIDAD_UNIDAD=new RegExp("^([-−]?[\\d.,]+)\\s*(("+UNIDADES_AMBOS+")\\.?)[|jI!\\]]?$");
 const RE_UNIDAD_SOLA=new RegExp("^(("+UNIDADES_AMBOS+")\\.?)$");
-const pareceNumero=t=>/^(\(\s*[\d.,]+\s*\)|[-−+]?\s*[\d.,]+\s*(\+\s*[\d.,]+\s*)*[−-]?\s*%?)$/.test(String(t).trim());
+// Con el símbolo «€» delante o detrás («12,34 €», «€23.45»: facturas de 2026-11-25, el precio y el importe acababan pegados a la
+// descripción) también es una cifra; con la palabra «EUR», no (2026-11-25: «12,00 EUR» con los descuentos en cascada «40,00-%20,00-%…»,
+// que aún no se leen, dejaba la línea sin cuadrar).
+const pareceCifraSola=t=>/^(\(\s*[\d.,]+\s*\)|[-−+]?\s*[\d.,]+\s*(\+\s*[\d.,]+\s*)*[−-]?\s*%?)$/.test(String(t).trim());
+const pareceNumero=t=>pareceCifraSola(String(t).trim().replace(/^€\s?(?=[-−+]?\d)|(?<=\d)\s?€$/,""));
 // Solo para OCR (celdas con confianza): menos del 40 % de los caracteres con confianza ≥ 50
 // (la escritura a mano sale casi siempre por debajo de 40; el impreso borroso, entre 50 y 70).
 function esManuscrita(linea){
@@ -286,7 +290,8 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=In
 }
 
 // Etiqueta genérica («Nº:», «Número:») solo si no hay ninguna que diga «albarán».
-const RE_NUMERO_GENERICO=/^(N[ºO°]|NUM|NUMERO)(\b|$)/;
+// «№» (el signo de número) pegado a las cifras («№.12345678901», factura de 2026-11-25) también; nunca «№ de envío» ni «№ cliente».
+const RE_NUMERO_GENERICO=/^(N[ºO°]|NUM|NUMERO)(\b|$)|^№(?= ?\d)/;
 const EXCLUIR_GENERICO=/CLIENTE|PEDIDO|PROVEEDOR|TELEF|TLF|FAX|PAGINA|PAG|OBRA|CIF|NIF|FACTURA|PRESUPUESTO|CUENTA|IBAN|SERIE|LOTE|BULTOS|MATRICULA|REGISTRO|TOMO|FOLIO|HOJA|INSCRIPCION/;
 function leerNumero(lineas){
  const r={literal:"",valor:null,estado:"VACIO",motivos:[],notas:[],caja:null};
@@ -920,8 +925,10 @@ function leerTablaPagina(pagina,perfil=null){
   // Ruido (manuscritos, marcas): sin referencia ni descripción y sin ninguna cifra válida.
   // OCR: tampoco es un artículo una cifra suelta, sin código, descripción ni cantidad, leída con
   // confianza baja (trazo de un manuscrito que cae en una columna de importes).
+  // Una fila sin código ni descripción con solo cifras con «€» (las filas vacías «0,00 €» de una plantilla o la suma suelta de la
+  // columna al final, factura de 2026-11-25) tampoco es un artículo: queda fuera, como antes de admitir el «€» en las cifras.
   const soloRuido=!tieneRef&&!celdas.descripcion&&
-   (Object.entries(celdas).every(([k,c])=>!NUMERICAS.has(k)||!pareceNumero(c.texto))||
+   (Object.entries(celdas).every(([k,c])=>!NUMERICAS.has(k)||!pareceCifraSola(c.texto))||
     (!tieneCantidad&&Object.values(celdas).every(c=>c.conf!=null&&c.conf<90)));
   if(soloRuido){
    ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Texto sin artículo ni cifras válidas (posible manuscrito o marca)"});
@@ -1039,7 +1046,7 @@ function valorPie(lineas,re,opcionesNumero){
  */
 const ETIQ_TOTALES={
  // «TOTAL BASE IMPONIBLE», «BASES IMPONIBLES», «BASE IVA» (banco de facturas, 2026-11-25).
- base:/^(BASES? IMPONIBLES?|BASE|BASES|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES|TOTAL BASES?( IMPONIBLES?)?|NET|TOTAL EXCL(UDING|UIDO)?( (TAX|VAT|IVA))?)\b|^HONORARIOS$/,
+ base:/^(BASES? IMPONIBLES?|BASE|BASES|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES|TOTAL BASES?( IMPONIBLES?)?|NET|TOTAL EXCL(UDING|UIDO)?( (TAX|VAT|IVA))?|PRECIO NETO TOTAL)\b|^HONORARIOS$/,
  // El % dentro de la etiqueta también vale («IVA 21%», «IVA21%», «21 % IVA», «Impuesto IVA 21%», «21% sobre la base imponible»).
  pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA|IMPUESTOS?( DE)? IVA|VAT|TAX|VAT RATE|TAX RATE)\b|^%$|^CUOTAS? \d{1,2}([.,]\d+)? ?%|^IVA(?= ?\d)|^\d{1,2}([.,]\d+)? ?% ?(DE )?(IVA|SOBRE)\b/,
  // «Cuota» sola (columna del desglose «Base IVA | % | Cuota») y «Total impuesto(s)»: la combinación decide.
@@ -1057,7 +1064,7 @@ const ETIQ_TOTALES={
 };
 // No son el total de la factura: recuentos y medidas («Total m²», «Total posiciones», «Total bultos»), el IVA, la base, lo que se
 // descuenta o compensa, el pedido y lo certificado a origen (banco de facturas, 2026-11-25: «Total m²: 543,21» aceptado como total).
-const EXCLUIR_TOTAL=/^TOTAL ?(L ?[IÍ1L]? ?N ?E ?A ?S|[IL1] ?[IÍ1L]? ?N ?E ?A ?S|(DE )?[ILT1] ?V ?A|RE|NETO|BRUTO|M ?[23²³]|M|ML|MTS|KGS?|KILOS|PESO|BULTOS|UDS|UNIDADES|PIEZAS|CANTIDAD(ES)?|POSICIONES|PARTIDAS|ARTICULOS|HORAS|LITROS|COMPENSACION|PEDIDO|DTOS?|DESCUENTOS?|PUNTOS|IMPUESTOS?|RECARGO|RETENCION|IRPF|BASES?|(FACTURA )?A ORIGEN|CERTIFICAD[OA]S?|VAT|EXCL(UDING|UIDO)?|CUOTAS?)(?![A-Z0-9])/;
+const EXCLUIR_TOTAL=/^TOTAL ?(L ?[IÍ1L]? ?N ?E ?A ?S|[IL1] ?[IÍ1L]? ?N ?E ?A ?S|(DE )?[ILT1] ?V ?A|RE|NETO|BRUTO|M ?[23²³]|M|ML|MTS|KGS?|KILOS|PESO|BULTOS|UDS|UNIDADES|PIEZAS|CANTIDAD(ES)?|POSICIONES|PARTIDAS|ARTICULOS|HORAS|LITROS|COMPENSACION|PEDIDO|DTOS?|DESCUENTOS?|PUNTOS|IMPUESTOS?|RECARGO|RETENCION|IRPF|BASES?|(FACTURA )?A ORIGEN|CERTIFICAD[OA]S?|VAT|EXCL(UDING|UIDO)?|CUOTAS?|NET|GROSS|WEIGHT)(?![A-Z0-9])/;
 // En una factura, el total de cada albarán que cita no es el de la factura.
 const EXCLUIR_TOTAL_FACTURA=new RegExp(EXCLUIR_TOTAL.source+"|^TOTAL (DEL? )?ALBAR[AE]N(ES)?(?![A-Z0-9])");
 // Base con impuestos («IMPORTE NETO TOTAL CON IMPUESTOS») o cuota «incluida»: no son base ni cuota.
@@ -1110,11 +1117,16 @@ function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false,fact
   // 2026-11-25: la base dejaba de encontrarse).
   const deColumna=l2=>l2.celdas.find(c=>Math.min(c.x1,celda.x1)-Math.max(c.x0,celda.x0)>0)||l2.celdas.find(c=>enColumna(c)&&/\d/.test(c.texto)&&!esEtiqueta(c.texto));
   const siguientes=lineas.slice(li+1);
+  let yRef=linea.y;
   for(const [j,l2] of siguientes.slice(0,3).entries()){
-   if(l2.y-linea.y>4.5*Math.max(linea.alto,celda.alto))break;
+   if(l2.y-yRef>4.5*Math.max(linea.alto,celda.alto))break;
    // Una llamada de nota (un «1» pequeño bajo «Tax», factura en inglés 2026-11-25): no es la cifra de la columna.
    if(l2.celdas.length===1&&String(l2.celdas[0].texto).trim().length<=2&&l2.alto<0.75*Math.max(linea.alto,celda.alto))continue;
    const abajo=deColumna(l2);
+   // Un renglón que solo precisa los títulos («(excl. VAT)», «(EUR)»: facturas de tiendas en línea, 2026-11-25) no es la cifra: se mira el
+   // siguiente, contando desde él. «(incl. VAT)» sí para: lo de debajo lleva el IVA y nunca es una base.
+   const precisa=c=>/^\(\D*\)$/.test(String(c.texto).trim());
+   if(abajo&&precisa(abajo)&&l2.celdas.every(precisa)){if(/INCL/i.test(abajo.texto))break;yRef=l2.y;continue;}
    if(abajo&&/\d/.test(abajo.texto)&&!esEtiqueta(abajo.texto)){
     textos.push(abajo.texto);
     // Columna de cifras (desglose por tipos de IVA y su fila de totales): también las de debajo, mientras sigan siendo solo cifras.
@@ -1137,8 +1149,10 @@ function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false,fact
    for(const t of piezasNumero(bruto)){
     const esPct=/%/.test(t);
     if(porcentaje!==esPct&&!(porcentaje&&/^\d{1,2}([.,]0+)?$/.test(t)))continue;
-    // Ni «0012» (el IBAN bajo «A ingresar») ni, en una factura, una cifra sin decimales (un año, un código) son importes.
-    if(!porcentaje&&(/^-?0\d/.test(t)||(factura&&!/[.,]\d{2,4}-?$/.test(t))))continue;
+    // Ni «0012» (el IBAN bajo «A ingresar») ni, en una factura, una cifra sin decimales (un año, un código) son importes; sí una casilla
+    // que es solo un importe con «€» («€0.0» o «€0» de las facturas de tiendas en línea, 2026-11-25).
+    const soloEuros=/^\s*(€\s?-?[\d.,]+|-?[\d.,]+\s?€)\s*$/.test(String(bruto));
+    if(!porcentaje&&(/^-?0\d/.test(t)||(factura&&!soloEuros&&!/[.,]\d{2,4}-?$/.test(t))))continue;
     const n=N().numero(porcentaje?t.replace(/ ?%$/,""):t,{...opcionesNumero,porcentaje});
     if(n.estado==="OK"&&(!porcentaje||(n.valor>=0&&n.valor<=30)))out.push({...n,etiqueta:celda.texto,caja:caja(celda),fila:li,orden:orden++});
    }
@@ -1171,7 +1185,8 @@ function leerTotales(lineas,opcionesNumero,{factura=false}={}){
  const signo=x=>Math.sign(x.valor);
  // «SUBTOTAL» solo de un renglón con una sola cifra: «SUBTOTAL | base | cuota | con IVA» es el de un grupo de líneas (factura de
  // combustible, 2026-11-25: el grupo al 10 % cuadraba solo y se aceptaba como la factura).
- const subtotales=S.filter(s=>S.filter(x=>x.fila===s.fila).length===1);
+ // La misma cifra repetida en la columna (el desglose y su fila «Total» de las facturas de tiendas en línea, 2026-11-25) cuenta una vez.
+ const subtotales=S.filter(s=>new Set(S.filter(x=>x.fila===s.fila).map(x=>x.valor)).size===1);
  const bases=[...unicos(B),...unicos(subtotales).filter(s=>!B.some(b=>b.valor===s.valor))];
  const combos=[];
  // Con gastos suplidos impresos: base + cuota + suplidos = total (la cuota solo de la base). Con retención (IRPF): − retención.
@@ -1329,8 +1344,10 @@ function abonoImpreso(paginas,T,yTabla=null){
  const p=paginas[0];if(!p)return null;
  // Encima de la tabla de artículos (sin tabla, en el 40 % de arriba), como renglón propio o casilla suelta: nunca una palabra dentro de
  // una frase («***** 15% ABONO MARCA PROMO …» en una factura normal, 2026-11-25).
+ // Título bilingüe con barra («Factura de deudor/Credit Note», 2026-11-25): su parte en inglés «Credit note» o «Credit memo» también.
+ const bilingue=t=>{const p2=String(t||"").split("/");return p2.length===2?p2.map(clave).filter(k=>/^CREDIT (NOTE|MEMO)$/.test(k)):[];};
  const arriba=p.lineas.filter(l=>l.y<(yTabla??0.4*(p.alto||842)))
-  .flatMap(l=>[clave(l.texto),...l.celdas.map((c,i)=>celdaSuelta(l,i)?clave(c.texto):null)]).filter(Boolean);
+  .flatMap(l=>[clave(l.texto),...l.celdas.flatMap((c,i)=>celdaSuelta(l,i)?[clave(c.texto),...bilingue(c.texto)]:[])]).filter(Boolean);
  const abono=arriba.find(k=>RE_TITULO_ABONO.test(k));
  if(abono)return "título impreso «"+abono+"»";
  const negativo=T?._negativos?.[0],rect=arriba.find(k=>RE_TITULO_RECTIFICATIVA.test(k));
@@ -1994,6 +2011,10 @@ function extraerDePaginas(paginas,opciones={}){
    const tras=String(x.celdaEtiqueta.texto||"").trim().replace(/^((n[º°o]\.?|n[uú]mero|num\.?|de|la|del|factura|documento)(?![a-zñáéíóú])\s*[:.#]?\s*)+/i,"");
    if(frase(tras)||(sig&&frase(String(sig.texto||"").trim())&&sig.x0-x.celdaEtiqueta.x1<=1.5*(x.celdaEtiqueta.alto||10)))h.splice(i,1);
   }
+  // Recibo (título «Receipt» suelto arriba y ningún número de factura: vendedores de tiendas en línea, 2026-11-25): su número es el del recibo.
+  if(!h.length&&primera.p.lineas.some(l=>l.y<0.2*(primera.p.alto||842)&&l.celdas.some((c,k)=>clave(c.texto)==="RECEIPT"&&celdaSuelta(l,k))))
+   h.push(...valoresEtiquetados(primera.p.lineas,/^RECEIPT (NUMBER|NO|NUM|#)(\b|$|(?<=#))/i,/ORDER|CUSTOMER/,
+    t=>esNumeroDeFactura(t,{espacio:true})&&!citados.has(N().canon(t)),{huecoDerecha:8,parClaveValor:true}));
   // Abono o rectificativa (2026-11-25: «Abono | RA-26000111» arriba y, más abajo, «Nº factura corregida | A-…»): su número es
   // el de su título.
   const tabla1=tablas.find(x=>x.t&&x.p===primera.p);
@@ -2003,6 +2024,10 @@ function extraerDePaginas(paginas,opciones={}){
   // lecturas son las mismas cifras, vale la más completa.
   const cifras=t=>t.replace(/\D/g,"");
   if(h.length>1&&h.every(x=>cifras(x.texto)===cifras(h[0].texto)))h.sort((a,b)=>b.texto.length-a.texto.length).splice(1);
+  // Número partido en dos renglones («ES-1234-2026-» y debajo «1234567890», factura de 2026-11-25) y entero más abajo: una lectura es el
+  // principio o el final de otra (con 6 cifras o más): vale la entera.
+  if(h.length>1){const sin=t=>t.replace(/\s/g,"").toUpperCase(),larga=[...h].sort((a,b)=>sin(b.texto).length-sin(a.texto).length)[0];
+   if(h.every(x=>x===larga||(cifras(x.texto).length>=6&&(sin(larga.texto).startsWith(sin(x.texto))||sin(larga.texto).endsWith(sin(x.texto))))))h.splice(0,h.length,larga);}
   if(h.length===1){
    salida.numero={literal:h[0].texto,valor:h[0].texto,estado:"OK",motivos:[],notas:["Número de la factura tras «"+h[0].etiqueta+"»"],
     caja:caja(h[0].celda),conf_ocr:h[0].celda?.conf??null};
@@ -2039,15 +2064,19 @@ function extraerDePaginas(paginas,opciones={}){
    // valía porque «Fecha de la factura— ene 10, 2026» también lo contiene).
    const suya=lit&&(cj?primera.p.lineas.find(l=>Math.abs(l.y-cj[1])<1&&l.celdas.some(c=>Math.abs(c.x0-cj[0])<1)):null)||
     (!cj&&lit?primera.p.lineas.find(l=>String(l.texto||"").includes(lit)):null);
-   if(h.length>1||!suya||!/FACTURA/.test(N().sinAcentos(suya.texto||"").toUpperCase())||!esNumeroDeFactura(lit))
+   // O el título «FACTURA» / «INVOICE» suelto justo encima de su renglón («FACTURA» y debajo «№.12345678901 | Fecha: …», factura de
+   // 2026-11-25).
+   const tituloEncima=suya&&primera.p.lineas.some(l=>l.y<suya.y&&suya.y-l.y<=2*Math.max(suya.alto||10,l.alto||10)&&
+    l.celdas.some((c,k)=>/^((FACTURA )?RECTIFICATIVA|FACTURA|INVOICE)$/.test(clave(c.texto))&&celdaSuelta(l,k)));
+   if(h.length>1||!suya||!(/FACTURA/.test(N().sinAcentos(suya.texto||"").toUpperCase())||tituloEncima)||!esNumeroDeFactura(lit))
     salida.numero={...salida.numero,estado:"REVISAR",motivos:[...(salida.numero.motivos||[]),h.length>1?"Varios números tras la etiqueta de la factura ("+h.map(x=>x.texto).join(" / ")+")":
      "No está tras «Nº factura»"+(suya?" (está en «"+String(suya.texto).slice(0,40)+"»)":"")+": compruébalo con el papel"]};
   }
  // Fecha de la factura (factura real 2026-11-24: «Fecha de la factura/Fecha de la entrega | 19 noviembre 2026» quedaba fuera por
   // «entrega»; en una rectificativa, también «Fecha de la factura original»): la única tras «Fecha (de la) factura», nunca la de la
   // factura original, el pedido o el vencimiento.
-  // En inglés: «Date of issue», «Date issued», «Issue Date», «Invoice date» (nunca «Date due», «Payment Date» ni «Order date»).
-  {const F=N().fecha,ff=[...new Map(valoresEtiquetados(primera.p.lineas,/^(FECHA (DE (LA )?)?FACTURA|DATE OF ISSUE|DATE ISSUED|ISSUE DATE|INVOICE DATE)(\b|$)/,/ORIGINAL|VENCIMIENTO|PEDIDO|PAGO|\bDUE\b|PAYMENT|ORDER/,
+  // En inglés: «Date of issue», «Date issued», «Issue Date», «Invoice date», «Receipt date» (nunca «Date due», «Payment Date» ni «Order date»).
+  {const F=N().fecha,ff=[...new Map(valoresEtiquetados(primera.p.lineas,/^(FECHA (DE (LA )?)?FACTURA|DATE OF ISSUE|DATE ISSUED|ISSUE DATE|INVOICE DATE|RECEIPT DATE)(\b|$)/,/ORIGINAL|VENCIMIENTO|PEDIDO|PAGO|\bDUE\b|PAYMENT|ORDER/,
     t=>/\d/.test(t)&&F(t,opcionesFecha).estado==="OK",{huecoDerecha:8,parClaveValor:true}).map(x=>[F(x.texto,opcionesFecha).valor,x])).values()];
    if(ff.length===1&&!(salida.fecha?.estado==="OK"&&salida.fecha.valor===F(ff[0].texto,opcionesFecha).valor)){
     const f=F(ff[0].texto,opcionesFecha);
@@ -2098,7 +2127,9 @@ function extraerDePaginas(paginas,opciones={}){
  // «€» del propio documento, si todos tienen el mismo formato.
  let origenFormato="cifras del propio documento";
  if(!deducido.confirmado&&opciones.numeroDeFactura){
-  const conEuro=digitales.flatMap(p=>p.lineas.flatMap(l=>l.celdas.flatMap(c=>[...String(c.texto).matchAll(/€\s?(-?\d[\d.,]*\d)|(-?\d[\d.,]*\d)\s?€/g)].map(m=>m[1]||m[2]))));
+  // También «EUR» detrás o en la casilla de al lado («100.00 | EUR», factura de 2026-11-25).
+  const conEuro=digitales.flatMap(p=>p.lineas.flatMap(l=>l.celdas.flatMap((c,i)=>[...[...String(c.texto).matchAll(/€\s?(-?\d[\d.,]*\d)|(-?\d[\d.,]*\d)\s?(€|EUR\b)/g)].map(m=>m[1]||m[2]),
+   ...(/^\s*(EUR|€)\s*$/i.test(l.celdas[i+1]?.texto||"")&&/^\s*-?\d[\d.,]*\d\s*$/.test(c.texto)?[c.texto.trim()]:[])])));
   const porEuro=N().deducirFormato(conEuro);
   if(porEuro.confirmado){deducido=porEuro;origenFormato="importes con «€» del documento";}
  }

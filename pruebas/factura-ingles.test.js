@@ -114,3 +114,103 @@ test("caracteres de control en el texto de un PDF («ABCDEFGH␀0012»): un espa
  const p=await T.leerPagina(pdfjs,page,1);
  assert.ok(p.lineas.some(l=>l.texto.includes("ABCDEFGH 0012")),JSON.stringify(p.lineas.map(l=>l.texto)));
 });
+
+// Vendedores de tiendas en línea (banco de facturas, 2026-11-25): la base y el IVA del desglose van dos renglones por debajo de su título, con
+// «(excl.VAT)» en medio, y el IVA cero se imprime «€0.0». Datos FICTICIOS.
+const amazon=({iva,base,cuota,total})=>[
+ ...fila(176,celda("Invoice #",348,27),celda("AbCdEfGhI-1234567890",429,78)),
+ ...fila(186,celda("Total payable",348,40),celda("€"+total,429,21)),
+ ...fila(479,celda("Description",60,34),celda("Qty",303,10),celda("Unit price",340,29),celda("VAT rate",398,26),celda("Unit price",450,29),celda("Item subtotal",495,39)),
+ ...fila(488,celda("(excl.VAT)",339,30),celda("(incl.VAT)",451,28),celda("(incl.VAT)",507,28)),
+ ...fila(504,celda("Funda ficticia",60,100),celda("1",309,4),celda("€"+base,352,17),celda(iva+"%",404,20),celda("€"+total,462,17),celda("€"+total,514,21)),
+ ...fila(534,celda("Shipping Charge",60,49),celda("€0.0",355,14),celda("€0.0",465,14),celda("€0.0",521,14)),
+ ...fila(587,celda("Invoice total",297,52),celda("€"+total,504,31)),
+ ...fila(618,celda("VAT rate",347,26),celda("Item subtotal",415,39),celda("VAT subtotal",496,39)),
+ ...fila(627,celda("(excl.VAT)",424,30)),
+ ...fila(646,celda(iva+"%",353,20),celda("€"+base,433,21),celda("€"+cuota,521,14)),
+ ...fila(664,celda("Total",302,15),celda("€"+base,433,21),celda("€"+cuota,521,14))];
+
+test("tienda en línea: la base bajo «Item subtotal» con «(excl.VAT)» en medio y el IVA «€0.0»; «(incl.VAT)» nunca da la base",()=>{
+ const cero=leer(amazon({iva:"0.00",base:"23.46",cuota:"0.0",total:"23.46"}));
+ assert.deepEqual(tot(cero),{base_imponible:[23.46,"VERIFICADO"],cuota_iva:[0,"VERIFICADO"],total:[23.46,"VERIFICADO"]});
+ assert.equal(cero.numero.valor,"AbCdEfGhI-1234567890");
+ const veintiuno=leer(amazon({iva:"21",base:"19.39",cuota:"4.07",total:"23.46"}));
+ assert.deepEqual(tot(veintiuno),{base_imponible:[19.39,"VERIFICADO"],cuota_iva:[4.07,"VERIFICADO"],total:[23.46,"VERIFICADO"]});
+});
+
+test("número partido en dos renglones («ES-…-2026-» y debajo sus últimas cifras) y entero más abajo: vale el entero",()=>{
+ const r=leer([...fila(168,celda("Invoice #",348,27),celda("ES-1234567-2026-",429,98)),...fila(177,celda("1234567890",429,37)),
+  ...fila(431,celda("Invoice # ES-1234567-2026-1234567890",304,235))]);
+ assert.equal(r.numero.valor,"ES-1234567-2026-1234567890");assert.equal(r.numero.estado,"OK");
+});
+
+test("recibo («Receipt» arriba, sin número de factura): su número y su fecha; con «Invoice number», nunca el del recibo",()=>{
+ const r=leer([...fila(62,celda("Receipt",500,39)),
+  ...fila(158,celda("Receipt date/Delivery",348,65),celda("3 mayo 2026",429,42)),...fila(167,celda("date",348,14)),
+  ...fila(176,celda("Receipt #",348,29),celda("AbCdEfGhI-1234567890",429,76))]);
+ assert.equal(r.numero.valor,"AbCdEfGhI-1234567890");assert.equal(r.numero.estado,"OK");
+ assert.equal(r.fecha.valor,"2026-05-03");assert.equal(r.fecha.estado,"OK");
+ const ambos=leer([...fila(62,celda("Receipt",500,39)),...fila(80,celda("Invoice number",30,67),celda("ABCDEFGH 0014",104,91)),
+  ...fila(94,celda("Receipt number",30,68),celda("1234 5678",104,47))]);
+ assert.equal(ambos.numero.valor,"ABCDEFGH 0014");
+});
+
+// Factura bilingüe (banco de facturas, 2026-11-25): «Factura/Invoice» o «Factura de deudor/Credit Note», la base en «Precio neto total»
+// y los pesos con «Total gross weight». Datos FICTICIOS.
+const bilingue=titulo=>[...fila(152,celda(titulo,29,115),celda("Número/Number:",176,66),celda("1234567890",278,45)),
+ ...fila(284,celda("Peso bruto total/Total gross Weight",343,136),celda("1.210,00 KG",499,39)),
+ ...fila(295,celda("Peso neto total/Total Net Weight",343,123),celda("1.000,00 KG",499,39)),
+ ...fila(746,celda("Precio neto total",387,50),celda("1.000,00",556,25)),...fila(751,celda("Total Net Price",391,46)),
+ ...fila(759,celda("Importe del IVA (EUR )",366,71),celda("210,00",561,20)),
+ ...fila(772,celda("Total Valor (EUR)",382,55),celda("1.210,00",556,25)),...fila(777,celda("Total Value",402,35))];
+
+test("factura bilingüe: base «Precio neto total», los pesos nunca son el total y «Credit Note» tras la barra es un abono",()=>{
+ const factura=leer(bilingue("Factura/Invoice"));
+ assert.deepEqual(tot(factura),{base_imponible:[1000,"VERIFICADO"],cuota_iva:[210,"VERIFICADO"],total:[1210,"VERIFICADO"]});
+ const abono=leer(bilingue("Factura de deudor/Credit Note"));
+ assert.deepEqual(tot(abono),{base_imponible:[-1000,"VERIFICADO"],cuota_iva:[-210,"VERIFICADO"],total:[-1210,"VERIFICADO"]});
+});
+
+test("«№.12345678901» bajo el título «FACTURA» es el número de la factura; «№ de Envío» y «№ Cliente» no",()=>{
+ const r=leer([...fila(159,celda("FACTURA",450,66)),...fila(173,celda("№.12345678901",385,67),celda("Fecha: 9-MAY-2026",470,86)),
+  ...fila(256,celda("№ de Envio",172,43),celda("№ Cliente",400,37)),...fila(276,celda("ABC123",172,40),celda("7654321",400,37))]);
+ assert.equal(r.numero.valor,"12345678901");assert.equal(r.numero.estado,"OK");
+ assert.equal(r.fecha.valor,"2026-05-09");
+});
+
+test("importes con punto decimal y «EUR» en la casilla de al lado («100.00 | EUR»): el formato lo dice el documento",()=>{
+ const r=leer([...fila(380,celda("Material",43,25),celda("Cant.",384,16),celda("Precio Ud.",414,34),celda("Total",474,16)),
+  ...fila(400,celda("Pieza ficticia",43,60),celda("2,5",384,12),celda("40.00",414,20),celda("100.00",474,22)),
+  ...fila(495,celda("Total Base Imponible:",400,70),celda("100.00",522,21),celda("EUR",554,14)),
+  ...fila(506,celda("Total IVA:",400,31),celda("21.00",526,17),celda("EUR",554,14)),
+  ...fila(520,celda("Total Factura IVA",400,55),celda("121.00",522,21),celda("EUR",554,14))]);
+ assert.deepEqual(tot(r),{base_imponible:[100,"VERIFICADO"],cuota_iva:[21,"VERIFICADO"],total:[121,"VERIFICADO"]});
+});
+
+// Cifras con «€» en las líneas (factura real 2026-11-25: el precio y el importe acababan pegados a la descripción y la línea quedaba
+// sin importe). Datos FICTICIOS.
+test("cifras con «€» en las líneas («12,34 €»): precio e importe, nunca pegados a la descripción",()=>{
+ const r=leer([...fila(344,celda("DESCRIPCIÓN",34,46),celda("UNIDADES",342,35),celda("PRECIO UNITARIO",407,61),celda("IVA %",481,19),celda("IMPORTE (EUR)",508,51)),
+  ...fila(380,celda("Servicio ficticio (mensual) - Cargos",34,224),celda("1",371,6),celda("12,34 €",439,29),celda("21 %",476,24),celda("12,34 €",530,29)),
+  ...fila(394,celda("prorrateados",34,66)),
+  ...fila(430,celda("Total excl. IVA",432,68),celda("12,34 €",530,29)),
+  ...fila(452,celda("IVA @ 21 %",446,54),celda("2,59 €",530,29)),
+  ...fila(485,celda("Total",474,26),celda("14,93 €",530,29))]);
+ assert.equal(r.lineas.length,1);
+ const l=r.lineas[0];
+ assert.equal(l.descripcion.valor,"Servicio ficticio (mensual) - Cargos prorrateados");
+ assert.equal(l.cantidad.valor,1);assert.equal(l.precio.valor,12.34);assert.equal(l.importe.valor,12.34);
+ assert.equal(r.totales.total.valor,14.93);
+});
+
+test("filas vacías «0,00 €» de la plantilla y la suma suelta de la columna al final: ni son líneas ni ocultan el total",()=>{
+ const vacias=[316,325,334,343].flatMap(y=>fila(y,celda("0,00 €",404,17)));
+ const r=leer([...fila(235,celda("Cantidad",95,25),celda("Concepto",224,27),celda("Precio",344,17),celda("Total",383,14)),
+  ...fila(244,celda("2",128,5),celda("menú ficticio",136,50),celda("10,00 €",359,21),celda("20,00 €",397,24)),
+  ...fila(253,celda("1",128,5),celda("postre",136,30),celda("2,00 €",363,17),celda("2,00 €",404,17)),
+  ...vacias,...fila(369,celda("22,00 €",397,24)),
+  ...fila(387,celda("Base impobible",95,43),celda("20,00 €",185,24)),...fila(396,celda("% iva",95,14),celda("10",163,7)),
+  ...fila(405,celda("total iva",95,23),celda("2,00 €",188,21))]);
+ assert.equal(r.lineas.length,2,JSON.stringify(r.lineas.map(l=>[l.descripcion?.valor,l.importe?.valor])));
+ assert.deepEqual(tot(r),{base_imponible:[20,"VERIFICADO"],cuota_iva:[2,"VERIFICADO"],total:[22,"VERIFICADO"]});
+});
