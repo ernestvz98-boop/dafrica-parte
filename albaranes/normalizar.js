@@ -114,7 +114,8 @@ function fechaReal(a,m,d){
 function fecha(literal,opciones={}){
  const r=resultado(limpiar(literal));
  if(!r.literal)return r;
- const s=sinAcentos(r.literal).replace(/\s+/g," ");
+ // «23- 02- 2026» (factura real 2026-11-25): sin los espacios junto al separador.
+ const s=sinAcentos(r.literal).replace(/\s+/g," ").replace(/(\d) ?([\/.\-]) ?(?=\d)/g,"$1$2");
  let a,m,d,m2;
  if((m2=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))){a=+m2[1];m=+m2[2];d=+m2[3];}
  else if((m2=s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/))){
@@ -123,7 +124,8 @@ function fecha(literal,opciones={}){
   a=+m2[3];
   if(m2[3].length===2){a+=2000;r.notas.push("Año impreso con dos cifras");}
  }
- else if((m2=s.match(/^(\d{1,2})(?: DE |[ \-\/.])([A-Z]+)\.?(?: DE |[ \-\/.])(\d{2}|\d{4})$/))){
+ // «27 de octubre del 2026» (factura real 2026-11-25: no se reconocía y se tomaba otra fecha del documento).
+ else if((m2=s.match(/^(\d{1,2})(?: DE |[ \-\/.])([A-Z]+)\.?(?: DEL? |[ \-\/.])(\d{2}|\d{4})$/))){
   d=+m2[1];m=MESES[m2[2]];a=+m2[3];
   if(!m){r.estado="INVALIDO";r.motivos.push("Mes no reconocido: "+m2[2]);return r;}
   if(m2[3].length===2){a+=2000;r.notas.push("Año impreso con dos cifras");}

@@ -359,9 +359,24 @@ function numeroPorFormato(pagina,perfil,leido,opcionesFecha){
 function leerFecha(lineas,opciones){
  const F=N().fecha;
  const r={literal:"",valor:null,estado:"VACIO",motivos:[],notas:[],caja:null};
+ const factura=!!opciones.factura;
+ // Factura (banco de facturas, 2026-11-25): «31/03/2026 09:42» tras «Fecha/Hora doc.» es una fecha con su hora.
+ const sinHora=t=>factura?String(t||"").replace(/\s+\d{1,2}:\d{2}(:\d{2})?$/,""):t;
  // Se aceptan también fechas con forma de fecha pero inexistentes (31/02): quedan INVALIDO.
  let hallados=valoresEtiquetados(lineas,RE_FECHA,EXCLUIR_FECHA,
-  t=>/\d/.test(t)&&(F(t,opciones).estado==="OK"||/^\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}$/.test(t)));
+  t=>{t=sinHora(t);return /\d/.test(t)&&(F(t,opciones).estado==="OK"||/^\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}$/.test(t));});
+ // Factura: la fecha de un albarán que cita («Fecha albarán: …», un renglón que empieza por «Albarán …») o la de recepción (taller:
+ // «Fecha recepción» del vehículo) nunca es la suya (banco de facturas, 2026-11-25: se aceptaban); «DE FECHA» («Nº FACTURA/CARTA DE
+ // FECHA», pegado «DEFECHA») también es su etiqueta.
+ const claveF=t=>N().sinAcentos(String(t||"")).replace(/[.:]/g," ").replace(/\s+/g," ").trim();
+ // «Alb nº 1XXX / 111 | REF. S/PEDIDO | de fecha | 20/02/2026» (abreviado): también es un albarán citado.
+ const filaDeAlbaran=l=>/^ALB(ARAN)?\b/.test(claveF(l?.celdas?.[0]?.texto));
+ if(factura){
+  // «DE FECHA» solo en el renglón de la factura («Nº FACTURA/CARTA | DE FECHA»).
+  hallados.push(...valoresEtiquetados(lineas,/^DE ?FECHA$/,EXCLUIR_FECHA,t=>F(sinHora(t),opciones).estado==="OK")
+   .filter(h=>/FACTURA/.test(claveF(lineas[h.indiceLinea]?.texto))));
+  hallados=hallados.filter(h=>!/ALBARAN|RECEPCION/.test(claveF(h.etiqueta))&&!filaDeAlbaran(lineas[h.indiceLinea])).map(h=>({...h,texto:sinHora(h.texto)}));
+ }
  // «FECHA» que encabeza una columna con dos o más fechas distintas en los renglones de debajo, alineadas (fallo real 2026-11-23:
  // factura de una gestoría con «FECHA | DESCRIPCION | CARGOS» y la fecha de cada cargo; la primera se tomaba como la de la factura):
  // es la fecha de cada línea, no la del documento.
@@ -384,9 +399,11 @@ function leerFecha(lineas,opciones){
  if(!hallados.length){
   etiquetada=false;
   hallados=[];
-  for(const l of lineas)for(const c of l.celdas){
-   const f=F(c.texto,opciones);
-   if(f.estado==="OK")hallados.push({texto:c.texto,celda:c});
+  for(const l of lineas)for(const [i,c] of l.celdas.entries()){
+   const f=F(sinHora(c.texto),opciones);
+   // Factura: tampoco sin etiqueta la de un albarán citado, ni la que lleva a su izquierda otra etiqueta de fecha (vencimiento…).
+   if(factura&&(filaDeAlbaran(l)||(i>0&&/ALBARAN|RECEPCION/.test(claveF(l.celdas[i-1].texto))||(i>0&&RE_FECHA.test(claveF(l.celdas[i-1].texto))&&EXCLUIR_FECHA.test(claveF(l.celdas[i-1].texto))))))continue;
+   if(f.estado==="OK")hallados.push({texto:sinHora(c.texto),celda:c});
   }
  }
  const distintos=[...new Map(hallados.map(h=>[F(h.texto,opciones).valor||h.texto,h])).values()];
@@ -404,9 +421,11 @@ function leerFecha(lineas,opciones){
  const junto=lineaFecha&&lineaFecha.celdas.some(c=>{
   const k=N().sinAcentos(c.texto).replace(/[.:]/g," ").replace(/\s+/g," ").trim();
   // Título del documento sin cifras («ALBARÁN CARGO») y la fecha pegada a su derecha.
-  return /^ALBARAN( [A-Z]+)?$/.test(k)&&celdaF.x0>=c.x1&&celdaF.x0-c.x1<=Math.max(c.x1-c.x0,4*c.alto);
+  return /^ALBARAN( [A-Z]+)?$/.test(k)&&celdaF.x0>=c.x1&&celdaF.x0-c.x1<=Math.max(c.x1-c.x0,4*c.alto)||
+   // Factura: el título «FACTURA» y, en su renglón, la única fecha (2026-11-25: «FACTURA | 30/06/2026 | 2000 | Página 1 de 1»).
+   factura&&/^FACTURA( N\S{0,3})?$/.test(k)&&celdaF.x0>=c.x1;
  });
- if(!etiquetada&&f.estado==="OK"&&junto)r.notas.push("Fecha en la misma línea que el rótulo del albarán");
+ if(!etiquetada&&f.estado==="OK"&&junto)r.notas.push(factura?"Fecha en la misma línea que el título de la factura":"Fecha en la misma línea que el rótulo del albarán");
  else if(!etiquetada&&f.estado==="OK"){r.estado="REVISAR";r.motivos.push("Fecha sin etiqueta «Fecha»: es la única fecha del encabezado, pero no se acepta automáticamente");}
  if(f.estado==="OK"){
   const hoy=opciones.hoy?new Date(opciones.hoy+"T00:00:00Z"):new Date();
@@ -1834,7 +1853,7 @@ function extraerDePaginas(paginas,opciones={}){
  const idPerfil=salida.proveedor.id||opciones.proveedorId;
  const perfil=idPerfil?registro.proveedores.find(p=>p.id===idPerfil):null;
  if(perfil?.columnas)for(const x of tablas)x.t=leerTablaPagina(x.p,perfil);
- const opcionesFecha={hoy:opciones.hoy,orden:perfil?.orden_fecha||"DMY"};
+ const opcionesFecha={hoy:opciones.hoy,orden:perfil?.orden_fecha||"DMY",...(opciones.numeroDeFactura?{factura:true}:{})};
  const zona=primera.t?primera.p.lineas.slice(0,primera.t.indiceCabecera):primera.p.lineas;
  salida.numero=leerNumero(zona);
  salida.fecha=leerFecha(zona,opcionesFecha);
@@ -1945,6 +1964,17 @@ function extraerDePaginas(paginas,opciones={}){
     const f=F(ff[0].texto,opcionesFecha);
     salida.fecha={literal:f.literal,valor:f.valor,estado:f.estado,motivos:[...f.motivos],notas:[...f.notas,"Fecha de la factura tras «"+ff[0].etiqueta+"»"],
      caja:caja(ff[0].celda),conf_ocr:ff[0].celda?.conf??null};
+   }
+   // Varias fechas etiquetadas (2026-11-25: «Factura nº | 12-26 | Fecha | 27 de Octubre del 2026» y, más abajo, «Fecha: 01/10/2026» de
+   // un trabajo): vale la única de los renglones del número de la factura (el aceptado o, si no lo hay, los de «Nº factura»).
+   const cj=salida.numero?.estado==="OK"?salida.numero.caja:null;
+   if(salida.fecha?.estado==="AMBIGUO"){
+    const filas=cj?primera.p.lineas.filter(l=>Math.abs(l.y-cj[1])<1&&l.celdas.some(c=>Math.abs(c.x0-cj[0])<1)):
+     h.map(x=>primera.p.lineas[x.indiceLinea]).filter(Boolean);
+    const deFila=[...new Map(filas.flatMap(l=>l.celdas).map(c=>[F(c.texto,opcionesFecha),c]).filter(([f])=>f.estado==="OK").map(([f,c])=>[f.valor,{f,c}])).values()];
+    if(deFila.length===1){const {f,c}=deFila[0];
+     salida.fecha={literal:f.literal,valor:f.valor,estado:"OK",motivos:[],notas:[...f.notas,"Varias fechas: la del renglón del número de la factura"],
+      caja:caja(c),conf_ocr:c.conf??null};}
    }}
  }
  // El formato de número del perfil es el de sus ALBARANES: no vale para el número de una factura ni de una confirmación de
