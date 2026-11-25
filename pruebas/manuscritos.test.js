@@ -97,6 +97,10 @@ test("coherencia del lote: dos lecturas de visión iguales sin validar NO se con
 test("obra impresa: «OBRA: …», «Referencia: OBRA …» y «SU PEDIDO: …»",()=>{
  const t=obrasImpresas([{texto:"OBRA: PISCINAS FICTICIAS 12345"},{texto:"Referencia: OBRA MUSEO FICTICIO"},{texto:"SU PEDIDO: vegasx"},{texto:"CANTIDAD 2,00"}]);
  assert.deepEqual(t,["PISCINAS FICTICIAS 12345","MUSEO FICTICIO","vegasx"]);
+ // Su pedido abreviado (fallo real 2026-11-25).
+ assert.deepEqual(obrasImpresas([{texto:"S/PDO: PUEBLO FICTICIO ENV.P.: SUS MEDIOS"},{texto:"S/PED. NAVE FICTICIA"},{texto:"SU PDO: OTRA FICTICIA"},{texto:"S/PDOS 12"},
+  {texto:"ALBARÁN SIPDO: VILLA FICTICIA ENV.P.: SUS MEDIOS PPTO:"},{texto:"PDO.: 254"}]),
+  ["PUEBLO FICTICIO ENV.P.: SUS MEDIOS","NAVE FICTICIA","OTRA FICTICIA","VILLA FICTICIA ENV.P.: SUS MEDIOS PPTO:"]);
 });
 
 test("flujo completo: a visión solo llegan recortes pequeños de la anotación, nunca la página",async()=>{

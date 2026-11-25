@@ -31,6 +31,17 @@ test("albarán AUTO_OK con todo resuelto: pendiente de crear", ()=>{
  assert.equal(o.plan.aviso_precio,null);
 });
 
+// 2026-11-25: la cantidad que no se leyó y que sugiere el cuadre llega al plan para ofrecerla en la revisión; nunca como cantidad.
+test("cantidad sin leer con sugerencia del cuadre: va al plan como sugerencia, la cantidad sigue vacía", ()=>{
+ const l={pagina:1,referencia:ok("REF-001"),descripcion:ok("TUBO FICTICIO 20MM"),cantidad:{valor:null,literal:"",estado:"VACIO",sugerida:-1},unidad:ok("UD"),
+  precio:ok(2.5),descuento:{porcentajes:[]},importe:ok(-2.5)};
+ const o=C.orden(doc({estado_documento:"REVISAR",resultado:{lineas:[l]}}),catalogo);
+ assert.equal(o.plan.lineas[0].cantidad,null);
+ assert.equal(o.plan.lineas[0].cantidad_sugerida,-1);
+ assert.equal(o.estado,"REVISAR");
+ assert.equal(C.orden(doc(),catalogo).plan.lineas[0].cantidad_sugerida,undefined,"con la cantidad leída, ninguna sugerencia");
+});
+
 test("el lector no lo da por bueno: REVISAR, nunca automático", ()=>{
  const o=C.orden(doc({estado_documento:"REVISAR"}),catalogo);
  assert.equal(o.estado,"REVISAR");assert.match(o.motivos.join(),/no lo da por bueno/);

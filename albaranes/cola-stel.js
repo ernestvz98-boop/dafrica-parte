@@ -351,7 +351,9 @@ function orden(doc,catalogo,opciones={}){
   // lo corregía a mano): si el nombre de STEL se parece a lo leído (descripcionDeStel), la línea lleva el de STEL y conserva lo leído.
   const nombreStel=articulo.estado==="existente"?descripcionDeStel(desc,articulo.stel?.nombre):null;
   const descFinal=nombreStel||desc;
-  return {fila:i+1,pagina:l.pagina??null,referencia:ref,descripcion:descFinal,...(descFinal!==descLeida?{descripcion_leida:descLeida}:{}),cantidad:Number.isFinite(cant)?cant:null,unidad:texto(l.unidad)||null,
+  return {fila:i+1,pagina:l.pagina??null,referencia:ref,descripcion:descFinal,...(descFinal!==descLeida?{descripcion_leida:descLeida}:{}),cantidad:Number.isFinite(cant)?cant:null,
+   // La cantidad que sugiere el cuadre (extraer.js, sugerirCantidad) cuando no se leyó: la revisión la ofrece, nunca la pone (2026-11-25).
+   ...(!Number.isFinite(cant)&&Number.isFinite(l.cantidad?.sugerida)?{cantidad_sugerida:l.cantidad.sugerida}:{}),unidad:texto(l.unidad)||null,
    precio,precio_pendiente:precio==null,descuentos:Array.isArray(l.descuento?.porcentajes)?l.descuento.porcentajes.filter(Number.isFinite):[],
    importe:Number.isFinite(l.importe?.valor)?l.importe.valor:null,articulo};
  });

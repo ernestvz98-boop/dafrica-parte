@@ -442,7 +442,9 @@ function coherenciaLote(docs,{catalogoObras=null}={}){
 }
 
 /* Textos de obra impresos: «OBRA: …», «Referencia: OBRA …», «OBRA/DATOS» con su casilla, «SU PEDIDO: …». */
-const RE_OBRA=/^(?:.*\b(?:OBRA(?:\/DATOS)?|SU PEDIDO|S\/REF|REFERENCIA)\b\s*[:.]?)\s*(.+)$/i;
+// «S/PDO:», «S/PED.», «S/PEDIDO», «SU PDO» (su pedido abreviado, fallo real 2026-11-25: «S/PDO: <obra>», leído «SIPDO:», no contaba
+// como obra impresa y la obra escrita a mano, bien leída, quedaba sin validar). La barra, también leída I, 1, l o |.
+const RE_OBRA=/^(?:.*\b(?:OBRA(?:\/DATOS)?|SU PEDIDO|SU PDO|S\/REF|S[\/I1l|]P(?:EDIDO|ED|DO)|REFERENCIA)\b\s*[:.]?)\s*(.+)$/i;
 /*
  * «Su referencia» impresa del albarán («S/REF: FARMACIA HOSPITAL», «Su pedido: NAVE NORTE», «Ref. cliente: …»), para el título
  * del albarán en STEL (usuario, 2026-11-11). Solo las palabras leídas con fiabilidad (confianza del OCR ≥ 70): lo escrito a

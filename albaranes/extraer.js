@@ -879,6 +879,20 @@ function leerTablaPagina(pagina,perfil=null){
     actual.continuacionesDudosas=[...(actual.continuacionesDudosas||[]),linea.texto];
     yAnterior=linea.y;continue;
    }
+   // Primer renglón de un artículo, impreso pero leído con poca confianza (fallo real 2026-11-25: «código  TEXTO … 300» con las
+   // cifras en el renglón de debajo, que quedaba sin código y con media descripción): un código con forma de código en su columna,
+   // texto en la de la descripción y ni precio ni importe. Se guarda para la línea de debajo si esta no trae código (en revisión).
+   {const a=asignar(linea).celdas;
+    if(a.referencia&&pareceCodigoFila(a.referencia.texto)&&a.descripcion&&/[A-Za-zÁÉÍÓÚÑáéíóúñ]{3,}/.test(a.descripcion.texto)&&!a.precio&&!a.importe){
+     // Todo el renglón es código y descripción (sin precio ni importe): la descripción, lo que sigue al código (también una cifra suelta
+     // del texto, «… 300» de «300 kPa», que el reparto por columnas no da a la descripción). La altura de la tabla no avanza: los
+     // renglones que siguen se juntan con la línea de debajo, no con la de arriba.
+     const codigo=String(a.referencia.texto).trim().split(/\s+/)[0],texto=String(linea.texto).trim();
+     const ig={pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Primer renglón de un artículo, leído con poca confianza OCR"};
+     Object.defineProperties(ig,{_sinCantidad:{value:true},_fila:{value:filas.length},_y:{value:linea.y},_x:{value:linea.celdas[0]?.x0??0},_texto:{value:linea.texto},
+      _primerRenglon:{value:{referencia:codigo,descripcion:texto.startsWith(codigo)?texto.slice(codigo.length).trim():a.descripcion.texto.trim()}}});
+     ignoradas.push(ig);continue;
+    }}
    ignoradas.push({pagina:pagina.numero,y:linea.y,texto:linea.texto,motivo:"Texto de baja confianza OCR (posible manuscrito o sello)"});
    continue;
   }
@@ -973,8 +987,12 @@ function leerTablaPagina(pagina,perfil=null){
     if(!v._sinCantidad||v._fila!==filas.length||linea.y-v._y>3*Math.max(linea.alto,altoFila))break;
     previas.push(v);
    }
+   // Con el primer renglón del artículo (con su código) encima y esta línea sin código: el código y el principio de la descripción son
+   // de esta línea (construirFila, en revisión); los demás renglones de encima, por orden de altura.
+   const p1=!tieneRef?previas.find(v=>v._primerRenglon):null;
+   if(p1)actual.primerRenglon={...p1._primerRenglon,resto:previas.filter(v=>v!==p1&&v._y>p1._y).sort((a,b)=>a._y-b._y).map(v=>v._texto).filter(Boolean)};
    // El OCR puede partir un mismo renglón en dos («Suministro» / «y montaje»): orden por posición.
-   if(previas.length)actual.textoPrevio=previas.sort((a,b)=>a._x-b._x).map(v=>v._texto).filter(Boolean).join(" ");
+   else if(previas.length)actual.textoPrevio=previas.sort((a,b)=>a._x-b._x).map(v=>v._texto).filter(Boolean).join(" ");
    filas.push(actual);
   }else{
    const soloTexto=Object.keys(celdas).every(k=>["descripcion","referencia","otra","unidad"].includes(k));
@@ -1418,7 +1436,8 @@ function sugerirCantidad(f,precioPor){
  const q0=f.importe.valor/(f.precio.valor/precioPor*factor);
  for(const d of [0,1,2,3]){
   const q=redondear(q0,d);
-  if(q<=0)continue;
+  // En negativo solo con el importe impreso en negativo: una devolución (fallo real 2026-11-25: «-1,00 Caja» sin leer, importe -7,43).
+  if(q===0||(q<0&&!(f.importe.valor<0)))continue;
   if(cuadre({...f,cantidad:{estado:"OK",valor:q}},precioPor).estado==="VERIFICADO"){
    f.cantidad.sugerida=q;
    f.cantidad.motivos=[...(f.cantidad.motivos||[]),"Cantidad no legible; el cuadre de la línea indica "+q+" (sugerencia para el revisor, no se asigna)"];
@@ -1591,6 +1610,36 @@ function verificarServicios(salida){
   l.estado=l.motivos.length?"REVISAR":"OK";
  }
 }
+// Dígito de control de un código EAN-13.
+function eanValido(t){
+ if(!/^\d{13}$/.test(String(t||"")))return false;
+ const d=[...String(t)].map(Number),s=d.slice(0,12).reduce((a,x,i)=>a+x*(i%2?3:1),0);
+ return (10-s%10)%10===d[12];
+}
+/*
+ * Arreglos de la casilla del código que no dejan dudas sobre lo leído (cambian el literal, no la confianza):
+ *  - EAN-13 con 1 a 3 signos sueltos delante (fallo real 2026-11-24/25: «ON 84000…», «añ 84000…»: trozos del
+ *    «ALBARÁN» vertical del margen leídos con el código): el código es el EAN, con su dígito de control comprobado.
+ *  - «£» o «€» dentro de un código: el OCR lee así la «E» (fallo real 2026-11-25: «0XXD£0001…» por «0XXDE0001…»). Las demás confusiones
+ *    de letras y cifras siguen en revisión, como siempre.
+ *  - Código con el principio de la descripción pegado detrás tras la raya de la columna («CODIGO0030 [Palabra palabra» y la descripción
+ *    «Resto …», fallo real 2026-11-25): el código es el primer trozo; las palabras van delante de la descripción, que queda en
+ *    revisión. Solo con ese signo en medio («[», «|» o «(»): sin él, la frontera es dudosa y se queda como estaba (en revisión).
+ */
+function arreglarReferencia(f){
+ const lit=String(f.referencia.literal||"").trim();
+ const nota=(t,motivo)=>{f.referencia={...f.referencia,literal:t,valor:t||null,notas:[...(f.referencia.notas||[]),motivo]};};
+ let m=lit.match(/^(\S{1,3})\s+(\d{13})$/);
+ if(m&&/\D/.test(m[1])&&eanValido(m[2])){nota(m[2],"«"+m[1]+"» delante del código EAN-13 (dígito de control válido) quitado: texto del margen");return;}
+ if(/[£€]/.test(lit)&&/^[A-Za-z0-9£€.\/-]{4,}$/.test(lit)){nota(lit.replace(/[£€]/g,"E"),"«£» o «€» leído en lugar de la «E» del código");return;}
+ m=lit.match(/^([A-Za-z0-9][A-Za-z0-9.\/-]{3,})\s*[\[|(]\s*([A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}(?: [A-Za-zÁÉÍÓÚÑáéíóúñ]{2,})*)$/);
+ const desc=String(f.descripcion.literal||"").trim();
+ if(m&&/\d/.test(m[1])&&desc&&!N().canon(desc).startsWith(N().canon(m[2]))){
+  nota(m[1],"Principio de la descripción («"+m[2]+"») separado del código");
+  const d=m[2]+" "+desc;
+  f.descripcion={...f.descripcion,literal:d,valor:d,estado:"REVISAR",motivos:[...(f.descripcion.motivos||[]),"El principio de la descripción («"+m[2]+"») estaba en la casilla del código"]};
+ }
+}
 function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  const c=cruda.celdas;
  const f={
@@ -1606,6 +1655,7 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   importe:campoNumero(c.importe,opcionesNumero),
   motivos:[],notas:[]
  };
+ arreglarReferencia(f);
  // Cantidad con la unidad pegada («8,00 UD», «20 SAC», «3,5 M2»).
  if(f.cantidad.estado==="INVALIDO"){
   const m=f.cantidad.literal.match(RE_CANTIDAD_UNIDAD);
@@ -1652,6 +1702,14 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   f.descripcion.literal=[f.descripcion.literal,...cruda.continuacionesDudosas].filter(Boolean).join(" ");
   f.descripcion.valor=f.descripcion.literal||null;f.descripcion.estado="REVISAR";
   f.descripcion.motivos=[...(f.descripcion.motivos||[]),"Continuación leída con baja confianza OCR (texto tachado, rodeado o manuscrito)"];
+ }
+ // Primer renglón del artículo con su código, leído con poca confianza (fallo real 2026-11-25): su código y el principio de la
+ // descripción, en revisión (nunca aceptados: ese renglón se leyó mal).
+ if(cruda.primerRenglon&&f.referencia.estado==="VACIO"){
+  const p=cruda.primerRenglon,d=[p.descripcion,...(p.resto||[]),f.descripcion.literal].filter(Boolean).join(" ").replace(/\s+/g," ").trim();
+  f.referencia={...f.referencia,literal:p.referencia,valor:p.referencia,estado:"REVISAR",motivos:[...(f.referencia.motivos||[]),"Código del primer renglón de la línea, leído con poca confianza OCR"]};
+  f.descripcion={...f.descripcion,literal:d,valor:d||null,estado:"REVISAR",motivos:[...(f.descripcion.motivos||[]),"Descripción en varios renglones; el primero, leído con poca confianza OCR"]};
+  f.motivos.push("Línea en varios renglones: el primero, con el código, leído con poca confianza");
  }
  if(cruda.textoPrevio){
   f.descripcion.estado=f.descripcion.estado==="VACIO"?"VACIO":"REVISAR";
@@ -2240,10 +2298,17 @@ function finalizar(salida){
  }
  // Tipo: impreso («ABONO») o deducido de importes y cantidades negativos (devolución).
  const negativos=salida.lineas.length>0&&salida.lineas.every(l=>l.cantidad.valor<0||l.importe.valor<0);
+ // Devolución dentro de un albarán (fallo real 2026-11-25: una línea con −1 y su importe −7,43, otra en positivo y el total −0,38 €; la
+ // persona lo tuvo que marcar como abono): una línea con la cantidad en negativo, o con el importe en negativo y el precio en positivo
+ // (no es un descuento), o el total impreso en negativo. Va como abono a revisión; lo confirma la persona. Las facturas, aparte.
+ const devuelta=!ctx.factura?salida.lineas.find(l=>l.cantidad.valor<0||(l.importe.valor<0&&l.precio.valor>0&&!(l.cantidad.valor>0))):null;
+ const totalNegativo=!ctx.factura&&salida.totales?.total?.valor<0&&["OK","VERIFICADO"].includes(salida.totales.total.estado);
  salida.clase_impresa=ctx.claseImpresa||null;
  salida.tipo_documento=ctx.abonoFactura?{valor:"ABONO",evidencia:"Factura de abono: "+ctx.abonoFactura}:
   ctx.tipoImpreso?{valor:"ABONO",evidencia:"Impreso «"+ctx.tipoImpreso+"» en el documento"}:
-  negativos?{valor:"ABONO",evidencia:"Todas las líneas tienen cantidad o importe negativo"}:{valor:"ALBARAN",evidencia:null};
+  negativos?{valor:"ABONO",evidencia:"Todas las líneas tienen cantidad o importe negativo"}:
+  devuelta?{valor:"ABONO",evidencia:"La línea "+devuelta.fila+" trae "+(devuelta.cantidad.valor<0?"la cantidad":"el importe")+" en negativo (devolución)"}:
+  totalNegativo?{valor:"ABONO",evidencia:"Total impreso en negativo ("+salida.totales.total.literal+")"}:{valor:"ALBARAN",evidencia:null};
  salida.validaciones=[];salida.incidencias=incidencias;
  const v=(nombre,estado,detalle)=>salida.validaciones.push({nombre,estado,detalle});
  if(!ctx.hayTabla)v("tabla","FALLO","No se encontró la cabecera de la tabla de artículos");
