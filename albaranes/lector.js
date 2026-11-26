@@ -43,6 +43,18 @@ function firmaPagina(resultado,pagina){
 }
 
 /*
+ * ¿Es la página otra factura? (2026-11-26) Solo leyendo facturas, con el número de factura leído con seguridad (OK o verificado) en la
+ * primera página del grupo y en esta, y distintos: ni el uno empieza por el otro («9900012345» y «9900012345 / 15.03.2026» son el mismo).
+ * Banco de facturas digitales de varias páginas (355): parte solo una, que lleva dos facturas.
+ */
+function otraFactura(opciones,primero,este){
+ if(!opciones.numeroDeFactura)return false;
+ const num=r=>{const n=r?.numero;return n&&["OK","VERIFICADO"].includes(n.estado)&&n.valor?M("normalizar").canon(n.valor):"";};
+ const a=num(primero),b=num(este);
+ return !!a&&!!b&&!a.startsWith(b)&&!b.startsWith(a);
+}
+
+/*
  * ¿La página `f` continúa el albarán cuyo primer y último firmas son `primera` y `ultima`?
  * Solo se une con pruebas: mismo proveedor y número, «Página k de n» con k > 1, o una página sin
  * cabecera propia tras otra que anuncia «suma y sigue» o que no tenía totales.
@@ -74,6 +86,34 @@ function agruparPaginas(firmas){
   else grupos.push([x]);
  }
  return grupos;
+}
+
+/*
+ * ¿La página `b` es otra copia de la página `a` del mismo albarán (el mismo papel escaneado dos veces, o el ejemplar del
+ * cliente y el del proveedor)? Fallo real 2026-11-24: un albarán de 9 líneas entró con 18 (cada línea dos veces) y la
+ * persona quitó a mano las 9 repetidas. Solo con pruebas: mismo número de albarán leído en las dos, las mismas líneas en el
+ * mismo orden (al menos 2), todas las cantidades iguales y al menos el 80 % de los códigos iguales (el OCR puede leer mal
+ * alguno), con 2 códigos como mínimo; si las dos traen total, el mismo. Una continuación de verdad nunca repite sus líneas.
+ */
+function copiaDePagina(a,b){
+ if(!a?.firma?.numero||a.firma.numero!==b?.firma?.numero)return false;
+ const la=a.resultado?.lineas||[],lb=b.resultado?.lineas||[];
+ if(la.length<2||la.length!==lb.length)return false;
+ const val=c=>c&&typeof c==="object"&&"valor" in c?c.valor:c;
+ const cant=l=>{const v=val(l.cantidad);return v==null||v===""?null:Number(String(v).replace(",","."));};
+ const ref=l=>String(val(l.referencia)||"").toUpperCase().replace(/[^0-9A-Z]/g,"");
+ if(!la.every((l,i)=>cant(l)!=null&&cant(l)===cant(lb[i])))return false;
+ // Misma línea: el mismo código (o uno es el otro con texto pegado por el OCR, «1300000004 5-6»), o las dos sin código y con
+ // la misma primera palabra en la descripción (ecotasas y similares).
+ const palabra=l=>(String(val(l.descripcion)||"").toUpperCase().match(/[A-ZÁÉÍÓÚÑ0-9]{3,}/)||[""])[0];
+ const codigos=la.filter((l,i)=>ref(l).length>=3&&ref(l)===ref(lb[i])).length;
+ const iguales=la.filter((l,i)=>{const x=ref(l),y=ref(lb[i]);
+  if(x.length>=3&&y.length>=3)return x===y||(Math.min(x.length,y.length)>=6&&(x.startsWith(y)||y.startsWith(x)));
+  return !x&&!y&&!!palabra(l)&&palabra(l)===palabra(lb[i]);}).length;
+ if(codigos<2||iguales<Math.ceil(0.8*la.length))return false;
+ const tot=r=>{const v=val(r?.totales?.total);return v==null||v===""?null:Number(String(v).replace(",","."));};
+ const ta=tot(a.resultado),tb=tot(b.resultado);
+ return ta==null||tb==null||ta===tb;
 }
 
 const esOcr=p=>p.tipo!=="DIGITAL";
@@ -146,7 +186,13 @@ async function leerPdf(fuente,opciones={}){
   if(!grupo.length)return;
   const g0=grupo;grupo=[];
   const paginas=g0.map(x=>x.n),blancas=g0.filter(x=>x.blanca&&x!==g0[0]).map(x=>x.n);
-  const g=g0.filter(x=>!blancas.includes(x.n));
+  // Copias del mismo papel: no se suman sus líneas (se informa con la página de la que son copia).
+  const repetidas=[];
+  for(const x of g0)if(x!==g0[0]&&!blancas.includes(x.n)){
+   const de=g0.find(y=>y!==x&&y.n<x.n&&!blancas.includes(y.n)&&!repetidas.some(r=>r.n===y.n)&&copiaDePagina(y,x));
+   if(de)repetidas.push({n:x.n,copia_de:de.n});
+  }
+  const g=g0.filter(x=>!blancas.includes(x.n)&&!repetidas.some(r=>r.n===x.n));
   // Un solo documento con las páginas escaneadas al revés (fallo real 2026-11-18: «Pág: 2» antes que «Pág: 1»): se leen en el
   // orden impreso, solo si cada página lleva su número y juntas son 1, 2, …, n.
   if(opciones.unSoloDocumento&&g.length>1){
@@ -165,6 +211,10 @@ async function leerPdf(fuente,opciones={}){
    }
    const doc={indice:documentos.length+1,paginas,resultado,estado_documento:g0[0].blanca&&g0.length===blancas.length+1&&!(resultado?.lineas||[]).length?"ERROR_DOCUMENTO":estadoDocumento(resultado)};
    if(blancas.length)doc.paginas_en_blanco=blancas;
+   if(repetidas.length&&resultado){
+    doc.paginas_repetidas=repetidas;
+    resultado.incidencias=[...(resultado.incidencias||[]),...repetidas.map(r=>"La página "+r.n+" es otra copia de la página "+r.copia_de+" (mismo número y mismas líneas): sus líneas no se suman")];
+   }
    if(g0[0].blanca&&doc.estado_documento==="ERROR_DOCUMENTO")doc.error="Página en blanco";
    documentos.push(doc);
   }catch(e){
@@ -203,7 +253,9 @@ async function leerPdf(fuente,opciones={}){
   const x={n,texto,resultado,firma,blanca:firma.vacia};
   // Confirmación de pedido (opciones.unSoloDocumento, usuario 2026-11-17: «un pedido de dos páginas lo dividió en dos»; real: un
   // presupuesto escaneado con las páginas al revés y sin número de albarán): todas las páginas del archivo son el mismo documento.
-  if(grupo.length&&(opciones.unSoloDocumento||(!ilegible&&continua(grupo[0].firma,grupo.at(-1).firma,firma))))grupo.push(x);
+  // Salvo en facturas, una página con OTRO número de factura leído con seguridad (fallo real 2026-11-26, usuario: «acabo de subir
+  // varias facturas y lo que leyó fue un desastre»: un escaneo de 6 páginas, 6 facturas de un taller, leído como una sola).
+  if(grupo.length&&!otraFactura(opciones,grupo[0].resultado,resultado)&&(opciones.unSoloDocumento||(!ilegible&&continua(grupo[0].firma,grupo.at(-1).firma,firma))))grupo.push(x);
   else{await cerrar();grupo=[x];}
  }
  await cerrar();
@@ -237,5 +289,5 @@ async function leerPdf(fuente,opciones={}){
  return {documentos,errores,resumen};
 }
 
-return {leerPdf,agruparPaginas,firmaPagina,continua,estadoDocumento,_numerosFueraDeSecuencia:numerosFueraDeSecuencia};
+return {leerPdf,agruparPaginas,firmaPagina,continua,estadoDocumento,_numerosFueraDeSecuencia:numerosFueraDeSecuencia,_copiaDePagina:copiaDePagina};
 });

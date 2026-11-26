@@ -261,6 +261,24 @@ const limpiarValor=v=>String(v||"").replace(/^[\s:#\-–—.º°]+/,"").replace(
 
 // huecoDerecha (en altos de la etiqueta): el valor a la derecha ha de estar a esa distancia como mucho (otra columna no vale).
 // unirDerecha: debajo de la etiqueta, si la celda más próxima no vale, se prueba unida a la celda pegada a su derecha.
+/*
+ * Matrícula del vehículo bajo (o junto a) la etiqueta «Matrícula» de la cabecera (factura de taller, 2026-11-26): solo con la forma de
+ * las matrículas actuales (4 cifras y 3 consonantes, o con la «E» de vehículo especial); con poca confianza OCR, en revisión.
+ */
+function matriculaDeCabecera(lineas){
+ const RE=/^(E-?)?(\d{4})[\s-]?([BCDFGHJKLMNPRSTVWXYZ]{3})$/;
+ for(const [i,l] of lineas.entries())for(const c of l.celdas||[]){
+  if(clave(c.texto||"").replace(/[^A-Z]/g,"")!=="MATRICULA")continue;
+  const alto=c.alto||l.alto||10;
+  const cands=[...(l.celdas||[]).filter(d=>d.x0>c.x1&&d.x0-c.x1<4*alto).slice(0,1),
+   ...lineas.slice(i+1,i+4).filter(m=>m.y-l.y<=4*alto).flatMap(m=>(m.celdas||[]).filter(d=>Math.min(d.x1,c.x1)-Math.max(d.x0,c.x0)>0))];
+  for(const d of cands){
+   const m=String(d.texto||"").trim().toUpperCase().match(RE);
+   if(m)return {literal:d.texto,valor:(m[1]?"E":"")+m[2]+m[3],estado:d.conf==null||d.conf>=80?"OK":"REVISAR",motivos:d.conf==null||d.conf>=80?[]:["Matrícula leída con poca confianza OCR"],caja:caja(d)};
+  }
+ }
+ return null;
+}
 function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=Infinity,unirDerecha=false,parClaveValor=false}={}){
  const hallados=[];
  lineas.forEach((linea,li)=>linea.celdas.forEach((celda,ci)=>{
@@ -421,7 +439,7 @@ function leerFecha(lineas,opciones){
   // «DE FECHA» solo en el renglón de la factura («Nº FACTURA/CARTA | DE FECHA»).
   hallados.push(...valoresEtiquetados(lineas,/^DE ?FECHA$/,EXCLUIR_FECHA,t=>F(sinHora(t),opciones).estado==="OK")
    .filter(h=>/FACTURA/.test(claveF(lineas[h.indiceLinea]?.texto))));
-  hallados=hallados.filter(h=>!/ALBARAN|RECEPCION/.test(claveF(h.etiqueta))&&!filaDeAlbaran(lineas[h.indiceLinea])).map(h=>({...h,texto:sinHora(h.texto)}));
+  hallados=hallados.filter(h=>!/ALBARAN|RECEP|MATRICULA|\bEST\b/.test(claveF(h.etiqueta))&&!filaDeAlbaran(lineas[h.indiceLinea])).map(h=>({...h,texto:sinHora(h.texto)}));
  }
  // «FECHA» que encabeza una columna con dos o más fechas distintas en los renglones de debajo, alineadas (fallo real 2026-11-23:
  // factura de una gestoría con «FECHA | DESCRIPCION | CARGOS» y la fecha de cada cargo; la primera se tomaba como la de la factura):
@@ -448,7 +466,7 @@ function leerFecha(lineas,opciones){
   for(const l of lineas)for(const [i,c] of l.celdas.entries()){
    const f=F(sinHora(c.texto),opciones);
    // Factura: tampoco sin etiqueta la de un albarán citado, ni la que lleva a su izquierda otra etiqueta de fecha (vencimiento…).
-   if(factura&&(filaDeAlbaran(l)||(i>0&&/ALBARAN|RECEPCION/.test(claveF(l.celdas[i-1].texto))||(i>0&&RE_FECHA.test(claveF(l.celdas[i-1].texto))&&EXCLUIR_FECHA.test(claveF(l.celdas[i-1].texto))))))continue;
+   if(factura&&(filaDeAlbaran(l)||(i>0&&/ALBARAN|RECEP|MATRICULA|\bEST\b/.test(claveF(l.celdas[i-1].texto))||(i>0&&RE_FECHA.test(claveF(l.celdas[i-1].texto))&&EXCLUIR_FECHA.test(claveF(l.celdas[i-1].texto))))))continue;
    if(f.estado==="OK")hallados.push({texto:sinHora(c.texto),celda:c});
   }
  }
@@ -2081,6 +2099,9 @@ function extraerDePaginas(paginas,opciones={}){
   if(h.length===1)salida.numero={literal:h[0].texto,valor:h[0].texto,estado:"OK",motivos:[],notas:["Número del pedido tras «"+h[0].etiqueta+"»"],
    caja:caja(h[0].celda),conf_ocr:h[0].celda?.conf??null};
  }
+ // Matrícula del vehículo en la cabecera de una factura (taller, 2026-11-26: «Matrícula» con el valor debajo; usuario: «que coja en el
+ // título todo, matrículas…»; en STEL las registran como «número fecha matrícula»).
+ if(opciones.numeroDeFactura){const m=matriculaDeCabecera(primera.p.lineas);if(m)salida.matricula=m;}
  // Factura de proveedor (opciones.numeroDeFactura, usuario 2026-11-20; real: casilla «NÚMERO» con «A | 000123» debajo y, en las
  // líneas, «ALBARAN Nº …» de cada albarán facturado): el número de la factura tras «NÚMERO», «Nº FACTURA» o «FACTURA», aunque el
  // lector haya tomado otro (los «ALBARÁN Nº» de una factura son los albaranes que cita, no su número). Solo si hay uno.
