@@ -35,17 +35,18 @@ const caja=c=>c?[Math.round(c.x0*10)/10,Math.round(c.y*10)/10,Math.round(c.x1*10
 /* ---------------------------- Cabecera de tabla ---------------------------- */
 const COLUMNAS=[
  ["referencia",/^(REF|REFERENCIA|REF ARTICULO|COD|CODIGO|COD ART|CODIGO ARTICULO|COD ARTICULO|ART|ARTICULO)$/],
- ["descripcion",/^(DESCRIPCION|CONCEPTO|CONCEPTOS|DENOMINACION|DESIGNACION|DETALLE|PRODUCTO|DESCRIPCION ARTICULO|DESCRIPCION DEL PRODUCTO|DESCRIPCION DEL ARTICULO|DESCRIPCION DEL|DESCRIPCION DE|DESCRIPCION EQUIPOS ALQUILADOS|DESCRIPCION EQUIPOS|EQUIPOS ALQUILADOS|DESCRIPCION SERVICIO|DESCRIPCION SERVICIOS)$/],
+ // En inglés («Description | Qty | Unit price | Tax | Amount», facturas de suscripciones de otros países de la UE, 2026-11-26).
+ ["descripcion",/^(DESCRIPCION|CONCEPTO|CONCEPTOS|DENOMINACION|DESIGNACION|DETALLE|PRODUCTO|DESCRIPCION ARTICULO|DESCRIPCION DEL PRODUCTO|DESCRIPCION DEL ARTICULO|DESCRIPCION DEL|DESCRIPCION DE|DESCRIPCION EQUIPOS ALQUILADOS|DESCRIPCION EQUIPOS|EQUIPOS ALQUILADOS|DESCRIPCION SERVICIO|DESCRIPCION SERVICIOS|DESCRIPTION)$/],
  // «UNID» (factura real escaneada 2026-11-23: «Unid. | Imp. Uni.» con las cantidades debajo). Si una tabla la usa para la unidad de
  // medida («UD», «KG»), esas casillas no son números y la línea queda sin cantidad (a revisión), nunca con una cantidad falsa.
- ["cantidad",/^(CANTIDAD|CANT|UDS|UNIDADES|UNDS|UNID|CTDAD|CANT SERVIDA|CANTIDAD SERVIDA|KILOS|KGS)$/],
+ ["cantidad",/^(CANTIDAD|CANT|UDS|UNIDADES|UNDS|UNID|CTDAD|CANT SERVIDA|CANTIDAD SERVIDA|KILOS|KGS|QTY|QUANTITY)$/],
  ["unidad",/^(UD|UN|U M|UM|UNIDAD|MEDIDA)$/],
  // «IMP. UNI.» = importe unitario (misma factura real del 2026-11-23).
- ["precio",/^(PRECIO|PRECIO ?UNIDAD|PRECIO ?UNITARIO|PRECIO ?UNIT|P UNIT|P UNITARIO|PUNITARIO|PUNIT|PVP|PRECIO ?UD|PRECIO ?UNID|P UNID|PRECIO DIA|PRECIO DIARIO|PRECIO ALQUILER|PRECIO NETO|PRECIO NETO U|PRECIO NETO UD|PRECIO NETO UNIT|PRECIO NETO UNITARIO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000|IMP ?UNI|IMP ?UNIT|IMP ?UNITARIO|IMPORTE ?UNITARIO|IMPORTE ?UNIDAD|IMP ?UNIDAD)$/],
+ ["precio",/^(PRECIO|PRECIO ?UNIDAD|PRECIO ?UNITARIO|PRECIO ?UNIT|P UNIT|P UNITARIO|PUNITARIO|PUNIT|PVP|PRECIO ?UD|PRECIO ?UNID|P UNID|PRECIO DIA|PRECIO DIARIO|PRECIO ALQUILER|PRECIO NETO|PRECIO NETO U|PRECIO NETO UD|PRECIO NETO UNIT|PRECIO NETO UNITARIO|TARIFA|PRECIO 100|PRECIO X 100|PRECIO 1000|PRECIO X 1000|IMP ?UNI|IMP ?UNIT|IMP ?UNITARIO|IMPORTE ?UNITARIO|IMPORTE ?UNIDAD|IMP ?UNIDAD|UNIT PRICE)$/],
  ["subtotal",/^(SUBTOTAL|BRUTO|IMPORTE BRUTO)$/],
  ["descuento",/^(DTO|DTOS|DESC|DESCUENTO|DTO %|% DTO|%DTO|DTO%|% DESC|DESC %|DTO ?[123]|DESC ?[123]|% ?DTO ?[123]|DTO ?[123] ?%)$/],
  // «CARGOS»: importe de cada concepto en una factura de servicios (gestoría, 2026-11-24: «FECHA | DESCRIPCION | CARGOS | ABONOS»).
- ["importe",/^(IMPORTE|IMPORTE NETO|TOTAL|NETO|TOTAL LINEA|IMPORTE TOTAL|IMPORTE EUR|CARGOS)$/]
+ ["importe",/^(IMPORTE|IMPORTE NETO|TOTAL|NETO|TOTAL LINEA|IMPORTE TOTAL|IMPORTE EUR|CARGOS|AMOUNT)$/]
 ];
 // Títulos de una palabra que el OCR puede leer con una letra cambiada («Descrinción»).
 const TITULOS_OCR={DESCRIPCION:"descripcion",CONCEPTO:"descripcion",DENOMINACION:"descripcion",CANTIDAD:"cantidad",
@@ -144,6 +145,15 @@ function evaluarCabecera(celdas){
   }
  }
  const ajenasFinal=columnas.filter(c=>c.campo==="otra").length;
+ // Títulos en inglés (2026-11-26): solo la tabla de las facturas de suscripciones («Description | Qty | Unit price | Tax | Amount»): un
+ // solo precio, el importe en «Amount» y como mucho una columna ajena, la del impuesto. Las demás tablas en inglés (tiendas en línea con
+ // dos precios, «Net | VAT | Total») se siguen leyendo por su pie, como antes (banco de facturas: con la tabla, sus totales se perdían).
+ if(columnas.some(c=>/^(DESCRIPTION|QTY|QUANTITY|UNIT PRICE|AMOUNT)$/.test(c.clave))){
+  const ajenas=columnas.filter(c=>c.campo==="otra");
+  const forma=columnas.filter(c=>c.campo==="precio").length===1&&columnas.filter(c=>c.campo==="importe").length===1&&columnas.some(c=>c.campo==="importe"&&c.clave==="AMOUNT")&&
+   ajenas.length<=1&&ajenas.every(c=>/^(TAX|VAT|VAT RATE|TAX RATE)$/.test(c.clave));
+  if(!forma)return {valida:false,columnas:columnas.sort((a,b)=>a.x0-b.x0),ajenas:ajenasFinal};
+ }
  // Factura de servicios (gestoría, 2026-11-24): conceptos con su importe en «CARGOS», sin cantidad ni precio. Vale como tabla; cada
  // concepto lleva cantidad 1 y precio = importe (usuario: «cantidad 1»), confirmados solo con los totales impresos (verificarServicios).
  const servicios=!finales.has("cantidad")&&!finales.has("precio")&&finales.has("descripcion")&&columnas.some(c=>c.campo==="importe"&&c.clave==="CARGOS")&&ajenasFinal<=3;
@@ -344,11 +354,21 @@ function numeroPorFormato(pagina,perfil,leido,opcionesFecha){
   });
  }
  const enLinea=leido?.caja?candidatos.filter(c=>Math.abs(c.linea.y-leido.caja[1])<=1.2*c.linea.alto):[];
+ // Bajo un título «ALBARÁN» con una letra mal leída («SLBARÁN», fallo real 2026-11-26: albarán de mostrador con la casilla «CLIENTE | ALBARÁN |
+ // FECHA» al pie; sin etiqueta reconocida, el número salía del código postal del cliente bajo «NO UTILIZAR»). Solo con el formato del
+ // proveedor y un único valor con ese formato en la casilla de debajo (como mucho tres renglones).
+ const etiquetas=pagina.lineas.flatMap(l=>l.celdas.filter(c=>{const k=N().sinAcentos(String(c.texto)).toUpperCase().replace(/[^A-Z]/g,"");
+  return k.length>=6&&k.length<=8&&distancia1(k,"ALBARAN")===1;}).map(c=>({c,l})));
+ const bajoEtiqueta=candidatos.filter(x=>etiquetas.some(({c,l})=>{const dy=x.linea.y-l.y,ancho=c.x1-c.x0,cx=(x.celda.x0+x.celda.x1)/2;
+  return dy>0&&dy<=3.2*(l.alto||10)&&cx>=c.x0-ancho&&cx<=c.x1+ancho;}));
  const unicos=x=>[...new Map(x.map(c=>[c.valor.replace(/\s+/g,""),c])).values()];
- const elegidos=unicos(enLinea.length?enLinea:(perfil.numero_sin_etiqueta?candidatos:[]));
+ const elegidos=unicos(enLinea.length?enLinea:bajoEtiqueta.length?bajoEtiqueta:(perfil.numero_sin_etiqueta?candidatos:[]));
  if(elegidos.length!==1)return null;
  const c=elegidos[0];
- const metodo=enLinea.length?"tras la serie impresa junto a la etiqueta («"+leido.literal+"»)":"sin etiqueta: único valor con el formato del proveedor";
+ const etiquetaLeida=!enLinea.length&&bajoEtiqueta.length?etiquetas.find(({c:e,l})=>bajoEtiqueta.includes(c)&&c.linea.y>l.y)?.c.texto:null;
+ const metodo=enLinea.length?"tras la serie impresa junto a la etiqueta («"+leido.literal+"»)":
+  etiquetaLeida?"bajo la etiqueta «"+etiquetaLeida+"» (ALBARÁN con una letra mal leída): único valor con el formato del proveedor":
+  "sin etiqueta: único valor con el formato del proveedor";
  const numero={literal:c.valor,valor:c.valor.replace(/\s*\/\s*/g,"/"),estado:"OK",motivos:[],notas:["Número "+metodo],caja:caja(c.celda),conf_ocr:c.celda.conf??null,
   resolucion:{metodo:"formato_proveedor",evidencias:["Formato "+perfil.formato_numero,metodo]}};
  let fecha=null;
@@ -560,6 +580,17 @@ function identificarProveedor(paginas,registro,limiteCabecera=null){
     notas:["CIF impreso no legible: proveedor identificado por su nombre registrado; el CIF procede del registro"]});
    return r;
   }
+  // Proveedor de otro país (facturas de suscripciones de otros países de la UE, 2026-11-26: «IE VAT IE…», «Número de registro de IVA:
+  // IE…»): su NIF-IVA, en un renglón con una etiqueta de IVA de la primera página, si es UNO. Sin letra de control: queda por
+  // comprobar (NIF_NO_REGISTRADO) y solo se identifica si está exacto y una sola vez en el catálogo de STEL (verificacion.js).
+  const ue=[...new Set((paginas[0]?.lineas||[]).filter(l=>/\b(VAT|IVA|TVA|UST|BTW|NIF|TAX ?ID)\b/.test(clave(l.texto)))
+   .flatMap(l=>NIF().buscarIntracomunitario?NIF().buscarIntracomunitario(l.texto).map(x=>x.nif):[]))];
+  if(ue.length===1){
+   Object.assign(r,{nif:ue[0],estado:"NIF_NO_REGISTRADO",via:"iva_intracomunitario",intracomunitario:true,candidatos:ue,
+    motivos:["NIF-IVA de otro país ("+ue[0]+"): el proveedor se busca por él en el catálogo de STEL"]});
+   return r;
+  }
+  if(ue.length>1){r.estado="AMBIGUO";r.motivos.push("Varios NIF-IVA de otros países: "+ue.join(", "));return r;}
   r.motivos.push(propio?"Solo aparece el NIF del destinatario (DAFRICA): el emisor no se puede identificar":"No aparece ningún NIF/CIF válido del emisor");
   return r;
  }
@@ -1024,9 +1055,23 @@ function leerTablaPagina(pagina,perfil=null){
  }
  const precio=cols.find(c=>c.campo==="precio");
  const precioPor=precio&&/1000|MIL/.test(precio.clave)?1000:precio&&/100/.test(precio.clave)?100:1;
- return {cabecera:cab.columnas.map(c=>c.campo),filas,ignoradas,pie,indiceCabecera:cab.indice,precioPor,dudosasTrasFin,cabeceraPerfil:!!cab.de_perfil,...(cab.servicios?{servicios:true}:{})};
+ return {cabecera:cab.columnas.map(c=>c.campo),columnas:cab.columnas.map(c=>({campo:c.campo,clave:c.clave,x0:c.x0,x1:c.x1})),filas,ignoradas,pie,indiceCabecera:cab.indice,precioPor,dudosasTrasFin,cabeceraPerfil:!!cab.de_perfil,...(cab.servicios?{servicios:true}:{})};
 }
 
+/*
+ * Devolución solo del IVA en una factura en inglés: «Credited subtotal» 0, «Credited total» = la cuota impresa y «Adjusted invoice
+ * total» = la base impresa (±0,01), con base + cuota = total. Devuelve {devuelto, queda} (cifras leídas) o null.
+ */
+function devolucionSoloIva(lineas,totales,opcionesNumero){
+ const sub=valorPie(lineas,/^CREDITED SUBTOTAL$/,opcionesNumero),dev=valorPie(lineas,/^CREDITED TOTAL$/,opcionesNumero);
+ const queda=valorPie(lineas,/^ADJUSTED (INVOICE )?TOTAL$/,opcionesNumero);
+ const ok=x=>x&&x.estado==="OK"&&Number.isFinite(x.valor);
+ if(!ok(sub)||!ok(dev)||!ok(queda)||Math.abs(sub.valor)>0.005||!(dev.valor>0)||!(queda.valor>0))return null;
+ const b=totales?.base_imponible?.valor,c=totales?.cuota_iva?.valor,t=totales?.total?.valor;
+ if(![b,c,t].every(Number.isFinite))return null;
+ const cerca=(x,y)=>Math.abs(x-y)<=0.01+1e-9;
+ return cerca(dev.valor,c)&&cerca(queda.valor,b)&&cerca(b+c,t)?{devuelto:dev,queda}:null;
+}
 function valorPie(lineas,re,opcionesNumero){
  for(const [li,linea] of lineas.entries())for(const [ci,celda] of linea.celdas.entries()){
   const k=clave(celda.texto);const m=k.match(re);
@@ -1165,7 +1210,25 @@ function candidatos(lineas,re,opcionesNumero,{excluir=null,porcentaje=false,fact
  });});
  return out;
 }
-function leerTotales(lineas,opcionesNumero,{factura=false}={}){
+// % de IVA de cada línea en la columna «Tax»/«IVA» de su tabla («0%», «21 %»; facturas en inglés, 2026-11-26: leída la tabla, ese «0%»
+// ya no llega al pie). null si alguna línea no lo trae.
+function porcentajesDeImpuesto(tablas,lineas){
+ const out=[];
+ for(const x of tablas){
+  if(!x.t)continue;
+  const col=(x.t.columnas||[]).find(c=>c.campo==="otra"&&/^(TAX|VAT|IVA|IVA %|% IVA|TIPO IVA|TAX RATE|VAT RATE|IMPUESTO)$/.test(c.clave));
+  if(!col)continue;
+  const ancho=Math.max(4,col.x1-col.x0);
+  for(const l of lineas.filter(l=>l.pagina===x.p.numero&&l.y!=null)){
+   const fila=x.p.lineas.find(r=>Math.abs(r.y-l.y)<=Math.max(1,0.5*(r.alto||8)));
+   const c=fila?.celdas.find(c=>Math.min(c.x1,col.x1+ancho)-Math.max(c.x0,col.x0-ancho)>0&&/^\d{1,2}(?:[.,]\d+)?\s*%$/.test(String(c.texto).trim()));
+   if(!c)return null;
+   out.push(Number(String(c.texto).replace(/[^\d.,]/g,"").replace(",",".")));
+  }
+ }
+ return out.length?out:null;
+}
+function leerTotales(lineas,opcionesNumero,{factura=false,ivaLineas=null}={}){
  const vacio=()=>({literal:"",valor:null,estado:"VACIO",motivos:[]});
  const res={base_imponible:vacio(),iva_porcentaje:vacio(),cuota_iva:vacio(),total:vacio(),validacion:null};
  const o={factura};
@@ -1205,9 +1268,11 @@ function leerTotales(lineas,opcionesNumero,{factura=false}={}){
  // €23.45»): la base que es el total cuadra con cuota 0. Solo si ningún % impreso es otro (2026-11-25: «21,0% IVA | 0,00» de las
  // líneas de una certificación daba un 0 % falso y se aceptaba la base como total) y con su etiqueta de impuesto (el «0,00%» de
  // «Retenciones / Otros Conceptos | %» no es el IVA).
- if(!combos.length&&P.length&&P.every(p=>p.valor===0)&&P.some(p=>/IVA|VAT|TAX|IMPUESTO/.test(claveTotales(p.etiqueta))))for(const b of bases)for(const t of unicos(T))
+ // También con el 0 % en la columna «Tax» de TODAS las líneas (leída la tabla, 2026-11-26) y ningún otro % impreso.
+ const ceroLineas=!P.length&&Array.isArray(ivaLineas)&&ivaLineas.length>0&&ivaLineas.every(v=>v===0);
+ if(!combos.length&&((P.length&&P.every(p=>p.valor===0)&&P.some(p=>/IVA|VAT|TAX|IMPUESTO/.test(claveTotales(p.etiqueta))))||ceroLineas))for(const b of bases)for(const t of unicos(T))
   if(t.valor&&signo(b)===signo(t)&&Math.abs(b.valor-t.valor)<=0.011)
-   combos.push({b,c:{literal:"0",valor:0,estado:"OK",motivos:[],notas:["IVA 0 % impreso: cuota 0"]},t});
+   combos.push({b,c:{literal:"0",valor:0,estado:"OK",motivos:[],notas:[ceroLineas?"IVA 0 % en la columna del impuesto de todas las líneas: cuota 0":"IVA 0 % impreso: cuota 0"]},t,...(ceroLineas?{p0:true}:{})});
  // Base y cuota se imprimen a veces con 4 y con 2 decimales (48,0000 y 48,00): al céntimo
  // son la misma combinación; se conserva la que tiene los importes en céntimos.
  const cent=v=>Math.round(v*100);
@@ -1234,6 +1299,7 @@ function leerTotales(lineas,opcionesNumero,{factura=false}={}){
   res.base_imponible=marcar(x.b,"VERIFICADO");res.cuota_iva=marcar(x.c,"VERIFICADO");res.total=marcar(x.t,"VERIFICADO");
   if(x.p)res.iva_porcentaje=marcar(x.p,"VERIFICADO");
   else if(unicos(P).length===1)res.iva_porcentaje=marcar(unicos(P)[0],"OK");
+  else if(x.p0)res.iva_porcentaje={literal:"0%",valor:0,estado:"VERIFICADO",motivos:[],notas:["IVA 0 % en la columna del impuesto de todas las líneas"]};
   if(x.e)res.exento=marcar(x.e,"VERIFICADO");
   if(x.r)res.retencion=marcar(x.r,"VERIFICADO");
   res.validacion={estado:"OK",detalle:"Base "+x.b.literal+" + IVA "+x.c.literal+(x.e?" + suplidos "+x.e.literal:"")+(x.r?" − retención "+x.r.literal:"")+
@@ -2202,11 +2268,23 @@ function extraerDePaginas(paginas,opciones={}){
  // «Total líneas: 21,77» (Saltoki) es la suma de importes, no un recuento.
  const totalLineas=leido&&leido.estado==="OK"&&Number.isInteger(leido.valor)&&!/,/.test(leido.literal)?leido:null;
  const sumaLineasImpresa=leido&&leido.estado==="OK"&&!totalLineas?leido:null;
- salida.totales=leerTotales(pie,opcionesNumero,{factura:!!opciones.numeroDeFactura});
+ salida.totales=leerTotales(pie,opcionesNumero,{factura:!!opciones.numeroDeFactura,ivaLineas:opciones.numeroDeFactura?porcentajesDeImpuesto(tablas,salida.lineas):null});
  // Factura de abono (banco de facturas, 2026-11-25: «Abono RA-…» o «Abono» con los importes impresos en positivo; en
  // STEL van en negativo): los importes positivos pasan a negativo.
  const tabla1=tablas.find(x=>x.t&&x.p===paginas[0]);
- const abonoFactura=opciones.numeroDeFactura?abonoImpreso(paginas,salida.totales,tabla1?tabla1.p.lineas[tabla1.t.indiceCabecera].y-tabla1.p.lineas[tabla1.t.indiceCabecera].alto:null):null;
+ let abonoFactura=opciones.numeroDeFactura?abonoImpreso(paginas,salida.totales,tabla1?tabla1.p.lineas[tabla1.t.indiceCabecera].y-tabla1.p.lineas[tabla1.t.indiceCabecera].alto:null):null;
+ // Devolución SOLO del IVA (factura real 2026-11-26: suscripción de otro país de la UE con el IVA español cobrado y devuelto después:
+ // «Credited subtotal» 0 · «Credited total» = el IVA · «Adjusted invoice total» = la base): lo que queda es la factura sin IVA, como las de
+ // inversión del sujeto pasivo («Tax 0%»). Solo con las tres cifras impresas y cuadrando con la factura (lo devuelto es su IVA y lo
+ // que queda su base): base y total = lo que queda, IVA 0, e `iva_devuelto`. No es un abono.
+ const soloIva=abonoFactura&&/REFUND/.test(abonoFactura)?devolucionSoloIva(paginas.flatMap(p=>p.lineas),salida.totales,opcionesNumero):null;
+ if(soloIva){
+  const v=(valor,literal,motivo)=>({valor,estado:"VERIFICADO",literal,motivos:[motivo],confianza:1});
+  const m="Devolución del IVA («Credited total» "+soloIva.devuelto.literal+" = el IVA de la factura): queda «Adjusted invoice total» "+soloIva.queda.literal+" sin IVA";
+  Object.assign(salida.totales,{base_imponible:v(soloIva.queda.valor,soloIva.queda.literal,m),iva_porcentaje:v(0,"0%",m),cuota_iva:v(0,"0",m),
+   total:v(soloIva.queda.valor,soloIva.queda.literal,m),iva_devuelto:v(soloIva.devuelto.valor,soloIva.devuelto.literal,m),validacion:{estado:"OK",detalle:m}});
+  abonoFactura=null;
+ }
  // «Refund» (devolución de una factura en inglés, 2026-11-25: se devuelve solo el IVA, «Credited total» distinto del «Total»): lo
  // impreso es la factura devuelta; lo abonado lo comprueba la persona.
  if(abonoFactura&&/REFUND/.test(abonoFactura)){

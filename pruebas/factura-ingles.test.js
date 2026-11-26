@@ -9,7 +9,7 @@ const test=require("node:test"),assert=require("node:assert/strict");
 const {extraerDePaginas}=require("../albaranes/extraer.js");
 const N=require("../albaranes/normalizar.js");
 const T=require("../albaranes/texto-pdf.js");
-const {HOY,registroCon,fila,cabeceraDoc,pagina}=require("./ayudas-ocr.js");
+const {HOY,registroCon,fila,cabeceraDoc,pagina,NIF_PROPIO}=require("./ayudas-ocr.js");
 // Proveedor sin el formato de las cifras en su perfil: lo dice el propio documento.
 const leer=palabras=>extraerDePaginas([pagina([...cabeceraDoc(),...palabras])],{registro:registroCon({formato_confirmado:false}),hoy:HOY,numeroDeFactura:true});
 const celda=(t,x,ancho,alto)=>[t,x,95,{ancho,...(alto?{alto}:{})}];
@@ -213,4 +213,59 @@ test("filas vacías «0,00 €» de la plantilla y la suma suelta de la columna 
   ...fila(405,celda("total iva",95,23),celda("2,00 €",188,21))]);
  assert.equal(r.lineas.length,2,JSON.stringify(r.lineas.map(l=>[l.descripcion?.valor,l.importe?.valor])));
  assert.deepEqual(tot(r),{base_imponible:[20,"VERIFICADO"],cuota_iva:[2,"VERIFICADO"],total:[22,"VERIFICADO"]});
+});
+
+// Suscripciones de otros países de la UE (facturas reales 2026-11-26: tabla en inglés sin leer, proveedor con NIF-IVA irlandés sin
+// reconocer, y una devolución solo del IVA). Datos FICTICIOS.
+// Sin la cabecera de ejemplo (lleva un CIF español): la de un proveedor de otro país.
+const leerUE=palabras=>extraerDePaginas([pagina(palabras)],{registro:registroCon({formato_confirmado:false}),hoy:HOY,numeroDeFactura:true});
+const suscripcion=(extra=[])=>[...fila(80,celda("Invoice",60,40)),
+ ...fila(100,celda("Invoice number",60,60),celda("ABCDEFGH 0014",160,60)),
+ ...fila(112,celda("Date of issue",60,50),celda("March 2, 2026",160,60)),
+ ...fila(150,celda("Empresa Ajena Limited",60,100),celda("Bill to",300,30)),
+ ...fila(162,celda("IE VAT IE1234567FA",60,80),celda("ES VAT ES"+NIF_PROPIO,300,80)),
+ ...fila(300,celda("Description",60,50),celda("Qty",300,15),celda("Unit price",360,40),celda("Tax",420,20),celda("Amount",480,35)),
+ ...fila(314,celda("Servicio ficticio",60,70),celda("1",300,5),celda("€20.00",360,30),celda("21%",420,15),celda("€20.00",480,30)),
+ ...fila(326,celda("Mar 2 Apr 2, 2026",60,70)),
+ ...fila(360,celda("Subtotal",360,40),celda("€20.00",480,30)),
+ ...fila(372,celda("Total excluding tax",360,70),celda("€20.00",480,30)),
+ ...fila(384,celda("VAT - Spain",300,45),celda("21% on €20.00",360,50),celda("€4.20",480,25)),
+ ...fila(396,celda("Total",360,25),celda("€24.20",480,30)),...extra];
+test("tabla en inglés («Description | Qty | Unit price | Tax | Amount»): la línea con su periodo, cuadrada",()=>{
+ const r=leer(suscripcion());
+ assert.equal(r.lineas.length,1);
+ const l=r.lineas[0];
+ assert.match(l.descripcion.valor,/^Servicio ficticio Mar 2 Apr 2, 2026$/);
+ assert.deepEqual([l.cantidad.valor,l.precio.valor,l.importe.valor],[1,20,20]);
+ assert.equal(l.importe.estado,"VERIFICADO");
+});
+test("NIF-IVA de otro país con su etiqueta («IE VAT IE…»): el del proveedor, por comprobar en STEL; nunca el «ES VAT» del cliente",()=>{
+ const r=leerUE(suscripcion());
+ assert.equal(r.proveedor.nif,"IE1234567FA");
+ assert.equal(r.proveedor.estado,"NIF_NO_REGISTRADO");
+ assert.equal(r.proveedor.intracomunitario,true);
+});
+test("devolución solo del IVA: queda la factura sin IVA (base y total = lo que queda, IVA 0) y no es un abono",()=>{
+ const devolucion=[...fila(430,celda("Credited subtotal",360,60),celda("€0.00",480,25)),
+  ...fila(442,celda("VAT - Spain",300,45),celda("21% on €20.00",360,50),celda("€4.20",480,25)),
+  ...fila(454,celda("Credited total",360,50),celda("€4.20",480,25)),
+  ...fila(466,celda("Adjusted invoice total",360,80),celda("€20.00",480,30))];
+ const r=leer([...fila(60,celda("Refund",60,40)),...suscripcion(devolucion)]);
+ assert.deepEqual(tot(r),{base_imponible:[20,"VERIFICADO"],cuota_iva:[0,"VERIFICADO"],total:[20,"VERIFICADO"]});
+ assert.equal(r.totales.iva_devuelto.valor,4.2);
+ assert.notEqual(r.tipo_documento?.valor,"ABONO");
+ // Si lo devuelto no es el IVA de la factura, como antes: a revisión.
+ const otra=[...fila(430,celda("Credited subtotal",360,60),celda("€0.00",480,25)),...fila(454,celda("Credited total",360,50),celda("€5.00",480,25)),
+  ...fila(466,celda("Adjusted invoice total",360,80),celda("€19.20",480,30))];
+ const r2=leer([...fila(60,celda("Refund",60,40)),...suscripcion(otra)]);
+ assert.equal(r2.totales.total.estado,"REVISAR");assert.equal(r2.totales.iva_devuelto,undefined);
+});
+test("el NIF-IVA de otro país solo identifica al proveedor si está exacto y una sola vez en el catálogo de STEL",()=>{
+ const V=require("../albaranes/verificacion.js");
+ const cat=proveedores=>({solo_lectura:true,persistido:false,escritura_supabase:false,escritura_stel:false,proveedores_completo:true,articulos_completo:false,proveedores,articulos:[]});
+ const con=c=>V.verificar(leerUE(suscripcion()),cat(c)).proveedor;
+ assert.deepEqual([con([{id:77,nif:"IE1234567FA"},{id:78,nif:"B00000000"}]).account_id,con([{id:77,nif:"IE1234567FA"}]).via],[77,"catalogo_stel_nif_ue"]);
+ assert.equal(con([{id:79,nif:"1234567FA"}]).account_id,79);
+ assert.equal(con([]).account_id,undefined);
+ assert.equal(con([{id:77,nif:"IE1234567FA"},{id:80,nif:"IE 1234567 FA"}]).account_id,undefined);
 });

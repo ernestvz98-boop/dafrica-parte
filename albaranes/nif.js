@@ -52,6 +52,19 @@ function buscar(texto){
 }
 
 /*
+ * NIF-IVA de otro país (intracomunitario o del Reino Unido) con su prefijo de país: «IE VAT IE1234567FA», «Número de registro de IVA:
+ * IE1234567F». Solo la forma (no hay letra de control común): el que lo usa exige una etiqueta de IVA en el renglón y la coincidencia
+ * exacta y única en el catálogo de STEL (facturas de suscripciones de otros países de la UE, 2026-11-26). Nunca «ES»: para los
+ * españoles, `buscar`.
+ */
+const PATRON_UE=/\b(AT ?U\d{8}|BE ?[01]\d{9}|BG ?\d{9,10}|CY ?\d{8}[A-Z]|CZ ?\d{8,10}|DE ?\d{9}|DK ?\d{8}|EE ?\d{9}|EL ?\d{9}|FI ?\d{8}|FR ?[0-9A-Z]{2} ?\d{9}|HR ?\d{11}|HU ?\d{8}|IE ?\d{7}[A-W][A-I]?|IE ?\d[A-Z+*]\d{5}[A-W]|IT ?\d{11}|LT ?(?:\d{12}|\d{9})|LU ?\d{8}|LV ?\d{11}|MT ?\d{8}|NL ?\d{9}B\d{2}|PL ?\d{10}|PT ?\d{9}|RO ?\d{2,10}|SE ?\d{12}|SI ?\d{8}|SK ?\d{10}|XI ?\d{9}(?:\d{3})?|GB ?\d{9}(?:\d{3})?)\b/g;
+function buscarIntracomunitario(texto){
+ const out=[];
+ for(const m of String(texto??"").toUpperCase().matchAll(PATRON_UE)){const nif=m[1].replace(/\s+/g,"");out.push({nif,pais:nif.slice(0,2),literal:m[0],indice:m.index});}
+ return out;
+}
+
+/*
  * Huella SHA-256 de un NIF normalizado. Los perfiles públicos guardan solo la huella (nunca el
  * NIF en claro): el lector calcula la huella del NIF leído y la compara. Síncrona, sin dependencias.
  */
@@ -80,5 +93,5 @@ function sha256(texto){
 }
 const huella=nif=>sha256("dafrica-nif:"+normalizar(nif));
 
-return {normalizar,validar,buscar,huella,sha256};
+return {normalizar,validar,buscar,buscarIntracomunitario,huella,sha256};
 });

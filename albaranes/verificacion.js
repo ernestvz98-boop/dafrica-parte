@@ -49,7 +49,16 @@
      notas:[...(p.notas||[]),'CIF con lecturas OCR distintas ('+p.lecturas_nif.join(' | ')+'): solo '+norm(c.v)+' está en el catálogo de STEL']});
    }
   }
-  if(catalogo.proveedores_completo&&p?.nif&&M('nif').validar(p.nif).valido&&['OK','NIF_NO_REGISTRADO'].includes(p.estado)){
+  // NIF-IVA de otro país (sin letra de control, 2026-11-26): exacto (con o sin el prefijo del país) y en UNA sola cuenta del catálogo
+  // completo de STEL. Si no está, queda sin cuenta: la persona elige el proveedor (y puede ponerle ese NIF-IVA en STEL para la próxima).
+  const ue=v=>String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,''),sinPais=v=>ue(v).replace(/^[A-Z]{2}(?=[0-9])/,'');
+  if(catalogo.proveedores_completo&&p?.intracomunitario&&p.nif&&p.account_id==null){
+   const candidatos=(catalogo.proveedores||[]).filter(s=>ue(s.nif)&&(ue(s.nif)===ue(p.nif)||(sinPais(s.nif).length>=8&&sinPais(s.nif)===sinPais(p.nif))));
+   if(candidatos.length===1){
+    p.estado='OK';p.motivos=[];p.account_id=candidatos[0].id;p.via='catalogo_stel_nif_ue';
+    p.verificacion_catalogo={metodo:'NIF-IVA de otro país exacto y único en el catálogo completo',account_id:p.account_id};
+   }else motivos.push(candidatos.length?'NIF-IVA duplicado en el catálogo de proveedores':'NIF-IVA no encontrado en el catálogo de proveedores');
+  }else if(catalogo.proveedores_completo&&p?.nif&&M('nif').validar(p.nif).valido&&['OK','NIF_NO_REGISTRADO'].includes(p.estado)){
    const candidatos=(catalogo.proveedores||[]).filter(s=>M('nif').normalizar(s.nif)===M('nif').normalizar(p.nif));
    if(candidatos.length===1){
     p.estado='OK';p.motivos=[];p.account_id=candidatos[0].id;p.via='catalogo_stel_nif';
