@@ -34,6 +34,23 @@ test('si STEL ignora el filtro: lee desde el final hacia atrás y para al llegar
  const otra=[];await buscarNotas(stel(false,otra),'k',{cuentas:[1],desde:'2026-10-20',hasta:'2026-10-30',pista:340,dormir:async()=>{}});
  assert.ok(otra.length<consultas.length,otra.length+' / '+consultas.length);
 });
+// Fallo real 2026-11-25: la API da «document-state-id» (un número) y no el nombre del estado; la aplicación no sabía si un albarán ya
+// estaba facturado. Datos FICTICIOS.
+test('cada albarán lleva el nombre de su estado de STEL (una consulta a la lista de estados); si esa consulta falla, sin nombre',async()=>{
+ const {buscarNotas}=await mod();
+ const notas=[{id:1,'full-reference':'ABP269001','account-id':7,date:'2026-10-14T00:00:00+0000','document-state-id':101,title:'99.001 A'},
+  {id:2,'full-reference':'ABP269002','account-id':7,date:'2026-10-14T00:00:00+0000','document-state-id':102,title:'99.002 B'}];
+ const estados=[{id:101,name:'Pendiente de facturar',type:'PURCHASEDELIVERYNOTE'},{id:102,name:'Facturado',type:'PURCHASEDELIVERYNOTE'}];
+ const consultas=[];
+ const fetcher=fallaEstados=>async(url)=>{consultas.push(url);const u=new URL(url);
+  if(u.pathname.endsWith('/documentStates')){assert.equal(u.searchParams.get('type'),'PURCHASEDELIVERYNOTE');return fallaEstados?response({},500):response(estados);}
+  const start=Number(u.searchParams.get('start')||0);return response(start?[]:notas);};
+ const r=await buscarNotas(fetcher(false),'k',{cuentas:[7],desde:'2026-10-14',hasta:'2026-10-14',dormir:async()=>{}});
+ assert.deepEqual(r.notas.map(n=>[n.fullReference,n.stateId,n.state]),[['ABP269001',101,'Pendiente de facturar'],['ABP269002',102,'Facturado']]);
+ assert.equal(consultas.filter(u=>u.includes('/documentStates')).length,1);
+ const sin=await buscarNotas(fetcher(true),'k',{cuentas:[7],desde:'2026-10-14',hasta:'2026-10-14',dormir:async()=>{}});
+ assert.deepEqual(sin.notas.map(n=>n.state),['','']);
+});
 test('el handler valida la búsqueda y exige sesión con permiso',async()=>{
  const {handler}=await mod();
  assert.equal((await handler(req({buscar:{cuentas:[1],desde:'2026-10-01',hasta:'2026-10-02'}},false),{env,fetcher:stel(true)})).status,401);

@@ -21,11 +21,14 @@
  *   fijo de STEL se sigue con ese tamaño; si no, incompleta («pagina_recortada»).
  * 2026-10-26: v8. Modo {pedidos: {codigos: ["PAP01234", …]}}: pedidos a proveedor por referencia,
  *   con sus artículos y unidades, sin precios (validar un «PAP» escrito a mano).
+ * 2026-11-26: v9 (versión 8 de Supabase). Cada albarán de compra lleva `stateId` y el nombre de su estado de STEL (para no
+ *   facturar albaranes ya facturados); copia de la anterior en respaldo-v7-handler.mjs.
  */
 const cors={"Access-Control-Allow-Origin":"https://ernestvz98-boop.github.io","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS"};
 const reply=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...cors,"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}});
 const BASE="https://app.stelorder.com/app/purchaseDeliveryNotes";
 const BASE_PEDIDOS="https://app.stelorder.com/app/purchaseOrders";
+const BASE_ESTADOS="https://app.stelorder.com/app/documentStates";
 const dia=v=>String(v||"").slice(0,10);
 const RE_DIA=/^\d{4}-\d{2}-\d{2}$/;
 
@@ -37,7 +40,8 @@ export function resumen(x){
   supplier:String(x["account-name"]||x["supplier-name"]||x.account?.name||""),
   accountId:x["account-id"]??x.accountId??x.account?.id??null,
   extraReference:String(x["extra-reference"]||x.extraReference||""),
-  state:String(x["document-state"]||x.status||"")};
+  state:String(x["document-state"]||x.status||""),
+  stateId:x["document-state-id"]!=null&&Number.isSafeInteger(Number(x["document-state-id"]))?Number(x["document-state-id"]):null};
 }
 
 // GET con reintentos: STEL responde 403/429 cuando se agota su cupo o hay consultas simultáneas.
@@ -63,10 +67,33 @@ function cliente(fetcher,clave,{esperas=[1500,4000],dormir=ms=>new Promise(r=>se
 }
 
 /*
- * Albaranes de compra de las cuentas `cuentas` con fecha en [desde, hasta].
+ * Nombre del estado de cada albarán de compra (fallo real 2026-11-25: la API de STEL da «document-state-id», un número, y no su nombre;
+ * el estado llegaba vacío y la aplicación no podía saber si un albarán ya estaba facturado: se propuso facturar albaranes ya
+ * facturados). Una consulta a la lista de estados de ese tipo de documento; si falla, sin nombres (la aplicación no da ninguno por
+ * pendiente).
+ */
+export async function nombresDeEstados(fetcher,clave,tipo,opciones={}){
+ const {get}=cliente(fetcher,clave,{...opciones,base:BASE_ESTADOS,maxConsultas:3});
+ try{
+  const lista=await get({type:tipo,limit:100});
+  return new Map(lista.filter(e=>String(e.type||tipo)===tipo&&e.id!=null&&Number.isSafeInteger(Number(e.id))).map(e=>[Number(e.id),String(e.name??"").trim()]));
+ }catch{return new Map();}
+}
+/*
+ * Albaranes de compra de las cuentas `cuentas` con fecha en [desde, hasta], con el nombre de su estado.
  * Devuelve {metodo, completo, notas, consultas, total?, motivo?}.
  */
-export async function buscarNotas(fetcher,clave,{cuentas=[],desde,hasta,pista=null,maxPaginas=20,tam=100,...opciones}){
+export async function buscarNotas(fetcher,clave,args={}){
+ const r=await buscarNotasSinEstado(fetcher,clave,args);
+ if(r.notas.some(n=>!n.state&&n.stateId!=null)){
+  const {cuentas,desde,hasta,pista,maxPaginas,tam,...opciones}=args;
+  const nombres=await nombresDeEstados(fetcher,clave,"PURCHASEDELIVERYNOTE",opciones);
+  for(const n of r.notas)if(!n.state&&n.stateId!=null)n.state=nombres.get(n.stateId)||"";
+  r.consultas=(r.consultas||0)+1;
+ }
+ return r;
+}
+async function buscarNotasSinEstado(fetcher,clave,{cuentas=[],desde,hasta,pista=null,maxPaginas=20,tam=100,...opciones}){
  const {get,estado}=cliente(fetcher,clave,opciones);
  const enIntervalo=x=>dia(x.date)>=desde&&dia(x.date)<=hasta;
  const delasCuentas=new Set(cuentas.map(String));
