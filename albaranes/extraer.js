@@ -144,6 +144,15 @@ function evaluarCabecera(celdas){
    finales=new Set(columnas.map(c=>c.campo).filter(c=>c!=="otra"));
   }
  }
+ // Factura de servicios con la base y el IVA de cada concepto («Descripción | Cuota IVA | Base Imponible (€)», 2026-11-26: prevención de
+ // riesgos laborales): el importe de cada concepto es su base y su tipo, el de la columna del IVA («21,00 %» o «EXENTO»). Solo con esa
+ // forma exacta: en otras facturas «Base imponible | % IVA | Cuota» es el desglose de los totales, no las líneas.
+ const conBase=columnas.length===3&&columnas.filter(c=>c.campo==="descripcion").length===1&&columnas.some(c=>c.campo==="otra"&&c.clave.trim()==="BASE IMPONIBLE")&&
+  columnas.some(c=>c.campo==="otra"&&/^(CUOTA IVA|% IVA|TIPO IVA)$/.test(c.clave.trim()));
+ if(conBase){
+  for(const c of columnas)if(c.campo==="otra"){c.clave=c.clave.trim();c.campo=c.clave==="BASE IMPONIBLE"?"importe":"iva";}
+  finales=new Set(columnas.map(c=>c.campo).filter(c=>c!=="otra"));
+ }
  const ajenasFinal=columnas.filter(c=>c.campo==="otra").length;
  // Títulos en inglés (2026-11-26): solo la tabla de las facturas de suscripciones («Description | Qty | Unit price | Tax | Amount»): un
  // solo precio, el importe en «Amount» y como mucho una columna ajena, la del impuesto. Las demás tablas en inglés (tiendas en línea con
@@ -156,9 +165,9 @@ function evaluarCabecera(celdas){
  }
  // Factura de servicios (gestoría, 2026-11-24): conceptos con su importe en «CARGOS», sin cantidad ni precio. Vale como tabla; cada
  // concepto lleva cantidad 1 y precio = importe (usuario: «cantidad 1»), confirmados solo con los totales impresos (verificarServicios).
- const servicios=!finales.has("cantidad")&&!finales.has("precio")&&finales.has("descripcion")&&columnas.some(c=>c.campo==="importe"&&c.clave==="CARGOS")&&ajenasFinal<=3;
+ const servicios=conBase||(!finales.has("cantidad")&&!finales.has("precio")&&finales.has("descripcion")&&columnas.some(c=>c.campo==="importe"&&c.clave==="CARGOS")&&ajenasFinal<=3);
  const valida=(finales.has("cantidad")&&(finales.has("descripcion")||finales.has("referencia"))&&finales.size>=3&&ajenasFinal<=3)||servicios;
- return {valida,...(servicios?{servicios:true}:{}),columnas:columnas.sort((a,b)=>a.x0-b.x0),ajenas:ajenasFinal};
+ return {valida,...(servicios?{servicios:true}:{}),...(conBase?{conBase:true}:{}),columnas:columnas.sort((a,b)=>a.x0-b.x0),ajenas:ajenasFinal};
 }
 function buscarCabeceraTabla(lineas,desde=0){
  for(let i=desde;i<lineas.length;i++){
@@ -743,6 +752,9 @@ function leerTablaPagina(pagina,perfil=null){
     ?cols.find(x=>["descripcion","referencia"].includes(x.campo)&&x.ini>=(columnaDe(p,cols)?.fin??Infinity)):null;
    if(sigTexto)campo=sigTexto.campo;
    else if(NUMERICAS.has(campo)&&!pareceNumero(p.texto)&&ultimo)campo=ultimo.campo;
+   // La columna del IVA de un concepto solo lleva su tipo («21,00 %» o «EXENTO»; 2026-11-26): una descripción larga que llega hasta
+   // ella sigue en la descripción.
+   else if(campo==="iva"&&ultimo&&!/^(\d{1,2}([.,]\d{1,2})?%?|%|EXENT[OA]S?)$/.test(clave(p.texto).replace(/ /g,"")))campo=ultimo.campo;
    if(ultimo&&ultimo.campo===campo){ultimo.texto+=" "+p.texto;ultimo.x1=p.x1;}
    else grupos.push({campo,texto:p.texto,x0:p.x0,x1:p.x1,alto:c.alto,y:c.y});
   }
@@ -1055,7 +1067,7 @@ function leerTablaPagina(pagina,perfil=null){
  }
  const precio=cols.find(c=>c.campo==="precio");
  const precioPor=precio&&/1000|MIL/.test(precio.clave)?1000:precio&&/100/.test(precio.clave)?100:1;
- return {cabecera:cab.columnas.map(c=>c.campo),columnas:cab.columnas.map(c=>({campo:c.campo,clave:c.clave,x0:c.x0,x1:c.x1})),filas,ignoradas,pie,indiceCabecera:cab.indice,precioPor,dudosasTrasFin,cabeceraPerfil:!!cab.de_perfil,...(cab.servicios?{servicios:true}:{})};
+ return {cabecera:cab.columnas.map(c=>c.campo),columnas:cab.columnas.map(c=>({campo:c.campo,clave:c.clave,x0:c.x0,x1:c.x1})),filas,ignoradas,pie,indiceCabecera:cab.indice,precioPor,dudosasTrasFin,cabeceraPerfil:!!cab.de_perfil,...(cab.servicios?{servicios:true}:{}),...(cab.conBase?{conBase:true}:{})};
 }
 
 /*
@@ -1102,7 +1114,8 @@ const ETIQ_TOTALES={
  // «Cuota» sola (columna del desglose «Base IVA | % | Cuota») y «Total impuesto(s)»: la combinación decide.
  cuota:/^(CUOTAS? ?(DE )?[IL1] ?V ?A|TOTAL ?(DE )?[ILT1] ?V ?A|IMP(ORTE)? ?(DEL? )?I ?V ?A|I V A|IVA|IMPUESTOS?( DE)? IVA|TOTAL IMPUESTOS?|TOTAL CUOTAS?|VAT|TAX|VAT SUBTOTAL|TOTAL (VAT|TAX))\b|^[L1] ?V ?A$|^CUOTAS?$|^CUOTAS? \d{1,2}([.,]\d+)? ?%|^IVA(?= ?\d)|^\d{1,2}([.,]\d+)? ?% ?(DE )?(IVA|SOBRE)\b/,
  // Gastos suplidos de una gestoría (2026-11-24: «GASTOS | HONORARIOS | % | I.V.A. | TOTAL FACTURA»): fuera de la base, sin IVA.
- exento:/^(GASTOS|SUPLIDOS|GASTOS SUPLIDOS|TOTAL SUPLIDOS)$/,
+ // La base exenta (2026-11-26: «Total Base Imponible Exenta (*)», prevención de riesgos laborales, art. 20 de la Ley del IVA): igual, sin IVA.
+ exento:/^(GASTOS|SUPLIDOS|GASTOS SUPLIDOS|TOTAL SUPLIDOS)$|^(TOTAL )?BASES? (IMPONIBLES? )?EXENTAS?\b/,
  // «A INGRESAR» (gestoría, 2026-11-24): el total otra vez, en su casilla; solo se toma si cuadra con base, IVA y suplidos.
  // Banco de facturas (2026-11-25): «Importe final», «Importe de la factura», «Importe del abono», «EURO TOTAL», «Importe neto total con
  // impuestos», «Invoice total», «Total payable», «TOTALABONO» (total a abonar = a pagar) y «T O T A L» (letras separadas).
@@ -1118,7 +1131,8 @@ const EXCLUIR_TOTAL=/^TOTAL ?(L ?[IÍ1L]? ?N ?E ?A ?S|[IL1] ?[IÍ1L]? ?N ?E ?A ?
 // En una factura, el total de cada albarán que cita no es el de la factura.
 const EXCLUIR_TOTAL_FACTURA=new RegExp(EXCLUIR_TOTAL.source+"|^TOTAL (DEL? )?ALBAR[AE]N(ES)?(?![A-Z0-9])");
 // Base con impuestos («IMPORTE NETO TOTAL CON IMPUESTOS») o cuota «incluida»: no son base ni cuota.
-const EXCLUIR_BASE=/\bCON (IMPUESTOS?|IVA)\b|\bIVA INCL/;
+// La base exenta va aparte (ETIQ_TOTALES.exento).
+const EXCLUIR_BASE=/\bCON (IMPUESTOS?|IVA)\b|\bIVA INCL|\bEXENTAS?\b/;
 const EXCLUIR_CUOTA=/\bINCLUID|\bINCL\b|\bINC\b/;
 // «T O T A L», «I V A»: letras sueltas separadas por espacios, juntas.
 const colapsarLetras=t=>t.replace(/\b[A-Z](?: [A-Z]\b){2,}/g,m=>m.replace(/ /g,""));
@@ -1261,7 +1275,8 @@ function leerTotales(lineas,opcionesNumero,{factura=false,ivaLineas=null}={}){
  // Abono con los importes en negativo: los tres del mismo signo.
  // Suplidos o retención a cero («IRPF: 0,00») son lo mismo que ninguno: no son otra combinación.
  for(const e of [null,...unicos(E).filter(x=>x.valor)])for(const r of [null,...unicos(R).filter(x=>x.valor)])for(const b of bases)for(const c of unicos(C))for(const t of unicos(T)){
-  if(!t.valor||signo(b)!==signo(t)||(c.valor&&signo(c)!==signo(t))||(r&&t.valor<0))continue;
+  // Base 0 solo con suplidos o base exenta (2026-11-26: «Total Base Imponible: 0,00», todo exento).
+  if(!t.valor||(b.valor?signo(b)!==signo(t):!e)||(c.valor&&signo(c)!==signo(t))||(r&&t.valor<0))continue;
   if(Math.abs(b.valor+c.valor+(e?.valor||0)-(r?Math.abs(r.valor):0)-t.valor)<=0.021)combos.push({b,c,t,...(e?{e}:{}),...(r?{r}:{})});
  }
  // IVA 0 % impreso y ninguna cuota (inversión del sujeto pasivo, facturas en inglés, 2026-11-25: «Subtotal €23.45 | Tax 0% | Total
@@ -1302,7 +1317,7 @@ function leerTotales(lineas,opcionesNumero,{factura=false,ivaLineas=null}={}){
   else if(x.p0)res.iva_porcentaje={literal:"0%",valor:0,estado:"VERIFICADO",motivos:[],notas:["IVA 0 % en la columna del impuesto de todas las líneas"]};
   if(x.e)res.exento=marcar(x.e,"VERIFICADO");
   if(x.r)res.retencion=marcar(x.r,"VERIFICADO");
-  res.validacion={estado:"OK",detalle:"Base "+x.b.literal+" + IVA "+x.c.literal+(x.e?" + suplidos "+x.e.literal:"")+(x.r?" − retención "+x.r.literal:"")+
+  res.validacion={estado:"OK",detalle:"Base "+x.b.literal+" + IVA "+x.c.literal+(x.e?(/EXENT/.test(claveTotales(x.e.etiqueta||""))?" + exento ":" + suplidos ")+x.e.literal:"")+(x.r?" − retención "+x.r.literal:"")+
    " = total "+x.t.literal+(x.p?" (IVA "+x.p.valor+" %)":"")+(x.desglose?" (suma del desglose de "+x.desglose+" tipos de IVA)":"")};
   return res;
  }
@@ -1683,16 +1698,26 @@ function verificarServicios(salida){
  if(!conceptos.length||conceptos.length!==salida.lineas.length)return;
  const T=salida.totales||{},ok=c=>c?.estado==="VERIFICADO"&&c.valor!=null;
  if(!ok(T.base_imponible)||!ok(T.total))return;
- const suplido=l=>/^SUPLIDOS?\b/.test(clave(l.descripcion?.valor||""));
+ // Exentos (su columna de IVA dice «EXENTO», 2026-11-26) como los suplidos: suman la base exenta impresa, sin IVA.
+ const suplido=l=>/^SUPLIDOS?\b/.test(clave(l.descripcion?.valor||""))||l.iva_linea?.exento===true;
  const suma=a=>Math.round(a.reduce((n,l)=>n+(Number(l.importe.valor)||0),0)*100)/100;
  const sup=conceptos.filter(suplido),resto=conceptos.filter(l=>!suplido(l));
  if(sup.length&&!ok(T.exento))return;
  if(Math.abs(suma(sup)-(sup.length?T.exento.valor:0))>0.011||Math.abs(suma(resto)-T.base_imponible.valor)>0.011)return;
  const pct=ok(T.iva_porcentaje)?T.iva_porcentaje.valor:null;
+ // Con la columna del IVA, el tipo de cada concepto es el suyo y la cuota impresa ha de ser la de esas bases (si no, nada se confirma).
+ const conColumna=resto.some(l=>l.iva_linea);
+ if(conColumna){
+  if(resto.some(l=>!(l.iva_linea?.valor>0)))return;
+  const cuota=Math.round(resto.reduce((n,l)=>n+Number(l.importe.valor)*l.iva_linea.valor/100,0)*100)/100;
+  if(!ok(T.cuota_iva)||Math.abs(cuota-T.cuota_iva.valor)>0.011*Math.max(1,resto.length))return;
+ }
  for(const l of conceptos){
-  const s=suplido(l),nota=s?"Suplido: suman los gastos suplidos impresos ("+T.exento.literal+"), sin IVA":"Suman la base imponible impresa ("+T.base_imponible.literal+")";
+  const s=suplido(l),ex=l.iva_linea?.exento===true,tipo=s?0:conColumna?l.iva_linea.valor:pct;
+  const nota=s?(ex?"Exento: suman la base imponible exenta impresa ("+T.exento.literal+"), sin IVA":"Suplido: suman los gastos suplidos impresos ("+T.exento.literal+"), sin IVA")
+   :"Suman la base imponible impresa ("+T.base_imponible.literal+")"+(conColumna?", con el IVA de su columna":"");
   for(const k of ["cantidad","precio","importe"])l[k]={...l[k],estado:"VERIFICADO",motivos:[],notas:[...(l[k].notas||[]).filter(n=>n!==nota),nota]};
-  l.iva={valor:s?0:pct,estado:s||pct!=null?"VERIFICADO":"VACIO",motivos:[],notas:[nota]};
+  l.iva={valor:tipo,estado:tipo!=null?"VERIFICADO":"VACIO",motivos:[],notas:[nota]};
   l.cuadre={estado:"VERIFICADO",detalle:"concepto de servicios: "+nota};
   l.motivos=l.motivos.filter(m=>!/^Concepto de servicios/.test(m));
   l.estado=l.motivos.length?"REVISAR":"OK";
@@ -1743,6 +1768,11 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
   importe:campoNumero(c.importe,opcionesNumero),
   motivos:[],notas:[]
  };
+ // Tipo de IVA del concepto en su columna («21,00 %» o «EXENTO»; factura de servicios con la base de cada concepto, 2026-11-26).
+ if(c.iva){
+  const t=String(c.iva.texto||"").trim(),m=t.match(/^(\d{1,2}(?:[.,]\d{1,2})?)\s*%$/);
+  f.iva_linea=/^EXENT[OA]S?$/.test(clave(t))?{literal:t,valor:0,exento:true}:m?{literal:t,valor:Number(m[1].replace(",","."))}:{literal:t,valor:null};
+ }
  arreglarReferencia(f);
  // Cantidad con la unidad pegada («8,00 UD», «20 SAC», «3,5 M2»).
  if(f.cantidad.estado==="INVALIDO"){
@@ -1807,6 +1837,9 @@ function construirFila(cruda,n,opcionesNumero,perfil,precioPor){
  const importeResuelto=cruda.conflictos.includes("importe")&&descuentoEnColumnaImporte(f,cruda.celdas?.importe,opcionesNumero,precioPor);
  for(const campo of cruda.conflictos){
   if(campo==="importe"&&importeResuelto)continue;
+  // La columna del IVA de un concepto con dos cifras: sin tipo (el concepto no se confirma).
+  if(campo==="iva"){f.iva_linea={literal:String(c.iva?.texto||""),valor:null};continue;}
+  if(!f[campo])continue;
   f[campo]={...f[campo],valor:null,estado:"AMBIGUO",motivos:[...(f[campo].motivos||[]),"Varias cifras en la misma columna"]};
  }
  importeEnColumnaDescuento(f,opcionesNumero,precioPor);
@@ -2241,7 +2274,8 @@ function extraerDePaginas(paginas,opciones={}){
  // estaría cortada. La anterior no se acepta sin revisión.
  if(!perfil?.permite_sin_referencia)salida.lineas.forEach((l,i)=>{
   const ant=salida.lineas[i-1],a=ant?.descripcion?.caja,b=l.descripcion?.caja;
-  if(!ant||l.referencia.estado!=="VACIO"||!a||!b||l.pagina!==ant.pagina||ant.descripcion.estado!=="OK")return;
+  // Dos conceptos de servicios, cada uno con su importe, son dos líneas (2026-11-26).
+  if(!ant||l.referencia.estado!=="VACIO"||!a||!b||l.pagina!==ant.pagina||ant.descripcion.estado!=="OK"||(l.servicio&&ant.servicio))return;
   if(b[1]-a[1]>0&&b[1]-a[1]<=2*a[3]&&b[0]>=a[0]-a[3]&&b[0]<=a[2]+a[3]){
    ant.descripcion={...ant.descripcion,estado:"REVISAR",motivos:[...(ant.descripcion.motivos||[]),"La fila siguiente, sin código, puede ser el final de esta descripción («"+l.descripcion.literal+"»)"]};
    ant.motivos.push("Descripción posiblemente cortada: sigue una fila sin código");ant.estado="REVISAR";
@@ -2269,6 +2303,13 @@ function extraerDePaginas(paginas,opciones={}){
  const totalLineas=leido&&leido.estado==="OK"&&Number.isInteger(leido.valor)&&!/,/.test(leido.literal)?leido:null;
  const sumaLineasImpresa=leido&&leido.estado==="OK"&&!totalLineas?leido:null;
  salida.totales=leerTotales(pie,opcionesNumero,{factura:!!opciones.numeroDeFactura,ivaLineas:opciones.numeroDeFactura?porcentajesDeImpuesto(tablas,salida.lineas):null});
+ // Totales ENCIMA de la tabla (2026-11-26: «TOTALES (€)» arriba y «Descripción | Cuota IVA | Base Imponible (€)» debajo): en la tabla de
+ // conceptos con su base, si el pie no da los totales, los renglones de encima de la tabla. Solo si cuadran entre sí.
+ const conBase=tablas.filter(x=>x.t?.conBase);
+ if(opciones.numeroDeFactura&&conBase.length&&salida.totales.validacion?.estado!=="OK"){
+  const arriba=leerTotales(conBase.flatMap(x=>x.p.lineas.slice(0,x.t.indiceCabecera)),opcionesNumero,{factura:true});
+  if(arriba.validacion?.estado==="OK")salida.totales=arriba;
+ }
  // Factura de abono (banco de facturas, 2026-11-25: «Abono RA-…» o «Abono» con los importes impresos en positivo; en
  // STEL van en negativo): los importes positivos pasan a negativo.
  const tabla1=tablas.find(x=>x.t&&x.p===paginas[0]);
