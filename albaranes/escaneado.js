@@ -1029,6 +1029,12 @@ async function extraerEscaneado(paginas,opciones={}){
  combinarCabecera(principal,lecturas.filter(r=>!r._lectura.startsWith("banda")));
  combinarLineas(principal,lecturas.filter(r=>!r._solo_cabecera));
  combinarTotales(principal,lecturas);
+ // Matrícula de la cabecera de una factura de taller (2026-11-26: la lectura principal no la tenía y otra sí): la de las demás lecturas,
+ // solo si todas las que la leen con confianza dan la misma.
+ if(opciones.numeroDeFactura&&!principal.matricula){
+  const ms=lecturas.map(r=>r.matricula).filter(m=>m&&m.estado==="OK");
+  if(ms.length&&ms.every(m=>m.valor===ms[0].valor))principal.matricula={...ms[0],notas:["De otra lectura OCR de la página"]};
+ }
  // Recuento de líneas: la banda de la tabla es la lectura más fiable de las filas.
  const banda=lecturas.find(r=>r._lectura.startsWith("banda"));
  principal.validaciones_extra=[];

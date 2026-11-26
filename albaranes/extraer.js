@@ -277,6 +277,17 @@ function matriculaDeCabecera(lineas){
    if(m)return {literal:d.texto,valor:(m[1]?"E":"")+m[2]+m[3],estado:d.conf==null||d.conf>=80?"OK":"REVISAR",motivos:d.conf==null||d.conf>=80?[]:["Matrícula leída con poca confianza OCR"],caja:caja(d)};
   }
  }
+ // Sin la etiqueta leída (escaneo: «Matrícula» en blanco sobre una banda oscura), en una cabecera de taller («Bastidor», «Kilómetros»):
+ // la ÚNICA casilla con forma de matrícula de la página.
+ const taller=lineas.some(l=>(l.celdas||[]).some(c=>/^(BASTIDOR|KILOMETROS|KMS)$/.test(clave(c.texto||"").replace(/[^A-Z]/g,""))));
+ if(taller){
+  const halladas=[];
+  for(const l of lineas)for(const d of l.celdas||[]){const m=String(d.texto||"").trim().toUpperCase().match(RE);if(m)halladas.push({d,v:(m[1]?"E":"")+m[2]+m[3]});}
+  if(halladas.length&&halladas.every(h=>h.v===halladas[0].v)){
+   const {d,v}=halladas[0],ok=d.conf==null||d.conf>=80;
+   return {literal:d.texto,valor:v,estado:ok?"OK":"REVISAR",motivos:ok?[]:["Matrícula leída con poca confianza OCR"],notas:["Única matrícula de la cabecera de un taller (sin la etiqueta leída)"],caja:caja(d)};
+  }
+ }
  return null;
 }
 function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=Infinity,unirDerecha=false,parClaveValor=false}={}){

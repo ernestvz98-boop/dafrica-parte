@@ -209,6 +209,11 @@ async function leerPdf(fuente,opciones={}){
     resultado=await M("escaneado").extraerEscaneado(await Promise.all(g.map(x=>fuente.ocr(x.n))),opciones);
     resultado.incidencias=[...(resultado.incidencias||[]),"Albarán con páginas digitales y escaneadas: leído por OCR"];
    }
+   // Factura que empieza en la página k > 1 («Núm. Página: 2 / 2»; fallo real 2026-11-26: de dos facturas solo se escaneó la última
+   // página, sin las líneas): se avisa de que faltan las anteriores.
+   const k0=g[0]?.firma?.pagina?.k,n0=g[0]?.firma?.pagina?.n;
+   if(opciones.numeroDeFactura&&resultado&&Number.isInteger(k0)&&k0>1)
+    resultado.incidencias=[...(resultado.incidencias||[]),"Falta la página "+(k0>2?"1 a "+(k0-1):"1")+" de esta factura: solo está la "+k0+(n0?" de "+n0:"")+" (las líneas suelen ir en la primera)"];
    const doc={indice:documentos.length+1,paginas,resultado,estado_documento:g0[0].blanca&&g0.length===blancas.length+1&&!(resultado?.lineas||[]).length?"ERROR_DOCUMENTO":estadoDocumento(resultado)};
    if(blancas.length)doc.paginas_en_blanco=blancas;
    if(repetidas.length&&resultado){
