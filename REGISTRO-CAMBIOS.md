@@ -3,6 +3,20 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-27 · Publicación: el lector de DAFRICA Control y el motor OCR 7 en la web y en SAT
+
+- `albaranes/cola-stel.js` y `pruebas/cola-stel.test.js`, iguales que en DAFRICA Control: la obra leída a mano y sin validar va
+  PROPUESTA en la revisión (`plan.obras_posibles`, como mucho 3, primero las de la lista de obras; nunca en `plan.obra`: sin una obra
+  elegida por la persona no se autoriza). Con esto, `albaranes/` y `vendor/tesseract/` son los mismos que en DAFRICA Control y en
+  DAFRICA Administración 0.3.81.
+- `index.html`: versión nueva (`?v=20261127publicar`) de los 11 ficheros del lector que cambian desde la última publicación, para que
+  el navegador no junte ficheros viejos y nuevos (varios cambios del 25 al 27 no la habían subido).
+- Las mejoras del lector del 23 al 27 (rama local `claude/sat-publicar`, hecha antes de SAT 0.3.16) se han vuelto a aplicar encima de
+  lo publicado (SAT 0.3.18), sin tocar nada de SAT salvo el nombre de la caché de `sat/sw.js` («dafrica-sat-0.3.18-motor7»).
+- Un comentario de `albaranes/lector.js` llevaba el número de una factura real: cambiado por uno inventado antes de publicar (también
+  en DAFRICA Control y en la aplicación).
+- Pruebas: `npm test` 520/520. Producción: se publica en `main` con el permiso del usuario («Sí, publícalas»).
+
 ## 2026-11-27 · Facturas escaneadas: números y fechas aceptados mal (el sitio, no las cifras)
 
 - Fallo real, hallado con un banco nuevo de 194 facturas ESCANEADAS (las de los envíos a la gestoría, con su registro en STEL; privado):

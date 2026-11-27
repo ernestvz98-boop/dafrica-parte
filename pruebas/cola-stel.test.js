@@ -308,13 +308,19 @@ test("clase impresa contraria a por dónde se subió: REVISAR con aviso", ()=>{
  assert.equal(C.orden(doc({resultado:{clase_impresa:"ALBARAN"}}),catalogo).estado,"PENDIENTE");
 });
 // Albarán sin PAP que encaja con un pedido abierto (usuario, 2026-11-17): aviso, nunca asociación sola. Datos ficticios.
-test("pedido abierto con todos los artículos del albarán: aviso y pedidos posibles; si falta alguno, nada", ()=>{
+test("pedido abierto con al menos la mitad de los artículos del albarán: aviso y pedidos posibles; con menos, nada", ()=>{
  const abiertos=[{codigo:"PAP09999",cuenta:9001,referencias:["REF-001","OTRA-9"]},{codigo:"PAP09998",cuenta:7777,referencias:["REF-001"]}];
  const o=C.orden(doc(),catalogo,{pedidosAbiertos:abiertos});
  assert.equal(o.estado,"REVISAR");assert.deepEqual(o.plan.pedidos_posibles,["PAP09999"]);assert.equal(o.plan.pedido,null);
  assert.match(o.motivos.join(),/Puede ser del pedido PAP09999/);
  assert.equal(C.orden(doc(),catalogo,{pedidosAbiertos:[{codigo:"PAP09997",cuenta:9001,referencias:["OTRA-9"]}]}).plan.pedidos_posibles,undefined);
  assert.equal(C.orden(doc(),catalogo).estado,"PENDIENTE");
+ // Fallo real 2026-11-24: el pedido tenía una referencia mal escrita y, exigiendo todas, no avisaba. Con la mitad, sí; con menos, no.
+ const linea=(ref,desc)=>({pagina:1,referencia:ok(ref),descripcion:ok(desc),cantidad:ok(1),unidad:ok("UD"),precio:ok(1),descuento:{porcentajes:[]},importe:ok(1)});
+ const dos=doc({resultado:{lineas:[linea("REF-001","TUBO FICTICIO 20MM"),linea("OTRA-9","CODO FICTICIO")],totales:{total:ok(2.42)}}});
+ assert.deepEqual(C.orden(dos,catalogo,{pedidosAbiertos:[{codigo:"PAP09996",cuenta:9001,referencias:["REF-001","REF-0O1"]}]}).plan.pedidos_posibles,["PAP09996"]);
+ const tres=doc({resultado:{lineas:[linea("REF-001","TUBO FICTICIO 20MM"),linea("OTRA-9","CODO FICTICIO"),linea("TERCERA-1","TE FICTICIA")],totales:{total:ok(3.63)}}});
+ assert.equal(C.orden(tres,catalogo,{pedidosAbiertos:[{codigo:"PAP09996",cuenta:9001,referencias:["REF-001"]}]}).plan.pedidos_posibles,undefined);
 });
 // Usuario 2026-11-18 («no cogió el PRY»): en una confirmación de pedido, la obra leída a mano sin segunda prueba va propuesta
 // (con su aviso) para que la persona la compruebe; en un albarán, no. Datos ficticios.
@@ -327,6 +333,29 @@ test("pedido: obra escrita a mano sin validar, propuesta en la revisión con avi
  // Sin el formato o con poca confianza, nada.
  assert.equal(C.orden(doc({resultado:{manuscritos:{obra:{valor:"PRY0999",estado:"REVISAR",confianza:0.8}}}}),catalogo,{tipoDocumento:"PEDIDO"}).plan.obra,null);
  assert.equal(C.orden(doc({resultado:{manuscritos:{obra:{valor:"PRY09999",estado:"AMBIGUO",confianza:0}}}}),catalogo,{tipoDocumento:"PEDIDO"}).plan.obra,null);
+});
+// Usuario 2026-11-26 («proponerla en Revisar»): en la cola real la persona buscaba la obra desde cero en ~40 % de los albaranes.
+// La obra leída y sin validar va PROPUESTA (obras_posibles), nunca en plan.obra; primero las de la lista, como mucho 3. Datos ficticios.
+test("albarán: obra leída y sin validar, propuesta en la revisión (obras_posibles) sin ponerla nunca sola", ()=>{
+ const cat={...catalogo,obras_completo:false,obras:[...catalogo.obras,{id:556,codigo:"PRY09998",nombre:"OTRA OBRA FICTICIA"}]};
+ const revisar=C.orden(doc({resultado:{manuscritos:{obra:{valor:"PRY09999",estado:"REVISAR",confianza:0.8,resolucion:{alternativas:["PRY09999"]}}}}}),cat);
+ assert.equal(revisar.plan.obra,null);assert.equal(revisar.estado,"REVISAR");
+ assert.deepEqual(revisar.plan.obras_posibles,[{codigo:"PRY09999",nombre:"OBRA FICTICIA",stel_id:null,en_lista:true}]);
+ // Con la lista de proyectos de STEL completa, también su proyecto.
+ assert.equal(C.orden(doc({resultado:{manuscritos:{obra:{valor:"PRY09999",estado:"REVISAR",confianza:0.8}}}}),catalogo).plan.obras_posibles[0].stel_id,555);
+ assert.match(revisar.motivos.join(),/Obra \(PRY\) sin validar: puede ser PRY09999 \(compruébalo en el papel\)/);
+ // Varias lecturas: primero las de la lista de obras; la que no está, al final y sin nombre; sin repetir y como mucho 3.
+ const ambigua=C.orden(doc({resultado:{manuscritos:{obra:{valor:null,estado:"AMBIGUO",confianza:0,
+  resolucion:{alternativas:["PRY01234","pry-09998","PRY09999","PRY09998","PRYMP00001"]}}}}}),cat);
+ assert.deepEqual(ambigua.plan.obras_posibles.map(x=>x.codigo),["PRY09998","PRY09999","PRY01234"]);
+ assert.deepEqual(ambigua.plan.obras_posibles[2],{codigo:"PRY01234",nombre:null,stel_id:null,en_lista:false});
+ assert.equal(ambigua.plan.obra,null);
+ // Sin lecturas con el formato, validada, o sin obra: nada que proponer.
+ assert.equal(C.orden(doc({resultado:{manuscritos:{obra:{valor:null,literal:"firma",estado:"VACIO"}}}}),cat).plan.obras_posibles,undefined);
+ assert.equal(C.orden(doc({resultado:{manuscritos:{obra:{valor:"PRY0999",estado:"REVISAR",confianza:0.8}}}}),cat).plan.obras_posibles,undefined);
+ assert.equal(C.orden(doc(),catalogo).plan.obras_posibles,undefined);
+ // En un pedido la obra ya va propuesta en plan.obra (con su aviso): no se repite.
+ assert.equal(C.orden(doc({resultado:{manuscritos:{obra:{valor:"PRY09999",estado:"REVISAR",confianza:0.8}}}}),cat,{tipoDocumento:"PEDIDO"}).plan.obras_posibles,undefined);
 });
 // Fallo real 2026-11-18: «Ø» de un diámetro de conducto leído M, G o Q. Textos ficticios.
 test("corregirSignos: «Ø» de conducto leído M/G/Q antes de un diámetro de 3 cifras; una métrica o un código, no", ()=>{

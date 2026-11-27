@@ -270,7 +270,17 @@ function orden(doc,catalogo,opciones={}){
  const codObra=ob?.estado==="OK"?canon(ob.valor):propuesta;
  if(propuesta)motivos.push("Obra "+propuesta+" leída a mano sin otra prueba: compruébala antes de confirmar");
  let obra=null;
- if(!codObra){if(!sinObra)motivos.push("Obra (PRY) sin validar");}
+ // Obra leída a mano y sin validar (usuario, 2026-11-26: «proponerla en Revisar»; en la cola real la persona tenía que buscarla desde
+ // cero en ~40 % de los albaranes): sus lecturas con el formato van PROPUESTAS en la revisión («Es la obra …», como el pedido), nunca
+ // aceptadas solas; primero las de la lista de obras (con su nombre), como mucho 3. El robot no las usa: sin obra elegida, no se crea.
+ const obrasPosibles=codObra||!ob?[]:(()=>{
+  const leidas=[...new Set([ob.valor,...(ob.resolucion?.alternativas||[])].map(x=>canon(x)).filter(x=>/^PRY(MP)?\d{5}$/.test(x)))];
+  const deLista=c=>{const o=(cat.obras||[]).filter(x=>canon(x.codigo)===c);return o.length===1?o[0]:null;};
+  return [...leidas.filter(c=>deLista(c)),...leidas.filter(c=>!deLista(c))].slice(0,3)
+   .map(c=>({codigo:c,nombre:deLista(c)?String(deLista(c).nombre||"").slice(0,150)||null:null,
+    stel_id:deLista(c)&&cat.obras_completo?deLista(c).id??null:null,en_lista:!!deLista(c)}));
+ })();
+ if(!codObra){if(!sinObra)motivos.push("Obra (PRY) sin validar"+(obrasPosibles.length?": puede ser "+obrasPosibles.map(x=>x.codigo).join(" o ")+" (compruébalo en el papel)":""));}
  else if(!cat.obras_completo){
   // Sin la lista de proyectos de STEL en esta lectura: el robot elige en STEL el proyecto cuyo nombre
   // termina en «(código)», solo si es uno (o se para).
@@ -363,7 +373,7 @@ function orden(doc,catalogo,opciones={}){
   tipo,numero,fecha,obra,pedido,su_referencia:r.manuscritos?.suReferencia||null,recoge:r.manuscritos?.recoge||null,notas_mano:Array.isArray(r.manuscritos?.notas)&&r.manuscritos.notas.length?r.manuscritos.notas.slice(0,3):null,...(anotacion?{anotacion}:{}),...(sinObra&&!codObra?{sin_obra:true,sin_obra_motivo:"Ningún código de obra escrito ni obra impresa: albarán sin obra"}:{}),ya_en_stel:abp?{referencia:String(abp.referencia||abp.fullReference||""),id:abp.id??null}:null,
   // Solo un total aceptado por el lector (nunca uno en revisión: prueba real 2026-10-28).
   lineas,total:Number.isFinite(r.totales?.total?.valor)&&["OK","VERIFICADO"].includes(r.totales.total.estado)?r.totales.total.valor:null,
-  ...(ivaImpreso(r.totales)?{iva:ivaImpreso(r.totales)}:{}),...(pedidosPosibles.length?{pedidos_posibles:pedidosPosibles}:{}),...(arreglo.notas.length?{arreglos_lineas:arreglo.notas}:{}),
+  ...(ivaImpreso(r.totales)?{iva:ivaImpreso(r.totales)}:{}),...(pedidosPosibles.length?{pedidos_posibles:pedidosPosibles}:{}),...(obrasPosibles.length?{obras_posibles:obrasPosibles}:{}),...(arreglo.notas.length?{arreglos_lineas:arreglo.notas}:{}),
   aviso_precio:!pedido&&lineas.some(l=>l.precio_pendiente)?"PRECIO PENDIENTE":null,
   comprobaciones_pendientes:comprobacionesPendientes(opciones)};
   // Solo informativo: las reglas de arriba ya dejan en REVISAR lo que dependa de esas comprobaciones
