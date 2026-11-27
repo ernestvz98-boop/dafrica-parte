@@ -1139,9 +1139,11 @@ const ETIQ_TOTALES={
  // «TOTAL BASE IMPONIBLE», «BASES IMPONIBLES», «BASE IVA» (banco de facturas, 2026-11-25).
  base:/^(BASES? IMPONIBLES?|BASE|BASES|SUMA NETO|NETO|TOTAL NETO|IMPORTE NETO|SUMA IMPORTES|TOTAL BASES?( IMPONIBLES?)?|NET|TOTAL EXCL(UDING|UIDO)?( (TAX|VAT|IVA))?|PRECIO NETO TOTAL)\b|^HONORARIOS$/,
  // El % dentro de la etiqueta también vale («IVA 21%», «IVA21%», «21 % IVA», «Impuesto IVA 21%», «21% sobre la base imponible»).
- pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA|IMPUESTOS?( DE)? IVA|VAT|TAX|VAT RATE|TAX RATE)\b|^%$|^CUOTAS? \d{1,2}([.,]\d+)? ?%|^IVA(?= ?\d)|^\d{1,2}([.,]\d+)? ?% ?(DE )?(IVA|SOBRE)\b/,
+ // «LV.A.» sola es «I.V.A.» mal leído (2026-11-27): como «IVA», puede ser la columna del % o la de la cuota; la combinación decide.
+ pct:/^(% ?IVA|IVA ?%|TIPO IVA|TIPO|IVA|IMPUESTOS?( DE)? IVA|VAT|TAX|VAT RATE|TAX RATE)\b|^%$|^[L1] ?V ?A$|^CUOTAS? \d{1,2}([.,]\d+)? ?%|^IVA(?= ?\d)|^\d{1,2}([.,]\d+)? ?% ?(DE )?(IVA|SOBRE)\b/,
  // «Cuota» sola (columna del desglose «Base IVA | % | Cuota») y «Total impuesto(s)»: la combinación decide.
- cuota:/^(CUOTAS? ?(DE )?[IL1] ?V ?A|TOTAL ?(DE )?[ILT1] ?V ?A|IMP(ORTE)? ?(DEL? )?I ?V ?A|I V A|IVA|IMPUESTOS?( DE)? IVA|TOTAL IMPUESTOS?|TOTAL CUOTAS?|VAT|TAX|VAT SUBTOTAL|TOTAL (VAT|TAX))\b|^[L1] ?V ?A$|^CUOTAS?$|^CUOTAS? \d{1,2}([.,]\d+)? ?%|^IVA(?= ?\d)|^\d{1,2}([.,]\d+)? ?% ?(DE )?(IVA|SOBRE)\b/,
+ // «Importe .V.A.» con la I perdida o leída L/1 (2026-11-27) también es la cuota.
+ cuota:/^(CUOTAS? ?(DE )?[IL1] ?V ?A|TOTAL ?(DE )?[ILT1] ?V ?A|IMP(ORTE)? ?(DEL? )?[IL1]? ?V ?A|I V A|IVA|IMPUESTOS?( DE)? IVA|TOTAL IMPUESTOS?|TOTAL CUOTAS?|VAT|TAX|VAT SUBTOTAL|TOTAL (VAT|TAX))\b|^[L1] ?V ?A$|^CUOTAS?$|^CUOTAS? \d{1,2}([.,]\d+)? ?%|^IVA(?= ?\d)|^\d{1,2}([.,]\d+)? ?% ?(DE )?(IVA|SOBRE)\b/,
  // Gastos suplidos de una gestoría (2026-11-24: «GASTOS | HONORARIOS | % | I.V.A. | TOTAL FACTURA»): fuera de la base, sin IVA.
  // La base exenta (2026-11-26: «Total Base Imponible Exenta (*)», prevención de riesgos laborales, art. 20 de la Ley del IVA): igual, sin IVA.
  exento:/^(GASTOS|SUPLIDOS|GASTOS SUPLIDOS|TOTAL SUPLIDOS)$|^(TOTAL )?BASES? (IMPONIBLES? )?EXENTAS?\b/,
@@ -1306,6 +1308,9 @@ function leerTotales(lineas,opcionesNumero,{factura=false,ivaLineas=null}={}){
  for(const e of [null,...unicos(E).filter(x=>x.valor)])for(const r of [null,...unicos(R).filter(x=>x.valor)])for(const b of bases)for(const c of unicos(C))for(const t of unicos(T)){
   // Base 0 solo con suplidos o base exenta (2026-11-26: «Total Base Imponible: 0,00», todo exento).
   if(!t.valor||(b.valor?signo(b)!==signo(t):!e)||(c.valor&&signo(c)!==signo(t))||(r&&t.valor<0))continue;
+  // Un importe con UN decimal junto a otros con dos es una cifra con el último decimal perdido (2026-11-27: «48,4» leído de «48,41»,
+  // con base + cuota = 48,42, cuadraba por la tolerancia del redondeo y se daba por bueno 48,40): nunca verifica.
+  if([b,c,t].some(x=>x.decimales===1)&&[b,c,t].some(x=>x.decimales>=2))continue;
   if(Math.abs(b.valor+c.valor+(e?.valor||0)-(r?Math.abs(r.valor):0)-t.valor)<=0.021)combos.push({b,c,t,...(e?{e}:{}),...(r?{r}:{})});
  }
  // IVA 0 % impreso y ninguna cuota (inversión del sujeto pasivo, facturas en inglés, 2026-11-25: «Subtotal €23.45 | Tax 0% | Total
