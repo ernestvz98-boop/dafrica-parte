@@ -3,6 +3,29 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-27 · Facturas escaneadas: números y fechas aceptados mal (el sitio, no las cifras)
+
+- Fallo real, hallado con un banco nuevo de 194 facturas ESCANEADAS (las de los envíos a la gestoría, con su registro en STEL; privado):
+  17 números y 9 fechas aceptados (confianza ≥ 0,9) y distintos de STEL. El número del albarán de la primera fila de la tabla («ALBARAN |
+  …» y debajo «2600001 | …»; un proveedor, 7 facturas), el código del cliente («… CLIENTE | 430000111»), una fecha con el mes en letra,
+  «HO12/26» por «H012/26», solo «115» de «115 4999», y el VENCIMIENTO como fecha de la factura («Vto: 15-07-26»). Datos inventados aquí.
+- Causa principal: `extraer.js` ya dejaba en duda un número que no está tras «Nº factura», pero la segunda fase (`segundaFase`,
+  `escaneado.js`) releía su casilla y, con 8 relecturas iguales, lo aceptaba al 0,95: la relectura confirma las CIFRAS de una casilla, no
+  que sea el número de la factura. Además usaba el formato de número de los ALBARANES del perfil del proveedor.
+- `escaneado.js` (solo factura y confirmación de pedido): no se relee un número en duda «de sitio» (no está tras «Nº factura», varios
+  números, albarán citado, barra leída «1», número partido, O junto a cifras), sin el formato de albarán del perfil; nunca se acepta lo
+  que da la relectura de la casilla de un vencimiento («Vto», «Venc»; al contado, con la factura del mismo día, queda en revisión).
+- `extraer.js` (solo facturas): bajo la etiqueta, una casilla que va justo tras otra etiqueta (sin cifras: CLIENTE, PEDIDO, ALBARÁN,
+  CUENTA…) no es su valor (`valoresEtiquetados`, opción `vecinoExcluido`; se sigue buscando debajo); un número tras otra etiqueta en su
+  renglón queda en duda aunque el renglón diga «FACTURA»; «114 | 4999» queda en duda («Número partido»); la letra O junto a cifras leída
+  por OCR queda en duda (en un PDF digital, no: hay números de tiendas en línea con letras); una fecha con el mes en letra no es un número.
+- Medido (privado): facturas escaneadas (180 con su registro en STEL), números aceptados mal 17 → 1, bien 73 → 77; fechas aceptadas mal
+  9 → 5 (ninguna nueva; las que quedan parecen registros con la fecha del cierre del periodo o un «8» leído «9» en la tabla), bien 117 →
+  115 (tres facturas al contado con la fecha y el vencimiento el mismo día pasan a revisión); totales sin ninguno mal. Además, 11
+  facturas de 2 páginas que se partían en dos (la segunda página con uno de esos números «seguros») ya no se parten. Las 1.741 facturas
+  digitales del banco y el banco de albaranes (86): iguales.
+- Pruebas: `pruebas/factura-numero-escaneada.test.js` (6, todas fallan sin el arreglo). `npm test` 612/612.
+
 ## 2026-11-27 · Motor OCR: tesseract.js 7.0.0 (antes 5.1.1), el mismo modelo de español
 
 - Usuario: «actualiza el OCR de tal manera que quede perfecto o mejor que antes». `vendor/tesseract/`: tesseract.js y su núcleo

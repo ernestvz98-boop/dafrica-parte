@@ -549,25 +549,48 @@ async function segundaFase(principal,paginas,lecturas,opciones){
  const resueltos=[];
  // Cabecera: número y fecha. Cajas: las de todas las lecturas que vieron algo en ese campo.
  const pendientesCabecera=[];
+ // Factura o confirmación de pedido (2026-11-27, 15 facturas escaneadas reales con el número mal y aceptado al 0,95): la relectura
+ // confirma las CIFRAS de una casilla, no que sea el número del documento. Si extraer.js lo dejó en duda por dónde está (no está tras
+ // «Nº factura», varios números tras la etiqueta, el número de un albarán que cita, la barra «/» leída «1»), no se relee: el número
+ // del albarán de la tabla («ALBARÁN | 2600001»), el código del cliente o la fecha salían aceptados con 8 relecturas iguales. Y el
+ // formato de número del perfil es el de sus ALBARANES: no vale para buscar ni validar el número de una factura o de un pedido.
+ const docFactura=!!(opciones?.numeroDeFactura||opciones?.numeroDePedido);
+ const dudaNoOcr=c=>docFactura&&(c?.motivos||[]).some(m=>/No está tras «Nº factura»|Varios números tras la etiqueta|albarán que cita la factura|barra «\/» como «1»|Número partido|Letra O junto a cifras/.test(String(m)));
+ const perfilCab=docFactura&&perfil?.formato_numero?{...perfil,formato_numero:null}:perfil;
+ // Fecha de una factura (2026-11-27, facturas escaneadas reales: «Vto: 15-07-26» y «VTO1: 31/12/2026» salían aceptadas como fecha
+ // de la factura por relectura: es una fecha válida, pero la del VENCIMIENTO): no se acepta lo que da la relectura de la casilla de un
+ // vencimiento (la casilla con «Vto»/«Venc» o tras una de las dos de su izquierda). Las casillas releídas son las mismas de siempre:
+ // quitar la del vencimiento dejaba sola la fecha de un albarán de la tabla, que salía aceptada (medido con el banco).
+ const deVencimiento=caja=>{for(const r of lecturas)for(const pg of r._pags||[])for(const l of pg.lineas){
+  const i=l.celdas.findIndex(c=>Math.abs(c.x0-caja[0])<2&&Math.abs((c.y??l.y)-caja[1])<2);
+  if(i>=0&&l.celdas.slice(Math.max(0,i-2),i+1).some(c=>/\bV(TO|ENC)/i.test(String(c.texto||""))))return true;}
+  return false;};
  for(const campo of ["numero","fecha"]){
   const actual=principal[campo];
   if(actual?.estado==="OK"&&(actual.confianza??0)>=0.9)continue;
-  const conCaja=[actual,...lecturas.map(r=>r[campo])].filter(c=>c?.caja&&c.literal).map(c=>c.caja);
+  if(campo==="numero"&&dudaNoOcr(actual))continue;
+  const conCaja=[actual,...lecturas.map(r=>r[campo])].filter(c=>c?.caja&&c.literal&&!(campo==="numero"&&dudaNoOcr(c))).map(c=>c.caja);
   // Número con formato de proveedor conocido: también las celdas que CONTIENEN ese formato
   // («600.1237»: un trazo de firma añadido), aunque su etiqueta no se haya leído.
-  if(campo==="numero"&&perfil?.formato_numero){
+  if(campo==="numero"&&perfilCab?.formato_numero){
    const re=new RegExp(perfil.formato_numero.replace(/^\^/,"").replace(/\$$/,""));
    for(const r of lecturas)for(const pg of r._pags||[])for(const l of pg.lineas)for(const c of l.celdas)
     if(re.test(c.texto)&&N.fecha(c.texto).estado!=="OK")conCaja.push([c.x0,c.y,c.x1,c.alto]);
   }
   const cajas=[...new Map(conCaja.map(c=>[c.map(v=>Math.round(v/4)).join(","),c])).values()].slice(0,4);
   if(!cajas.length)continue;
-  const r=await resolverCampo(pag,campo,cajas,{perfil,opcionesFecha,validacionEstructural:campo==="fecha"||!!perfil?.formato_numero});
+  const r=await resolverCampo(pag,campo,cajas,{perfil:perfilCab,opcionesFecha,validacionEstructural:campo==="fecha"||!!perfilCab?.formato_numero});
   const valida=v=>v!=null&&v!=="";
   if(!r||r.conflicto){
    if(r?.conflicto)actual.motivos=[...(actual.motivos||[]),"Relecturas con valores distintos: "+r.conflicto.join(" | ")];
    const cand=[actual?.estado==="OK"?actual.valor:null,...(r?.conflicto||[])].filter(valida);
    if(cand.length)pendientesCabecera.push({campo,candidatos:cand,caja:actual?.caja||cajas[0]});
+   continue;
+  }
+  // Sin excepciones (medido con el banco): al contado la factura y el vencimiento son el mismo día (tres de un transportista quedan en revisión), pero
+  // «la misma fecha está en otra casilla» también dejaba pasar un vencimiento (la fecha de una línea, o «VTO» mal leído).
+  if(docFactura&&campo==="fecha"&&r.caja&&deVencimiento(r.caja)){
+   if(actual)actual.motivos=[...(actual.motivos||[]),"La relectura da la fecha de un vencimiento («"+r.valor+"»), no la de la factura"];
    continue;
   }
   if(actual?.estado==="OK"&&N.canon(actual.valor)!==N.canon(r.valor)){
@@ -580,7 +603,7 @@ async function segundaFase(principal,paginas,lecturas,opciones){
    notas:[...((actual?.notas)||[]),"Resuelto en la segunda fase por relectura dirigida de la casilla"],
    resolucion:{metodo:"relectura_dirigida",confianza:0.95,estrategias:r.estrategias,conf_ocr_min:r.conf,
     evidencias:["Mismo valor en "+r.estrategias.length+" relecturas independientes de la casilla",
-     campo==="numero"&&perfil?.formato_numero?"Cumple el formato de número del proveedor ("+perfil.formato_numero+")":campo==="fecha"?"Fecha válida":"Valor con forma de número de albarán"]}};
+     campo==="numero"&&perfilCab?.formato_numero?"Cumple el formato de número del proveedor ("+perfilCab.formato_numero+")":campo==="fecha"?"Fecha válida":docFactura?"Valor con forma de número de documento":"Valor con forma de número de albarán"]}};
   resueltos.push(campo);
  }
  // Línea que no cuadra con el descuento vacío, y otras líneas con descuento leído: el OCR pudo

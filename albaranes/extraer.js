@@ -290,7 +290,10 @@ function matriculaDeCabecera(lineas){
  }
  return null;
 }
-function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=Infinity,unirDerecha=false,parClaveValor=false}={}){
+// vecinoExcluido (número de la factura, 2026-11-27): debajo de la etiqueta no vale una casilla que va justo tras OTRA etiqueta de las
+// excluidas en su renglón (factura real escaneada: el título «FACTURA» suelto y, debajo, «… | CLIENTE | 430000111»: el código del
+// cliente se tomaba por el número de la factura).
+function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=Infinity,unirDerecha=false,parClaveValor=false,vecinoExcluido=false}={}){
  const hallados=[];
  lineas.forEach((linea,li)=>linea.celdas.forEach((celda,ci)=>{
   const k=N().sinAcentos(celda.texto).replace(/[.:]/g," ").replace(/\s+/g," ").trim();
@@ -322,6 +325,11 @@ function valoresEtiquetados(lineas,reEtiqueta,reExcluir,aceptar,{huecoDerecha=In
    // Distancia: hueco horizontal entre ambas cajas (0 si se solapan); a igualdad, la más centrada.
    const c=[...abajo.celdas].map(c=>({c,d:Math.max(0,c.x0-celda.x1,celda.x0-c.x1),dc:Math.abs((c.x0+c.x1)/2-centro)}))
     .filter(x=>x.d<=Math.max(anchoEt,2*celda.alto)).sort((a,b)=>a.d-b.d||a.dc-b.dc)[0]?.c;
+   if(c&&vecinoExcluido){const iz=abajo.celdas[abajo.celdas.indexOf(c)-1];
+    // La casilla justo a su izquierda, esté a la distancia que esté (en la factura real, «CLIENTE» a más de 4 alturas de su valor), si
+    // es una etiqueta (sin cifras: «CIF-B-…» es el valor de otra columna). Entonces se sigue buscando en el renglón de debajo (una fila
+    // de títulos traducidos, «CUSTOMER Nº | INVOICE Nº», con los valores más abajo).
+    if(iz&&!/\d/.test(iz.texto)&&reExcluir.test(N().sinAcentos(iz.texto).toUpperCase().replace(/[.:]/g," ").replace(/\s+/g," ").trim()))continue;}
    if(c){candidatos.push({texto:limpiarValor(c.texto),celda:c});if(aceptar(limpiarValor(c.texto)))break;}
    // Serie y número en dos celdas («SERIE» | «2600001», fallo real 2026-11-18): con unirDerecha, la celda pegada a su derecha.
    if(c&&unirDerecha){
@@ -1431,7 +1439,9 @@ function esNumeroDeFactura(t,{espacio=false}={}){
  // con cualquier etiqueta entraban «GIRO A 60 DIAS» o «GESTION COMERCIAL …» y el número bueno quedaba en duda.
  return (/^[A-Z]{0,4}[ \/-]?\d[\d.\/ -]{2,}( ?[A-Z]{1,3})?$/i.test(s)||/^(?=(?:[A-Z]*\d){2})[A-Z0-9]{8,20}$/i.test(s)||
    /^(?=(?:\D*\d){2})[A-Z0-9]{2,20}(?:[\/-][A-Z0-9]{1,20}){1,4}$/i.test(s)||(espacio&&/^[A-Z0-9]{6,12} \d{3,}$/.test(s)))&&
-  !/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(s)&&!/^20[1-3]\d$/.test(s)&&!/^\d{4} ?[BCDFGHJKLMNPRSTVWXYZ]{3}$/i.test(s);
+  !/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(s)&&!/^20[1-3]\d$/.test(s)&&!/^\d{4} ?[BCDFGHJKLMNPRSTVWXYZ]{3}$/i.test(s)&&
+  // Ni una fecha con el mes en letra («26-feb-2026» bajo «Factura», factura real escaneada del 2026-11-27).
+  !/^\d{1,2}[\s\/.-]*(ene|feb|mar|abr|may|jun|jul|ago|sep|set|oct|nov|dic|jan|apr|aug|dec)[a-z]*\.?[\s\/.-]*\d{2,4}$/i.test(s);
 }
 /*
  * ¿Factura de abono? Título de abono en la parte de arriba de la primera página («Abono», «Factura de abono», «Nota de abono»,
@@ -2137,7 +2147,7 @@ function extraerDePaginas(paginas,opciones={}){
    // («12345678 RX», factura real 2026-11-24), o un código de letras y cifras con al menos dos cifras («ES12AB34CDEF»); nunca una
    // fecha ni una dirección.
    t=>esNumeroDeFactura(t)&&!citados.has(N().canon(t)),
-   {huecoDerecha:8,unirDerecha:true,parClaveValor:true}),
+   {huecoDerecha:8,unirDerecha:true,parClaveValor:true,vecinoExcluido:true}),
    // Tras «Invoice number» también «CÓDIGO CIFRAS» con un espacio (plataformas en línea).
    ...valoresEtiquetados(primera.p.lineas,/^INVOICE (NUMBER|NO|NUM|#)(\b|$|(?<=#))/i,/RECEIPT|ORDER|CUSTOMER/,
     t=>esNumeroDeFactura(t,{espacio:true})&&!citados.has(N().canon(t)),{huecoDerecha:8,parClaveValor:true})].map(x=>[x.texto,x])).values()];
@@ -2195,6 +2205,13 @@ function extraerDePaginas(paginas,opciones={}){
     if(salida.fecha?.estado!=="OK")
      salida.fecha={literal:sinBarras,valor:fechaSinBarras(sinBarras),estado:"REVISAR",motivos:["Fecha leída sin barras («"+sinBarras+"»): propuesta, compárala con el papel"],notas:[],caja:null};
    }
+   // Número partido (factura real escaneada, 2026-11-27: «NUM. FACTURA | 115 | 4999 | FECHA…», el número es «115-4999» y se
+   // aceptaba «115»): solo cifras y, pegado a su derecha, otro grupo de cifras: el número puede seguir; no se acepta.
+   const sig=fila?fila.celdas[fila.celdas.indexOf(c0)+1]:null;
+   if(sig&&/^\d+$/.test(h[0].texto)&&/^\d{2,}$/.test(String(sig.texto||"").trim())&&sig.x0-(c0?.x1??sig.x0)<=1.5*(c0?.alto||10)){
+    salida.numero.estado="REVISAR";
+    salida.numero.motivos.push("Número partido: a su derecha sigue «"+String(sig.texto).trim()+"» (puede ser «"+h[0].texto+"-"+String(sig.texto).trim()+"»)");
+   }
   }else if(salida.numero?.valor!=null&&citados.has(N().canon(salida.numero.valor)))
    salida.numero={literal:"",valor:null,estado:"VACIO",motivos:["El número leído es el de un albarán que cita la factura, no el de la factura"],notas:[],caja:null};
   // Sin un solo número tras la etiqueta de la factura, el que tomó el lector por otra etiqueta («Nº doc CRM 26XXXX», factura real
@@ -2209,9 +2226,19 @@ function extraerDePaginas(paginas,opciones={}){
    // 2026-11-25).
    const tituloEncima=suya&&primera.p.lineas.some(l=>l.y<suya.y&&suya.y-l.y<=2*Math.max(suya.alto||10,l.alto||10)&&
     l.celdas.some((c,k)=>/^((FACTURA )?RECTIFICATIVA|FACTURA|INVOICE)$/.test(clave(c.texto))&&celdaSuelta(l,k)));
-   if(h.length>1||!suya||!(/FACTURA/.test(N().sinAcentos(suya.texto||"").toUpperCase())||tituloEncima)||!esNumeroDeFactura(lit))
+   // Tras OTRA etiqueta en su renglón (factura real escaneada, 2026-11-27: «FACTURA 14.999 FECHA … CLIENTE 430000111», el código del
+   // cliente valía porque el renglón dice «FACTURA»).
+   const suCelda=suya&&cj?suya.celdas.find(c=>Math.abs(c.x0-cj[0])<1):null,izq=suCelda?suya.celdas[suya.celdas.indexOf(suCelda)-1]:null;
+   const trasOtra=izq&&/\b(ALBARAN|PEDIDO|CLIENTE|PROVEEDOR|CUENTA|IBAN|TELEF\w*|OBRA|CIF|NIF|N I F|C I F|COD\w*|REFERENCIA|REF)\b/.test(clave(izq.texto).toUpperCase())?izq:null;
+   if(trasOtra||h.length>1||!suya||!(/FACTURA/.test(N().sinAcentos(suya.texto||"").toUpperCase())||tituloEncima)||!esNumeroDeFactura(lit))
     salida.numero={...salida.numero,estado:"REVISAR",motivos:[...(salida.numero.motivos||[]),h.length>1?"Varios números tras la etiqueta de la factura ("+h.map(x=>x.texto).join(" / ")+")":
-     "No está tras «Nº factura»"+(suya?" (está en «"+String(suya.texto).slice(0,40)+"»)":"")+": compruébalo con el papel"]};
+     "No está tras «Nº factura»"+(trasOtra?" (está tras «"+String(trasOtra.texto).slice(0,30)+"»)":suya?" (está en «"+String(suya.texto).slice(0,40)+"»)":"")+": compruébalo con el papel"]};
+  }
+  // Letra O junto a cifras LEÍDA POR OCR («HO12/26» por «H012/26», factura real escaneada del 2026-11-27): puede ser un cero; el mismo
+  // motor la vuelve a leer igual, así que las relecturas no lo resuelven. En un PDF digital el texto es exacto (números de tiendas en
+  // línea con letras, «…D4OAEUI»).
+  if(salida.numero?.estado==="OK"&&salida.numero.conf_ocr!=null&&/\dO|O\d/.test(String(salida.numero.valor||""))){
+   salida.numero={...salida.numero,estado:"REVISAR",motivos:[...(salida.numero.motivos||[]),"Letra O junto a cifras en «"+salida.numero.valor+"»: puede ser un cero"]};
   }
  // Fecha de la factura (factura real 2026-11-24: «Fecha de la factura/Fecha de la entrega | 19 noviembre 2026» quedaba fuera por
   // «entrega»; en una rectificativa, también «Fecha de la factura original»): la única tras «Fecha (de la) factura», nunca la de la
