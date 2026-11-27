@@ -3,6 +3,29 @@
 Cada entrada indica qué cambió, cómo se verificó y si afecta a producción.
 Producción = rama `main` (GitHub Pages) y funciones Edge desplegadas en Supabase.
 
+## 2026-11-27 · Motor OCR: tesseract.js 7.0.0 (antes 5.1.1), el mismo modelo de español
+
+- Usuario: «actualiza el OCR de tal manera que quede perfecto o mejor que antes». `vendor/tesseract/`: tesseract.js y su núcleo
+  7.0.0 (diciembre de 2025; los ficheros, iguales byte a byte a los del paquete oficial de npm), con la variante nueva
+  `tesseract-core-relaxedsimd-lstm.wasm.js`, que el propio motor elige si el navegador la admite. `index.html` carga
+  `tesseract.min.js?v=7.0.0`. Las pruebas en node (`pruebas/motor-tesseractjs.js`) usan el mismo motor (`package.json`).
+- Modelo de español: el mismo de siempre, `spa` «fast» (tessdata_fast; la red pesa 401 KB). Se probó el «best_int» (la red del
+  modelo «best» en enteros, 1,5 MB, el de `@tesseract.js-data/spa`): con el motor 7 y el mismo lector manda mucho más a revisar
+  (banco de 86 albaranes: precios bien 198 → 177, descuentos 199 → 170, cantidades 194 → 188, códigos 176 → 173; 0 mal en los dos)
+  porque en estas hojas confunde más los signos («55 10» → «5510», «50,00%» → «50.00%», un precio perdido). Descartado.
+- Medido (privado, `pruebas/corpus-real` fuera de git; lector en Chromium, como la aplicación):
+  - Banco de albaranes (7 lotes reales, 86 albaranes, 278 líneas): todo igual que con 5.1.1 (líneas, obras, números, estados y la
+    confianza de cada campo; 0 mal). Solo cambia la confianza de cada PALABRA del OCR, que el motor 7 da sin decimales (85,545 → 85):
+    el lector solo la compara con umbrales enteros a través de mínimos, máximos y medianas, que no cambian. Tiempo: 2.161 s → 1.758 s.
+  - Banco de facturas escaneadas (194, de los envíos a la gestoría, con su registro en STEL): número, fecha, base, cuota, total,
+    estado y cada línea iguales en las 194. Tiempo: 4.715 s → 3.857 s (18 % menos).
+  - Además, el motor 6 corrigió fugas de memoria del 5 (la memoria crecía con cada lectura en un lote largo).
+- La web publicada: hasta que caduque la caché de GitHub Pages (unos 10 minutos) un navegador podría juntar el `worker.min.js` viejo
+  con el `tesseract.min.js` nuevo; volver a cargar la página lo arregla. En la aplicación de escritorio los ficheros van dentro.
+- SAT: `sat/sw.js` con otra caché («dafrica-sat-0.3.18-motor7»): la vieja se borra al activarse y el teléfono baja el motor nuevo
+  la primera vez que tenga red.
+- Pruebas: `npm test`. Afecta a producción al publicar la web; DAFRICA Administración, en su próxima versión.
+
 ## 2026-11-24 · Lector: facturas de servicios y dos lecturas fiables distintas (lo mismo que DAFRICA Control y la aplicación)
 
 - `albaranes/extraer.js` y `escaneado.js` vuelven a ser los mismos que en las otras dos copias: tabla de servicios con «CARGOS» (cada

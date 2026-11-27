@@ -13,6 +13,6 @@
     "@electric-sql/pglite": "0.3.8",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "4.10.38",
-    "tesseract.js": "5.1.1"
+    "tesseract.js": "7.0.0"
   }
 }

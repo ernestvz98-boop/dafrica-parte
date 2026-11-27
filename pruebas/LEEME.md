@@ -25,7 +25,7 @@ o número tapadas por una firma) y solo combina lo que valida: cifras de línea 
 cuadran, totales con base + IVA = total, cabecera en la que coinciden las lecturas.
 Además: enderezado de escaneos torcidos, descarte de manuscritos y del texto girado de
 los márgenes, y sugerencia (nunca asignación) de una cantidad tapada a partir del cuadre.
-En la web el OCR se ejecuta en el propio navegador con tesseract.js 5.1.1 y el modelo
+En la web el OCR se ejecuta en el propio navegador con tesseract.js 7.0.0 y el modelo
 español de `vendor/tesseract/` (servidos desde el sitio, sin servicios externos; el PDF no
 sale del navegador): `albaranes/motor-navegador.js`. La pantalla «Interpretar PDF» lo usa
 para los PDF escaneados antes de la IA. En pruebas hay dos motores con la misma interfaz:
@@ -42,7 +42,7 @@ motor y modelo que la web): `npm run evaluar -- --motor=tesseractjs`.
 | `albaranes/ocr.js` | palabras de OCR → líneas y celdas; enderezado; descarte de márgenes |
 | `albaranes/escaneado.js` | varias lecturas OCR por página y combinación validada |
 | `albaranes/motor-navegador.js` | pdf.js + tesseract.js en el navegador (misma interfaz que el motor de pruebas) |
-| `vendor/tesseract/` | tesseract.js 5.1.1 y modelo `spa` (Apache-2.0), servidos desde el propio sitio |
+| `vendor/tesseract/` | tesseract.js 7.0.0 (desde el 2026-11-27; antes 5.1.1) y modelo `spa` «fast» (tessdata_fast, Apache-2.0), servidos desde el propio sitio |
 | `control-28.js` | integración en la pantalla «Interpretar albaranes (sin guardar)» |
 
 ## Ejecutar las pruebas
